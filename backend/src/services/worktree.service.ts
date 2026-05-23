@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import type { TestSyncResultDto } from "@agenthub/shared";
@@ -23,10 +23,12 @@ export class WorktreeService {
 
     const shortRun = runId.replace(/^run-/, "run-");
     const branchName = `agent/${shortRun}/main`;
-    const worktreePath = join(repoPath, ".agenthub", "worktrees", `${shortRun}-main`);
+    const worktreesRoot = join(repoPath, ".agenthub", "worktrees");
+    const worktreePath = join(worktreesRoot, `${shortRun}-main`);
     const artifactDir = join(worktreePath, ".agenthub", "artifacts", shortRun);
 
-    await mkdir(dirname(worktreePath), { recursive: true });
+    await mkdir(worktreesRoot, { recursive: true });
+    await this.removeStaleWorktree(repoPath, worktreesRoot, worktreePath);
     await this.git(repoPath, ["worktree", "add", "-B", branchName, worktreePath, "main"]);
     await mkdir(artifactDir, { recursive: true });
 
@@ -93,5 +95,22 @@ export class WorktreeService {
 
   private async git(cwd: string, args: string[]) {
     return execFileAsync("git", args, { cwd });
+  }
+
+  private async removeStaleWorktree(repoPath: string, worktreesRoot: string, worktreePath: string): Promise<void> {
+    const root = resolve(worktreesRoot);
+    const target = resolve(worktreePath);
+    const relativeTarget = relative(root, target);
+    if (!relativeTarget || relativeTarget.startsWith("..") || isAbsolute(relativeTarget)) {
+      throw new Error(`Refusing to remove worktree outside ${worktreesRoot}: ${worktreePath}`);
+    }
+
+    try {
+      await this.git(repoPath, ["worktree", "remove", "--force", worktreePath]);
+      await this.git(repoPath, ["worktree", "prune"]);
+    } catch {
+      await rm(worktreePath, { recursive: true, force: true });
+      await this.git(repoPath, ["worktree", "prune"]);
+    }
   }
 }

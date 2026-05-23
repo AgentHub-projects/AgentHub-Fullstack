@@ -57,7 +57,7 @@ describe("AgentRunner claude cli path", () => {
       );
       expect(spawnMock).toHaveBeenCalledWith(
         "claude-test",
-        ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"],
+        ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
         expect.objectContaining({ cwd: tempDir, shell: true })
       );
       expect(child.stdin.end).toHaveBeenCalledWith("implement this");
@@ -87,7 +87,7 @@ describe("AgentRunner claude cli path", () => {
       await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
       expect(spawnMock).toHaveBeenCalledWith(
         "claude",
-        ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"],
+        ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
         expect.objectContaining({
           cwd: tempDir,
           env: process.env,

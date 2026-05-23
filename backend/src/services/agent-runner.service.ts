@@ -125,7 +125,7 @@ export class AgentRunner {
 
   private async runClaude(context: RunnerContext): Promise<RunnerResult> {
     const command = process.env.AGENT_COMMAND ?? "claude";
-    const args = ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"];
+    const args = ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
     const evidence = {
       mode: "claude-cli",
       command,
