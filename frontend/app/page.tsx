@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { AgentEvent, SessionDto } from "@agenthub/shared";
 import {
   cancelAgentRun,
@@ -12,25 +12,87 @@ import {
 } from "../lib/agenthub-api";
 
 type SocketState = "connecting" | "connected" | "disconnected" | "unavailable";
+type TeamStatus = "online" | "working" | "idle" | "done" | "error";
 
-const agents = [
+type TeamMember = {
+  id: string;
+  name: string;
+  shortName: string;
+  role: string;
+  provider: string;
+  status: TeamStatus;
+  accent: string;
+};
+
+const singleAgents = [
+  {
+    id: "claude-cli-agent",
+    name: "Claude CLI",
+    provider: "Claude Code",
+    role: "本地代码执行与修复",
+  },
+  {
+    id: "local-cli-agent",
+    name: "Local CLI",
+    provider: "PowerShell",
+    role: "本地命令与验证",
+  },
+];
+
+const teamMembers: TeamMember[] = [
+  {
+    id: "orchestrator-agent",
+    name: "Orchestrator",
+    shortName: "OR",
+    role: "拆解任务 / 汇总进度",
+    provider: "Controller",
+    status: "online",
+    accent: "#6f5bd7",
+  },
   {
     id: "frontend-agent",
-    name: "Frontend Agent",
-    role: "Next.js TS",
-    status: "running",
+    name: "Frontend",
+    shortName: "FE",
+    role: "Next.js UI / 状态接线",
+    provider: "Claude CLI",
+    status: "working",
+    accent: "#1677ff",
   },
   {
     id: "backend-agent",
-    name: "Backend Agent",
+    name: "Backend",
+    shortName: "BE",
     role: "API / Socket",
+    provider: "Node runtime",
     status: "idle",
+    accent: "#12a37f",
   },
   {
     id: "review-agent",
-    name: "Review Agent",
-    role: "Contract check",
+    name: "Review",
+    shortName: "RV",
+    role: "契约与回归检查",
+    provider: "Reviewer",
     status: "idle",
+    accent: "#d46b08",
+  },
+  {
+    id: "test-agent",
+    name: "Test",
+    shortName: "TS",
+    role: "typecheck / build",
+    provider: "CI local",
+    status: "idle",
+    accent: "#0f766e",
+  },
+  {
+    id: "merge-agent",
+    name: "Merge",
+    shortName: "MG",
+    role: "提交 / 分支同步",
+    provider: "Git",
+    status: "idle",
+    accent: "#475569",
   },
 ];
 
@@ -44,10 +106,10 @@ function formatTime(value: string | number) {
 
 function statusLabel(status: SessionDto["status"]) {
   const labels: Record<SessionDto["status"], string> = {
-    idle: "idle",
-    running: "running",
-    succeeded: "succeeded",
-    failed: "failed",
+    idle: "待命",
+    running: "运行中",
+    succeeded: "已完成",
+    failed: "失败",
   };
   return labels[status];
 }
@@ -60,10 +122,35 @@ function stringifyPayload(payload: unknown) {
   return JSON.stringify(payload, null, 2);
 }
 
+function payloadSummary(event: AgentEvent) {
+  if (typeof event.payload === "string") {
+    return event.payload;
+  }
+
+  if (event.payload && typeof event.payload === "object") {
+    const payload = event.payload as Record<string, unknown>;
+    const message = payload.message ?? payload.title ?? payload.status;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+
+  return event.type.replace(/_/g, " ");
+}
+
+function getAgentMeta(agentId: string) {
+  return (
+    teamMembers.find((agent) => agent.id === agentId) ??
+    teamMembers.find((agent) => agent.id === "orchestrator-agent") ??
+    teamMembers[0]
+  );
+}
+
 export default function WorkbenchPage() {
   const [session, setSession] = useState<SessionDto>(initialSession);
   const [events, setEvents] = useState<AgentEvent[]>(initialEvents);
   const [prompt, setPrompt] = useState("请执行 P0 smoke test 并返回结果摘要");
+  const [selectedAgentId, setSelectedAgentId] = useState(singleAgents[0].id);
   const [notice, setNotice] = useState("后端未返回前使用本地占位数据。");
   const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -73,19 +160,48 @@ export default function WorkbenchPage() {
   );
 
   const latestEvent = events.at(-1);
+  const selectedAgent =
+    singleAgents.find((agent) => agent.id === selectedAgentId) ??
+    singleAgents[0];
   const isRunning = session.status === "running" || isSubmitting;
+  const visibleRunIds = session.runIds.length > 0 ? session.runIds : ["无"];
+
+  const eventGroups = useMemo(() => {
+    return events.reduce<
+      Array<{ agent: TeamMember; events: AgentEvent[]; key: string }>
+    >((groups, event) => {
+      const agent = getAgentMeta(event.agentId);
+      const last = groups.at(-1);
+      if (last?.agent.id === agent.id) {
+        last.events.push(event);
+        return groups;
+      }
+
+      groups.push({
+        agent,
+        events: [event],
+        key: `${agent.id}-${event.eventId}`,
+      });
+      return groups;
+    }, []);
+  }, [events]);
 
   const contractFields = useMemo(
     () => [
+      ["SessionDto.id", session.id],
       ["SessionDto.status", session.status],
+      ["SessionDto.agentId", session.agentId ?? selectedAgent.id],
       ["SessionDto.output", session.output ?? "未生成"],
       ["SessionDto.error", session.error ?? "无"],
+      ["runIds", visibleRunIds.join(", ")],
+      ["currentRunId", currentRunId ?? "等待后端返回"],
       ["testSync.status", session.testSync?.status ?? "pending"],
       ["testSync.targetBranch", session.testSync?.targetBranch ?? "main"],
+      ["testSync.summaryPath", session.testSync?.summaryPath ?? "未返回"],
       ["AgentEvent.type", latestEvent?.type ?? "无事件"],
       ["AgentEvent.payload", latestEvent ? "已接收" : "无"],
     ],
-    [latestEvent, session],
+    [currentRunId, latestEvent, selectedAgent.id, session, visibleRunIds],
   );
 
   useEffect(() => {
@@ -150,6 +266,7 @@ export default function WorkbenchPage() {
     setCurrentRunId(null);
     setSession((current) => ({
       ...current,
+      agentId: selectedAgent.id,
       status: "running",
       prompt: value,
       updatedAt: new Date().toISOString(),
@@ -195,80 +312,148 @@ export default function WorkbenchPage() {
   }
 
   return (
-    <main className="shell">
-      <aside className="rail">
-        <div className="brand">
-          <span className="brandMark">AH</span>
+    <main className="workspaceShell">
+      <aside className="leftRail" aria-label="会话与 Agent">
+        <div className="brandBlock">
+          <span className="brandGlyph">A</span>
           <div>
             <strong>AgentHub</strong>
-            <span>P0 Workbench</span>
+            <span>Lobe-style Workspace</span>
           </div>
         </div>
 
-        <section className="panelSection">
+        <section className="railSection">
           <div className="sectionHeader">
-            <span>会话</span>
-            <span className={`dot ${session.status}`} />
+            <span>Sessions</span>
+            <span className={`statusDot ${session.status}`} />
           </div>
-          <button className="conversation active" type="button">
+          <button className="sessionCard active" type="button">
             <span>{session.title ?? "Current Session"}</span>
-            <small>{statusLabel(session.status)} · {session.runIds.length} runs</small>
+            <small>
+              {statusLabel(session.status)} · {session.runIds.length} runs
+            </small>
+          </button>
+          <button className="sessionCard quiet" type="button">
+            <span>Agent Team Preview</span>
+            <small>前端派生视图 · 不触发编排</small>
           </button>
         </section>
 
-        <section className="panelSection">
+        <section className="railSection">
           <div className="sectionHeader">
-            <span>Agents</span>
-            <small>{agents.length}</small>
+            <span>Single Agent</span>
+            <small>{selectedAgent.provider}</small>
           </div>
-          <div className="agentList">
-            {agents.map((agent) => (
-              <button className="agentItem" key={agent.id} type="button">
-                <span className="avatar">{agent.name.slice(0, 2)}</span>
-                <span>
+          <div className="agentSwitch">
+            {singleAgents.map((agent) => (
+              <button
+                className={agent.id === selectedAgentId ? "selected" : ""}
+                key={agent.id}
+                onClick={() => setSelectedAgentId(agent.id)}
+                type="button"
+              >
+                <strong>{agent.name}</strong>
+                <small>{agent.role}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="railSection">
+          <div className="sectionHeader">
+            <span>Agent Team</span>
+            <small>{teamMembers.length}</small>
+          </div>
+          <div className="teamRoster">
+            {teamMembers.map((agent) => (
+              <div className="teamMember" key={agent.id}>
+                <span
+                  className="teamAvatar"
+                  style={{ "--agent-accent": agent.accent } as CSSProperties}
+                >
+                  {agent.shortName}
+                </span>
+                <div>
                   <strong>{agent.name}</strong>
                   <small>{agent.role}</small>
-                </span>
-                <i className={agent.status} />
-              </button>
+                </div>
+                <i className={agent.status}>{agent.status}</i>
+              </div>
             ))}
           </div>
         </section>
       </aside>
 
-      <section className="thread">
-        <header className="topbar">
+      <section className="chatWorkbench" aria-label="聊天线程">
+        <header className="chatHeader">
           <div>
-            <p>Session #{session.id}</p>
+            <span className="eyebrow">Session #{session.id}</span>
             <h1>{session.prompt ?? "输入测试口令启动会话"}</h1>
           </div>
-          <div className="topbarMeta">
-            <span className={`socket ${socketState}`}>Socket {socketState}</span>
-            <span>{formatTime(session.updatedAt)}</span>
+          <div className="headerBadges">
+            <span className={`socketBadge ${socketState}`}>
+              Socket {socketState}
+            </span>
+            <span className={`runBadge ${session.status}`}>
+              {statusLabel(session.status)}
+            </span>
+            <time>{formatTime(session.updatedAt)}</time>
           </div>
         </header>
 
-        <div className="messagePane">
-          <article className="message user">
-            <span>Test Prompt</span>
-            <p>{session.prompt}</p>
+        <div className="threadPane">
+          <article className="messageRow userMessage">
+            <div className="messageBubble">
+              <span className="messageMeta">User Prompt</span>
+              <p>{session.prompt}</p>
+            </div>
           </article>
 
-          <article className={`message agent ${session.status}`}>
-            <span>SessionDto · {session.status}</span>
-            <p>{session.output ?? "等待 agent 输出..."}</p>
-            {session.error ? <pre>{session.error}</pre> : null}
+          <article className={`messageRow assistantMessage ${session.status}`}>
+            <div className="assistantAvatar">{selectedAgent.name.slice(0, 2)}</div>
+            <div className="messageBubble">
+              <span className="messageMeta">
+                {selectedAgent.name} · {session.status}
+              </span>
+              <p>{session.output ?? "等待 agent 输出或 streaming delta..."}</p>
+              {session.error ? <pre>{session.error}</pre> : null}
+            </div>
           </article>
 
-          {events.map((event) => (
-            <article className="eventCard" key={event.eventId}>
-              <div>
-                <strong>{event.type}</strong>
-                <span>seq {event.seq} · {formatTime(event.ts)}</span>
-              </div>
-              <pre>{stringifyPayload(event.payload)}</pre>
-            </article>
-          ))}
+          <section className="groupThread" aria-label="Agent group events">
+            <div className="groupTitle">
+              <span>Agent Group Events</span>
+              <small>按 agent 聚合展示事件流</small>
+            </div>
+            {eventGroups.map((group) => (
+              <article className="agentEventGroup" key={group.key}>
+                <div
+                  className="eventAgentAvatar"
+                  style={{ "--agent-accent": group.agent.accent } as CSSProperties}
+                >
+                  {group.agent.shortName}
+                </div>
+                <div className="eventStack">
+                  <div className="eventAgentHeader">
+                    <strong>{group.agent.name}</strong>
+                    <span>{group.agent.provider}</span>
+                  </div>
+                  {group.events.map((event) => (
+                    <details className="eventCard" key={event.eventId} open>
+                      <summary>
+                        <span>{event.type}</span>
+                        <small>
+                          seq {event.seq} · {formatTime(event.ts)}
+                        </small>
+                      </summary>
+                      <p>{payloadSummary(event)}</p>
+                      <pre>{stringifyPayload(event.payload)}</pre>
+                    </details>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </section>
         </div>
 
         <footer className="composer">
@@ -278,9 +463,9 @@ export default function WorkbenchPage() {
             placeholder="输入测试口令..."
             value={prompt}
           />
-          <div className="composerActions">
+          <div className="composerFooter">
             <span>{notice}</span>
-            <div>
+            <div className="runControls">
               <button
                 className="secondary"
                 disabled={!isRunning || !currentRunId || isCancelling}
@@ -298,13 +483,22 @@ export default function WorkbenchPage() {
         </footer>
       </section>
 
-      <aside className="inspector">
-        <section>
+      <aside className="inspectorPanel" aria-label="运行检查器">
+        <section className="inspectorSection heroStatus">
           <div className="sectionHeader">
             <span>Run Inspector</span>
             <small>{session.status}</small>
           </div>
-          <dl className="kv">
+          <strong>{statusLabel(session.status)}</strong>
+          <p>{currentRunId ?? "等待 RunSessionResponse.run.id"}</p>
+        </section>
+
+        <section className="inspectorSection">
+          <div className="sectionHeader">
+            <span>Contract Fields</span>
+            <small>{contractFields.length}</small>
+          </div>
+          <dl className="kvList">
             {contractFields.map(([key, value]) => (
               <div key={key}>
                 <dt>{key}</dt>
@@ -314,24 +508,40 @@ export default function WorkbenchPage() {
           </dl>
         </section>
 
-        <section className="previewCard">
+        <section className="inspectorSection">
           <div className="sectionHeader">
-            <span>Preview</span>
-            <small>placeholder</small>
+            <span>Artifacts</span>
+            <small>路径</small>
           </div>
-          <div className="previewBox">
-            <span>UI Preview</span>
-            <strong>{session.status}</strong>
-            <p>后端 preview_card 事件接入后在此展示实际预览。</p>
+          <div className="artifactList">
+            <div>
+              <span>Log path</span>
+              <strong>backend session events / socket stream</strong>
+            </div>
+            <div>
+              <span>Summary</span>
+              <strong>{session.testSync?.summaryPath ?? "未返回 summaryPath"}</strong>
+            </div>
+            <div>
+              <span>Target branch</span>
+              <strong>{session.testSync?.targetBranch ?? "main"}</strong>
+            </div>
           </div>
         </section>
 
-        <section className="diffCard">
+        <section className="inspectorSection commandHints">
           <div className="sectionHeader">
-            <span>Diff</span>
-            <small>placeholder</small>
+            <span>Mode Hints</span>
+            <small>只读提示</small>
           </div>
-          <pre>{`+ frontend/app/page.tsx\n+ frontend/lib/agenthub-api.ts\n~ waiting for code_diff event`}</pre>
+          <div className="hintGrid">
+            <span>Selected</span>
+            <strong>{selectedAgent.name}</strong>
+            <span>Command</span>
+            <strong>pnpm --filter @agenthub/frontend typecheck</strong>
+            <span>Mode</span>
+            <strong>single-chat + static group view</strong>
+          </div>
         </section>
       </aside>
     </main>

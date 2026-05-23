@@ -1,16 +1,20 @@
 :root {
-  --bg: #ece9e2;
-  --panel: #f8f6f0;
-  --panel-strong: #fffdf7;
-  --ink: #171717;
-  --muted: #6a665d;
-  --line: #d8d2c5;
-  --accent: #235b45;
-  --accent-strong: #143b2b;
-  --amber: #b66a1f;
-  --red: #b73b2f;
-  --blue: #285f8f;
-  --shadow: 0 18px 60px rgba(42, 35, 22, 0.12);
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --surface-strong: #eef4ff;
+  --ink: #172033;
+  --muted: #667085;
+  --faint: #98a2b3;
+  --line: #dce3ee;
+  --line-strong: #c7d4e5;
+  --primary: #1677ff;
+  --primary-strong: #0958d9;
+  --green: #12a37f;
+  --amber: #d46b08;
+  --red: #d92d20;
+  --violet: #6f5bd7;
+  --shadow: 0 18px 45px rgba(23, 32, 51, 0.08);
 }
 
 * {
@@ -25,12 +29,17 @@ body {
 
 body {
   background:
-    linear-gradient(90deg, rgba(23, 23, 23, 0.035) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(23, 23, 23, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(244, 246, 251, 0.82)),
+    radial-gradient(circle at 18% 0%, rgba(22, 119, 255, 0.14), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgba(18, 163, 127, 0.1), transparent 24%),
     var(--bg);
-  background-size: 28px 28px;
   color: var(--ink);
-  font-family: "Aptos", "Segoe UI", sans-serif;
+  font-family:
+    "Segoe UI Variable",
+    "Aptos",
+    "Microsoft YaHei UI",
+    "Segoe UI",
+    sans-serif;
 }
 
 button,
@@ -44,249 +53,7 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.shell {
-  display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(420px, 1fr) minmax(300px, 380px);
-  gap: 12px;
-  height: 100vh;
-  padding: 12px;
-}
-
-.rail,
-.thread,
-.inspector {
-  min-height: 0;
-  border: 1px solid var(--line);
-  background: rgba(248, 246, 240, 0.94);
-  box-shadow: var(--shadow);
-}
-
-.rail,
-.inspector {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  overflow: auto;
-  padding: 18px;
-}
-
-.brand,
-.agentItem,
-.topbar,
-.composerActions,
-.sectionHeader,
-.eventCard > div,
-.kv div {
-  display: flex;
-  align-items: center;
-}
-
-.brand {
-  gap: 12px;
-}
-
-.brandMark,
-.avatar {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--panel);
-  font-weight: 800;
-}
-
-.brandMark {
-  width: 42px;
-  height: 42px;
-  letter-spacing: 0;
-}
-
-.brand strong,
-.agentItem strong {
-  display: block;
-  font-weight: 750;
-}
-
-.brand span,
-small,
-.topbar p,
-.message span,
-.eventCard span,
-.kv dt {
-  color: var(--muted);
-}
-
-.panelSection,
-.inspector section {
-  display: grid;
-  gap: 10px;
-}
-
-.sectionHeader {
-  justify-content: space-between;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.dot,
-.agentItem i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-.dot.running,
-.agentItem i.running {
-  background: var(--amber);
-}
-
-.dot.succeeded {
-  background: var(--accent);
-}
-
-.dot.failed {
-  background: var(--red);
-}
-
-.conversation,
-.agentItem {
-  width: 100%;
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-  color: var(--ink);
-  text-align: left;
-}
-
-.conversation {
-  display: grid;
-  gap: 6px;
-  padding: 14px;
-}
-
-.conversation.active {
-  border-color: var(--ink);
-}
-
-.agentList {
-  display: grid;
-  gap: 8px;
-}
-
-.agentItem {
-  gap: 10px;
-  padding: 10px;
-}
-
-.avatar {
-  width: 34px;
-  height: 34px;
-  font-size: 12px;
-}
-
-.agentItem span:nth-child(2) {
-  min-width: 0;
-  flex: 1;
-}
-
-.thread {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
-}
-
-.topbar {
-  justify-content: space-between;
-  gap: 18px;
-  border-bottom: 1px solid var(--line);
-  padding: 18px 22px;
-}
-
-.topbar p,
-.topbar h1 {
-  margin: 0;
-}
-
-.topbar h1 {
-  margin-top: 4px;
-  font-size: clamp(20px, 2vw, 30px);
-  letter-spacing: 0;
-  line-height: 1.15;
-}
-
-.topbarMeta {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 8px;
-  justify-items: end;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.socket {
-  border: 1px solid var(--line);
-  padding: 5px 8px;
-}
-
-.socket.connected {
-  border-color: var(--accent);
-  color: var(--accent-strong);
-}
-
-.socket.unavailable {
-  border-color: var(--amber);
-  color: var(--amber);
-}
-
-.messagePane {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow: auto;
-  padding: 22px;
-}
-
-.message,
-.eventCard,
-.previewBox,
-.diffCard pre {
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-}
-
-.message {
-  max-width: 78%;
-  padding: 14px 16px;
-}
-
-.message.user {
-  align-self: flex-end;
-  border-color: #b7a98f;
-  background: #fff9eb;
-}
-
-.message.agent.running {
-  border-left: 4px solid var(--amber);
-}
-
-.message.agent.succeeded {
-  border-left: 4px solid var(--accent);
-}
-
-.message.agent.failed {
-  border-left: 4px solid var(--red);
-}
-
-.message p,
-.previewBox p {
-  margin: 8px 0 0;
-  line-height: 1.55;
+  opacity: 0.56;
 }
 
 pre {
@@ -296,175 +63,654 @@ pre {
   word-break: break-word;
   font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
-.message pre {
+.workspaceShell {
+  display: grid;
+  grid-template-columns: minmax(248px, 292px) minmax(440px, 1fr) minmax(316px, 392px);
+  gap: 10px;
+  height: 100vh;
+  padding: 10px;
+}
+
+.leftRail,
+.chatWorkbench,
+.inspectorPanel {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(220, 227, 238, 0.9);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.leftRail,
+.inspectorPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.brandBlock,
+.sectionHeader,
+.teamMember,
+.chatHeader,
+.composerFooter,
+.eventAgentHeader,
+.eventCard summary,
+.kvList div,
+.runControls {
+  display: flex;
+  align-items: center;
+}
+
+.brandBlock {
+  gap: 12px;
+  min-height: 48px;
+}
+
+.brandGlyph {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--ink), #2f405f);
+  color: #fff;
+  font-weight: 850;
+}
+
+.brandBlock strong,
+.teamMember strong,
+.agentSwitch strong,
+.sessionCard span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brandBlock span,
+small,
+.eyebrow,
+.messageMeta,
+.eventAgentHeader span,
+.kvList dt,
+.artifactList span,
+.hintGrid span {
+  color: var(--muted);
+}
+
+.railSection,
+.inspectorSection {
+  display: grid;
+  gap: 10px;
+}
+
+.sectionHeader {
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.statusDot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--faint);
+  box-shadow: 0 0 0 4px rgba(152, 162, 179, 0.12);
+}
+
+.statusDot.running,
+.runBadge.running {
+  background: rgba(212, 107, 8, 0.12);
+  color: var(--amber);
+}
+
+.statusDot.succeeded,
+.runBadge.succeeded {
+  background: rgba(18, 163, 127, 0.13);
+  color: var(--green);
+}
+
+.statusDot.failed,
+.runBadge.failed {
+  background: rgba(217, 45, 32, 0.12);
+  color: var(--red);
+}
+
+.sessionCard,
+.agentSwitch button {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.sessionCard {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.sessionCard.active {
+  border-color: rgba(22, 119, 255, 0.44);
+  background: linear-gradient(180deg, #ffffff, #f3f7ff);
+  box-shadow: 0 8px 22px rgba(22, 119, 255, 0.08);
+}
+
+.sessionCard.quiet {
+  background: var(--surface-soft);
+}
+
+.agentSwitch {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+}
+
+.agentSwitch button {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+}
+
+.agentSwitch button.selected {
+  border-color: var(--primary);
+  background: var(--surface-strong);
+}
+
+.teamRoster {
+  display: grid;
+  gap: 8px;
+}
+
+.teamMember {
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.86);
+  padding: 9px;
+}
+
+.teamMember > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.teamMember i {
+  max-width: 72px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  padding: 3px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMember i.working {
+  background: rgba(22, 119, 255, 0.1);
+  color: var(--primary-strong);
+}
+
+.teamMember i.online,
+.teamMember i.done {
+  background: rgba(18, 163, 127, 0.12);
+  color: #08745c;
+}
+
+.teamMember i.error {
+  background: rgba(217, 45, 32, 0.12);
+  color: var(--red);
+}
+
+.teamAvatar,
+.eventAgentAvatar {
+  --agent-accent: var(--primary);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--agent-accent) 14%, white);
+  color: var(--agent-accent);
+  font-weight: 850;
+}
+
+.teamAvatar {
+  width: 34px;
+  height: 34px;
+  font-size: 12px;
+}
+
+.chatWorkbench {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.chatHeader {
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 16px 20px;
+}
+
+.chatHeader > div:first-child {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chatHeader h1 {
+  display: -webkit-box;
+  max-width: 920px;
+  margin: 5px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 22px;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.headerBadges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.socketBadge,
+.runBadge,
+.headerBadges time {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 6px 9px;
+}
+
+.socketBadge.connected {
+  border-color: rgba(18, 163, 127, 0.35);
+  color: #08745c;
+}
+
+.socketBadge.unavailable {
+  border-color: rgba(212, 107, 8, 0.38);
+  color: var(--amber);
+}
+
+.threadPane {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  overflow: auto;
+  padding: 22px;
+}
+
+.messageRow {
+  display: flex;
+  gap: 10px;
+  max-width: min(760px, 92%);
+}
+
+.userMessage {
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.assistantMessage {
+  align-self: flex-start;
+}
+
+.assistantAvatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--ink);
+  color: white;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.messageBubble,
+.eventCard {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 13px 15px;
+}
+
+.userMessage .messageBubble {
+  border-color: rgba(22, 119, 255, 0.26);
+  background: linear-gradient(180deg, #f8fbff, #eef5ff);
+}
+
+.assistantMessage.running .messageBubble {
+  border-left: 4px solid var(--amber);
+}
+
+.assistantMessage.succeeded .messageBubble {
+  border-left: 4px solid var(--green);
+}
+
+.assistantMessage.failed .messageBubble {
+  border-left: 4px solid var(--red);
+}
+
+.messageBubble p,
+.eventCard p,
+.heroStatus p {
+  margin: 7px 0 0;
+  overflow-wrap: anywhere;
+  line-height: 1.58;
+}
+
+.messageBubble pre {
   margin-top: 10px;
   color: var(--red);
 }
 
-.eventCard {
+.groupThread {
   display: grid;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 12px;
+  margin-top: 6px;
 }
 
-.eventCard > div {
+.groupTitle {
+  display: flex;
   justify-content: space-between;
   gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  font-weight: 800;
+}
+
+.agentEventGroup {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.eventAgentAvatar {
+  width: 40px;
+  height: 40px;
+  position: sticky;
+  top: 0;
+}
+
+.eventStack {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.eventAgentHeader {
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.eventAgentHeader strong,
+.eventAgentHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eventCard {
+  display: grid;
+  gap: 8px;
+}
+
+.eventCard summary {
+  justify-content: space-between;
+  gap: 10px;
+  list-style: none;
+}
+
+.eventCard summary::-webkit-details-marker {
+  display: none;
+}
+
+.eventCard summary span {
+  font-weight: 760;
+}
+
+.eventCard p {
+  color: var(--ink);
+}
+
+.eventCard pre {
+  max-height: 210px;
+  border-radius: 10px;
+  background: #f6f8fb;
+  color: #344054;
+  padding: 10px;
 }
 
 .composer {
   border-top: 1px solid var(--line);
-  background: rgba(255, 253, 247, 0.86);
-  padding: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
 }
 
 .composer textarea {
   width: 100%;
-  min-height: 84px;
+  min-height: 86px;
   resize: vertical;
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
   color: var(--ink);
-  padding: 12px;
   outline: none;
+  padding: 12px 13px;
 }
 
 .composer textarea:focus {
-  border-color: var(--ink);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.11);
 }
 
-.composerActions {
+.composerFooter {
   justify-content: space-between;
   gap: 12px;
   margin-top: 10px;
 }
 
-.composerActions span {
+.composerFooter > span {
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
-.composerActions div {
-  display: flex;
+.runControls {
+  flex: 0 0 auto;
   gap: 8px;
 }
 
-.composerActions button {
+.runControls button {
   min-width: 92px;
-  border: 1px solid var(--accent-strong);
-  background: var(--accent-strong);
-  color: var(--panel-strong);
-  padding: 10px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 11px;
+  background: var(--primary);
+  color: #fff;
   font-weight: 800;
+  padding: 10px 14px;
 }
 
-.composerActions button.secondary {
-  border-color: var(--line);
-  background: transparent;
+.runControls button.secondary {
+  border-color: var(--line-strong);
+  background: var(--surface);
   color: var(--ink);
 }
 
-.inspector {
-  background: rgba(255, 253, 247, 0.92);
+.inspectorPanel {
+  background: rgba(248, 250, 252, 0.88);
 }
 
-.kv {
+.heroStatus {
+  border: 1px solid rgba(22, 119, 255, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #edf5ff);
+  padding: 14px;
+}
+
+.heroStatus strong {
+  color: var(--primary-strong);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.kvList {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   margin: 0;
 }
 
-.kv div {
+.kvList div {
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   border-bottom: 1px solid var(--line);
   padding-bottom: 8px;
 }
 
-.kv dd {
-  max-width: 52%;
+.kvList dt {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.kvList dd {
+  max-width: 56%;
   margin: 0;
   overflow-wrap: anywhere;
   text-align: right;
-  font-weight: 750;
+  font-weight: 760;
 }
 
-.previewBox {
+.artifactList,
+.hintGrid {
   display: grid;
-  min-height: 170px;
-  place-items: center;
-  padding: 18px;
-  text-align: center;
+  gap: 8px;
 }
 
-.previewBox span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+.artifactList div,
+.hintGrid {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 11px;
 }
 
-.previewBox strong {
-  color: var(--blue);
-  font-size: 34px;
+.artifactList strong,
+.hintGrid strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.diffCard pre {
-  padding: 14px;
-  color: var(--accent-strong);
+.hintGrid {
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+  align-items: start;
 }
 
-@media (max-width: 1080px) {
-  .shell {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .inspector {
-    grid-column: 1 / -1;
-    min-height: 280px;
-  }
-}
-
-@media (max-width: 760px) {
-  .shell {
-    grid-template-columns: 1fr;
+@media (max-width: 1180px) {
+  .workspaceShell {
+    grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
     height: auto;
     min-height: 100vh;
   }
 
-  .rail,
-  .thread,
-  .inspector {
-    min-height: auto;
+  .inspectorPanel {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .workspaceShell {
+    grid-template-columns: 1fr;
+    padding: 8px;
   }
 
-  .thread {
+  .leftRail,
+  .inspectorPanel {
+    max-height: none;
+  }
+
+  .inspectorPanel {
+    display: flex;
+  }
+
+  .chatWorkbench {
     min-height: 720px;
   }
 
-  .topbar,
-  .composerActions {
+  .chatHeader,
+  .composerFooter {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .topbarMeta {
-    justify-items: start;
+  .headerBadges {
+    justify-content: flex-start;
   }
 
-  .message {
+  .threadPane {
+    padding: 14px;
+  }
+
+  .messageRow {
     max-width: 100%;
   }
 
-  .composerActions div {
+  .agentEventGroup {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .eventAgentAvatar {
+    width: 34px;
+    height: 34px;
+    font-size: 12px;
+  }
+
+  .runControls {
     width: 100%;
   }
 
-  .composerActions button {
+  .runControls button {
     flex: 1;
   }
 }
