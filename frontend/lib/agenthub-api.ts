@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  AgentRun,
   ApiErrorDto,
   RunSessionRequest,
   SessionDto,
@@ -9,6 +10,16 @@ import { io, type Socket } from "socket.io-client";
 export type SessionSnapshot = {
   session: SessionDto | null;
   events: AgentEvent[];
+};
+
+export type RunSessionResponse = {
+  session: SessionDto;
+  run: AgentRun;
+};
+
+export type CancelRunResponse = {
+  session: SessionDto;
+  run: AgentRun;
 };
 
 export type ApiResult<T> =
@@ -95,9 +106,9 @@ async function requestJson<T>(
 
 export async function runSession(
   prompt: string,
-): Promise<ApiResult<SessionDto>> {
+): Promise<ApiResult<RunSessionResponse>> {
   const body: RunSessionRequest = { prompt };
-  return requestJson<SessionDto>("/api/session/run", {
+  return requestJson<RunSessionResponse>("/api/session/run", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -133,14 +144,29 @@ export async function getCurrentSession(): Promise<ApiResult<SessionSnapshot>> {
   };
 }
 
-export async function cancelSession(): Promise<ApiResult<SessionDto>> {
-  return requestJson<SessionDto>("/api/session/cancel", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+export async function cancelAgentRun(
+  runId: string,
+): Promise<ApiResult<CancelRunResponse>> {
+  return requestJson<CancelRunResponse>(
+    `/api/agent-runs/${encodeURIComponent(runId)}/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function joinConversation(
+  socket: Socket | null,
+  conversationId: string | null,
+) {
+  if (socket && conversationId) {
+    socket.emit("joinConversation", { conversationId });
+  }
 }
 
 export function connectSessionSocket(
+  conversationId: string | null,
   onEvent: (event: AgentEvent) => void,
   onStatus: (status: "connected" | "disconnected" | "unavailable") => void,
 ): () => void {
@@ -157,11 +183,19 @@ export function connectSessionSocket(
     return () => undefined;
   }
 
-  socket.on("connect", () => onStatus("connected"));
+  socket.on("connect", () => {
+    onStatus("connected");
+    joinConversation(socket, conversationId);
+  });
   socket.on("disconnect", () => onStatus("disconnected"));
   socket.on("connect_error", () => onStatus("unavailable"));
+  socket.on("AgentEvent", (event: AgentEvent) => onEvent(event));
   socket.on("agent:event", (event: AgentEvent) => onEvent(event));
   socket.on("session:event", (event: AgentEvent) => onEvent(event));
+
+  if (socket.connected) {
+    joinConversation(socket, conversationId);
+  }
 
   return () => {
     socket?.disconnect();

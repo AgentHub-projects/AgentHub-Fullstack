@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AgentEvent, SessionDto } from "@agenthub/shared";
 import {
-  cancelSession,
+  cancelAgentRun,
   connectSessionSocket,
   getCurrentSession,
   initialEvents,
@@ -68,6 +68,9 @@ export default function WorkbenchPage() {
   const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(
+    initialSession.runIds.at(-1) ?? null,
+  );
 
   const latestEvent = events.at(-1);
   const isRunning = session.status === "running" || isSubmitting;
@@ -97,6 +100,10 @@ export default function WorkbenchPage() {
       if (result.ok) {
         if (result.data.session) {
           setSession(result.data.session);
+          setCurrentRunId((current) => {
+            const latestRunId = result.data.session?.runIds.at(-1);
+            return current ?? latestRunId ?? null;
+          });
         }
         if (result.data.events.length > 0) {
           setEvents(result.data.events);
@@ -117,6 +124,7 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     const disconnect = connectSessionSocket(
+      session.id,
       (event) => {
         setEvents((current) => {
           if (current.some((item) => item.eventId === event.eventId)) {
@@ -129,7 +137,7 @@ export default function WorkbenchPage() {
     );
 
     return disconnect;
-  }, []);
+  }, [session.id]);
 
   async function handleRun() {
     const value = prompt.trim();
@@ -139,6 +147,7 @@ export default function WorkbenchPage() {
     }
 
     setIsSubmitting(true);
+    setCurrentRunId(null);
     setSession((current) => ({
       ...current,
       status: "running",
@@ -150,7 +159,8 @@ export default function WorkbenchPage() {
     setIsSubmitting(false);
 
     if (result.ok) {
-      setSession(result.data);
+      setSession(result.data.session);
+      setCurrentRunId(result.data.run.id);
       setNotice("已调用 POST /api/session/run。");
       return;
     }
@@ -159,12 +169,18 @@ export default function WorkbenchPage() {
   }
 
   async function handleCancel() {
+    if (!currentRunId) {
+      setNotice("暂无可取消的 runId，等待后端返回 RunSessionResponse.run.id。");
+      return;
+    }
+
     setIsCancelling(true);
-    const result = await cancelSession();
+    const result = await cancelAgentRun(currentRunId);
     setIsCancelling(false);
 
     if (result.ok) {
-      setSession(result.data);
+      setSession(result.data.session);
+      setCurrentRunId(result.data.run.id);
       setNotice("已发送 Cancel 请求。");
       return;
     }
@@ -267,9 +283,10 @@ export default function WorkbenchPage() {
             <div>
               <button
                 className="secondary"
-                disabled={!isRunning || isCancelling}
+                disabled={!isRunning || !currentRunId || isCancelling}
                 onClick={handleCancel}
                 type="button"
+                title={currentRunId ? "Cancel current run" : "等待 runId"}
               >
                 {isCancelling ? "Cancelling" : "Cancel"}
               </button>
