@@ -123,18 +123,42 @@ export class AgentRunner {
     };
   }
 
-  private runClaude(context: RunnerContext): Promise<RunnerResult> {
+  private async runClaude(context: RunnerContext): Promise<RunnerResult> {
     const command = process.env.AGENT_COMMAND ?? "claude";
     const args = ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"];
+    const evidence = {
+      mode: "claude-cli",
+      command,
+      cwd: context.worktree.worktreePath
+    };
+    const evidenceLog = `Agent execution mode: ${JSON.stringify(evidence)}\n`;
+
+    context.emit({
+      type: "agent_thinking",
+      runId: context.run.id,
+      conversationId: context.run.conversationId,
+      agentId: context.run.agentId,
+      payload: evidence
+    });
+    await writeFile(context.worktree.logPath, evidenceLog, "utf8");
 
     return new Promise((resolve, reject) => {
-      const child = spawn(command, args, {
-        cwd: context.worktree.worktreePath,
-        env: process.env
-      });
+      let child: ChildProcessWithoutNullStreams;
+      try {
+        child = spawn(command, args, {
+          cwd: context.worktree.worktreePath,
+          env: process.env
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void writeFile(context.worktree.logPath, `${evidenceLog}Spawn failed: ${message}\n`, "utf8");
+        reject(new Error(`Failed to spawn agent command "${command}": ${message}`));
+        return;
+      }
       this.children.set(context.run.id, child);
       let output = "";
       let stderr = "";
+      let settled = false;
 
       child.stdout.on("data", (chunk: Buffer) => {
         for (const line of chunk.toString("utf8").split(/\r?\n/)) {
@@ -157,14 +181,30 @@ export class AgentRunner {
         stderr += chunk.toString("utf8");
       });
 
-      child.on("error", reject);
-      child.on("close", async (code) => {
-        this.children.delete(context.run.id);
-        await writeFile(context.worktree.logPath, `${output}\n${stderr}`, "utf8");
-        if (code !== 0) {
-          reject(new Error(stderr || `Agent command exited with code ${code}`));
+      child.on("error", async (error) => {
+        if (settled) {
           return;
         }
+        settled = true;
+        this.children.delete(context.run.id);
+        const message = error instanceof Error ? error.message : String(error);
+        const failure = `Spawn failed: ${message}`;
+        await writeFile(context.worktree.logPath, `${evidenceLog}${output}\n${stderr}${failure}\n`, "utf8");
+        reject(new Error(`Failed to spawn agent command "${command}": ${message}`));
+      });
+      child.on("close", async (code) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.children.delete(context.run.id);
+        if (code !== 0) {
+          const failure = stderr || `Agent command exited with code ${code}`;
+          await writeFile(context.worktree.logPath, `${evidenceLog}${output}\n${stderr}Failure: ${failure}\n`, "utf8");
+          reject(new Error(failure));
+          return;
+        }
+        await writeFile(context.worktree.logPath, `${evidenceLog}${output}\n${stderr}`, "utf8");
         resolve({
           output,
           summary: `# AgentHub Run ${context.run.id}\n\n${output || "Claude completed without text output."}\n`
