@@ -51,29 +51,33 @@ export class WorktreeService {
   }
 
   async complete(prepared: PreparedWorktree, summary: string): Promise<TestSyncResultDto> {
-    await mkdir(dirname(prepared.summaryPath), { recursive: true });
-    await writeFile(prepared.summaryPath, summary, "utf8");
+    try {
+      await mkdir(dirname(prepared.summaryPath), { recursive: true });
+      await writeFile(prepared.summaryPath, summary, "utf8");
 
-    await this.git(prepared.worktreePath, ["add", "-A"]);
-    const hasChanges = (await this.git(prepared.worktreePath, ["status", "--porcelain"])).stdout.trim().length > 0;
-    let commitSha: string | undefined;
+      await this.git(prepared.worktreePath, ["add", "-A"]);
+      const hasChanges = (await this.git(prepared.worktreePath, ["status", "--porcelain"])).stdout.trim().length > 0;
+      let commitSha: string | undefined;
 
-    if (hasChanges) {
-      await this.git(prepared.worktreePath, ["commit", "-m", `agenthub ${prepared.branchName}`]);
-      commitSha = (await this.git(prepared.worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
-    } else {
-      commitSha = (await this.git(prepared.worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
+      if (hasChanges) {
+        await this.git(prepared.worktreePath, ["commit", "-m", `agenthub ${prepared.branchName}`]);
+        commitSha = (await this.git(prepared.worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
+      } else {
+        commitSha = (await this.git(prepared.worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
+      }
+
+      await this.git(prepared.repoPath, ["checkout", "main"]);
+      await this.git(prepared.repoPath, ["merge", "--no-ff", prepared.branchName, "-m", `merge ${prepared.branchName}`]);
+
+      return {
+        status: "synced",
+        targetBranch: "main",
+        commitSha,
+        summaryPath: prepared.summaryPath
+      };
+    } catch (error) {
+      return this.fail(error);
     }
-
-    await this.git(prepared.repoPath, ["checkout", "main"]);
-    await this.git(prepared.repoPath, ["merge", "--no-ff", prepared.branchName, "-m", `merge ${prepared.branchName}`]);
-
-    return {
-      status: "synced",
-      targetBranch: "main",
-      commitSha,
-      summaryPath: prepared.summaryPath
-    };
   }
 
   async fail(error: unknown): Promise<TestSyncResultDto> {

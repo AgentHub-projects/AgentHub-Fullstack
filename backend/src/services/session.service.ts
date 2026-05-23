@@ -130,6 +130,16 @@ export class SessionService {
     return { session: this.current, run };
   }
 
+  cancelCurrent(): CancelRunResponse {
+    if (!this.activeRunId) {
+      throw new ApiHttpException(HttpStatus.CONFLICT, {
+        code: "NO_ACTIVE_RUN",
+        message: "There is no active run in this P0 session."
+      });
+    }
+    return this.cancel(this.activeRunId);
+  }
+
   private async executeRun(run: AgentRun, request: RunSessionRequest): Promise<void> {
     this.emit({
       type: "agent_started",

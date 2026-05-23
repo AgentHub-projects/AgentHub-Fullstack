@@ -21,4 +21,10 @@ export class SessionController {
   cancel(@Param("runId") runId: string): CancelRunResponse {
     return this.sessions.cancel(runId);
   }
+
+  @Post("session/cancel")
+  @HttpCode(200)
+  cancelCurrent(): CancelRunResponse {
+    return this.sessions.cancelCurrent();
+  }
 }

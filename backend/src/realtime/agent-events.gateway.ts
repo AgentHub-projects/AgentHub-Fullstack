@@ -8,7 +8,7 @@ export class AgentEventsGateway {
   private server?: Server;
 
   emitAgentEvent(event: AgentEvent): void {
-    this.server?.to(`conv:${event.conversationId}`).emit("AgentEvent", event);
+    this.server?.to(`conv:${event.conversationId}`).emit("agent:event", event);
   }
 
   @SubscribeMessage("joinConversation")
