@@ -50,15 +50,17 @@ describe("AgentRunner claude cli path", () => {
           payload: {
             mode: "claude-cli",
             command: "claude-test",
-            cwd: tempDir
+            cwd: tempDir,
+            shell: true
           }
         })
       );
       expect(spawnMock).toHaveBeenCalledWith(
         "claude-test",
         ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"],
-        expect.objectContaining({ cwd: tempDir })
+        expect.objectContaining({ cwd: tempDir, shell: true })
       );
+      expect(child.stdin.end).toHaveBeenCalledWith("implement this");
 
       child.stdout.emit("data", Buffer.from(`${JSON.stringify({ text: "hello" })}\n`, "utf8"));
       child.emit("close", 0);
@@ -67,6 +69,37 @@ describe("AgentRunner claude cli path", () => {
       await expect(readFile(join(tempDir, "agent.log"), "utf8")).resolves.toContain(
         '"mode":"claude-cli","command":"claude-test","cwd"'
       );
+      await expect(readFile(join(tempDir, "agent.log"), "utf8")).resolves.toContain('"shell":true');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the default claude command through a shell for local shims", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "agenthub-runner-"));
+    const child = createMockChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    try {
+      const runner = new AgentRunner();
+      const resultPromise = runner.run(createContext(tempDir, vi.fn()));
+
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+      expect(spawnMock).toHaveBeenCalledWith(
+        "claude",
+        ["--print", "--output-format", "stream-json", "--dangerously-skip-permissions"],
+        expect.objectContaining({
+          cwd: tempDir,
+          env: process.env,
+          shell: true
+        })
+      );
+      expect(child.stdin.end).toHaveBeenCalledWith("implement this");
+
+      child.stdout.emit("data", Buffer.from("done\n", "utf8"));
+      child.emit("close", 0);
+
+      await expect(resultPromise).resolves.toMatchObject({ output: "done" });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -129,7 +129,8 @@ export class AgentRunner {
     const evidence = {
       mode: "claude-cli",
       command,
-      cwd: context.worktree.worktreePath
+      cwd: context.worktree.worktreePath,
+      shell: true
     };
     const evidenceLog = `Agent execution mode: ${JSON.stringify(evidence)}\n`;
 
@@ -147,7 +148,8 @@ export class AgentRunner {
       try {
         child = spawn(command, args, {
           cwd: context.worktree.worktreePath,
-          env: process.env
+          env: process.env,
+          shell: true
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
