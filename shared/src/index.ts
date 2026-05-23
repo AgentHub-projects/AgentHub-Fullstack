@@ -103,6 +103,22 @@ export interface RunSessionRequest {
   config?: AgentConfigDraft;
 }
 
+export interface RunSessionResponse {
+  session: SessionDto;
+  run: AgentRun;
+}
+
+export interface CancelRunResponse {
+  session: SessionDto;
+  run: AgentRun;
+}
+
+export interface HealthResponse {
+  ok: boolean;
+  service: string;
+  ts: string;
+}
+
 export interface TestSyncResultDto {
   status: TestSyncStatus;
   targetBranch: TestSyncTargetBranch;
