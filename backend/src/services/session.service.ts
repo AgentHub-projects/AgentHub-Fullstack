@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import type {
   AgentEvent,
   AgentRun,
@@ -28,9 +28,9 @@ export class SessionService {
   private eventSeq = 0;
 
   constructor(
-    private readonly runner: AgentRunner,
-    private readonly worktrees: WorktreeService,
-    private readonly gateway: AgentEventsGateway
+    @Inject(AgentRunner) private readonly runner: AgentRunner,
+    @Inject(WorktreeService) private readonly worktrees: WorktreeService,
+    @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway
   ) {}
 
   getCurrentSession(): SessionDto {

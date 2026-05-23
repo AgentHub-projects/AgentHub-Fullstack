@@ -1,10 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Post } from "@nestjs/common";
 import type { CancelRunResponse, RunSessionRequest, RunSessionResponse, SessionDto } from "@agenthub/shared";
 import { SessionService } from "../services/session.service";
 
 @Controller()
 export class SessionController {
-  constructor(private readonly sessions: SessionService) {}
+  constructor(@Inject(SessionService) private readonly sessions: SessionService) {}
 
   @Get("session/current")
   getCurrent(): SessionDto {
