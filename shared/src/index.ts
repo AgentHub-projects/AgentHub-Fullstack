@@ -1,23 +1,32 @@
 export type AgentRunStatus =
   | "queued"
   | "running"
-  | "completed"
+  | "succeeded"
   | "failed"
   | "cancelled";
 
 export type AgentEventType =
-  | "run.created"
-  | "run.started"
-  | "run.output"
-  | "run.completed"
-  | "run.failed"
-  | "run.cancelled";
+  | "agent_started"
+  | "agent_thinking"
+  | "text_delta"
+  | "code_diff"
+  | "preview_card"
+  | "agent_completed"
+  | "agent_failed"
+  | "agent_cancelled"
+  | "conflict_card"
+  | "done";
 
-export type AgentRuntime = "node" | "browser" | "python" | "shell";
+export type AgentRuntimeStatus =
+  | "idle"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
 
-export type SessionStatus = "idle" | "running" | "completed" | "failed";
+export type SessionStatus = "idle" | "running" | "succeeded" | "failed";
 
-export type TestSyncStatus = "pending" | "synced" | "failed";
+export type TestSyncTargetBranch = "main";
 
 export interface ApiErrorDto {
   code: string;
@@ -28,19 +37,30 @@ export interface ApiErrorDto {
 export interface AgentConfigDraft {
   name: string;
   description?: string;
-  runtime: AgentRuntime;
-  entrypoint: string;
+  provider: string;
+  role: string;
+  entrypoint?: string;
   env?: Record<string, string>;
   tags?: string[];
+}
+
+export interface AgentRuntime {
+  agentId: string;
+  displayName: string;
+  provider: string;
+  role: string;
+  worktreePath: string;
+  branchName: string;
+  status: AgentRuntimeStatus;
 }
 
 export interface AgentRun {
   id: string;
   agentId: string;
-  sessionId?: string;
+  conversationId: string;
   status: AgentRunStatus;
   runtime: AgentRuntime;
-  input?: unknown;
+  prompt: string;
   output?: unknown;
   error?: ApiErrorDto;
   createdAt: string;
@@ -49,12 +69,15 @@ export interface AgentRun {
 }
 
 export interface AgentEvent {
-  id: string;
-  runId: string;
+  eventId: string;
   type: AgentEventType;
-  timestamp: string;
-  message?: string;
-  data?: unknown;
+  runId: string;
+  conversationId: string;
+  agentId: string;
+  messageId?: string;
+  payload: unknown;
+  seq: number;
+  ts: string;
 }
 
 export interface SessionDto {
@@ -68,15 +91,15 @@ export interface SessionDto {
 }
 
 export interface RunSessionRequest {
-  agentId: string;
-  sessionId?: string;
-  input?: unknown;
+  prompt: string;
+  repositoryPath?: string;
+  testRepositoryPath?: string;
   config?: AgentConfigDraft;
 }
 
 export interface TestSyncResultDto {
-  status: TestSyncStatus;
-  syncedAt?: string;
-  message?: string;
+  targetBranch: TestSyncTargetBranch;
+  commitSha?: string;
+  summaryPath?: string;
   error?: ApiErrorDto;
 }
