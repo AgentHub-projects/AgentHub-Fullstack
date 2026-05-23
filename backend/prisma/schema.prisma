@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id        String   @id
+  title     String?
+  status    String
+  agentId   String?
+  prompt    String?
+  output    String?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  runs      AgentRun[]
+}
+
+model AgentRun {
+  id             String   @id
+  sessionId      String
+  conversationId String
+  agentId        String
+  status         String
+  prompt         String
+  output         Json?
+  error          Json?
+  createdAt      DateTime @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  session        Session  @relation(fields: [sessionId], references: [id])
+  events         AgentEvent[]
+}
+
+model AgentEvent {
+  eventId        String   @id
+  runId          String
+  conversationId String
+  agentId        String
+  type           String
+  seq            Int
+  payload        Json
+  ts             BigInt
+  run            AgentRun @relation(fields: [runId], references: [id])
+}
+
+model Artifact {
+  id        String   @id
+  runId     String
+  kind      String
+  path      String
+  createdAt DateTime @default(now())
+}
