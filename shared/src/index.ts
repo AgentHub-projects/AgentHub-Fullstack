@@ -26,6 +26,8 @@ export type AgentRuntimeStatus =
 
 export type SessionStatus = "idle" | "running" | "succeeded" | "failed";
 
+export type TestSyncStatus = "pending" | "synced" | "failed";
+
 export type TestSyncTargetBranch = "main";
 
 export interface ApiErrorDto {
@@ -77,7 +79,7 @@ export interface AgentEvent {
   messageId?: string;
   payload: unknown;
   seq: number;
-  ts: string;
+  ts: number;
 }
 
 export interface SessionDto {
@@ -86,6 +88,10 @@ export interface SessionDto {
   status: SessionStatus;
   agentId?: string;
   runIds: string[];
+  prompt?: string;
+  output?: string;
+  error?: string;
+  testSync?: TestSyncResultDto;
   createdAt: string;
   updatedAt: string;
 }
@@ -98,6 +104,7 @@ export interface RunSessionRequest {
 }
 
 export interface TestSyncResultDto {
+  status: TestSyncStatus;
   targetBranch: TestSyncTargetBranch;
   commitSha?: string;
   summaryPath?: string;
