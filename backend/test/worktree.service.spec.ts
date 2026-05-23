@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -91,6 +91,21 @@ describe("WorktreeService", () => {
         process.env.MOCK_AGENT = previousMockAgent;
       }
     }
+  });
+
+  it("removes the exact stale run worktree path before reusing a run id", async () => {
+    repoPath = await mkdtemp(join(tmpdir(), "agenthub-stale-"));
+    await initRepo(repoPath);
+
+    const stalePath = join(repoPath, ".agenthub", "worktrees", "run-902-main");
+    await mkdir(stalePath, { recursive: true });
+    await writeFile(join(stalePath, "stale.txt"), "old\n", "utf8");
+
+    const service = new WorktreeService();
+    const prepared = await service.prepare("run-902", repoPath);
+
+    await expect(readFile(join(prepared.worktreePath, "README.md"), "utf8")).resolves.toContain("# Test");
+    await expect(readFile(join(prepared.worktreePath, "stale.txt"), "utf8")).rejects.toThrow();
   });
 });
 

@@ -17,3 +17,16 @@ NestJS backend for the AgentHub P0 flow.
 - `MOCK_AGENT=true`: writes deterministic TypeScript sample files instead of invoking Claude
 - `AGENTHUB_TEST_REPO_PATH`: defaults to `D:\agent\AgentHub-Test`
 - `DATABASE_URL`: used by Prisma migrations
+
+## Local Claude Code validation
+
+The real agent path directly invokes the local Claude Code CLI; it does not use an Anthropic SDK or API integration.
+
+1. Install and authenticate Claude Code on the machine running the backend.
+2. Verify the CLI is available:
+   ```powershell
+   Get-Command claude
+   ```
+3. Unset `MOCK_AGENT` or leave it undefined.
+4. Keep `AGENT_COMMAND=claude`, or set `AGENT_COMMAND` to another local wrapper command if needed.
+5. Start the backend and run a session. The run emits an `agent_thinking` event and writes `mode`, `command`, and `cwd` evidence to `agent.log` before spawning the CLI.
