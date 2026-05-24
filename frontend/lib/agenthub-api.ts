@@ -23,49 +23,26 @@ export type CancelRunResponse = {
 };
 
 export type ApiResult<T> =
-  | { ok: true; data: T; source: "api" | "mock" }
+  | { ok: true; data: T; source: "api" }
   | { ok: false; error: string };
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
-export const initialEvents: AgentEvent[] = [
-  {
-    eventId: "mock-evt-1",
-    type: "agent_started",
-    runId: "mock-run",
-    conversationId: "mock-session",
-    agentId: "frontend-agent",
-    payload: { message: "等待后端会话数据，当前展示本地占位事件。" },
-    seq: 1,
-    ts: Date.now() - 120000,
-  },
-  {
-    eventId: "mock-evt-2",
-    type: "preview_card",
-    runId: "mock-run",
-    conversationId: "mock-session",
-    agentId: "frontend-agent",
-    payload: { title: "Preview placeholder", status: "idle" },
-    seq: 2,
-    ts: Date.now() - 60000,
-  },
-];
+const now = new Date().toISOString();
+
+export const initialEvents: AgentEvent[] = [];
 
 export const initialSession: SessionDto = {
-  id: "mock-session",
-  title: "P0 前端工作台占位会话",
+  id: "local-offline-session",
+  title: "等待连接后端会话",
   status: "idle",
-  agentId: "frontend-agent",
-  runIds: ["mock-run"],
-  prompt: "输入测试口令后将调用 POST /api/session/run",
-  output: "后端未连接时，界面会保留本地占位数据并继续允许操作。",
-  testSync: {
-    status: "pending",
-    targetBranch: "main",
-  },
-  createdAt: new Date(Date.now() - 180000).toISOString(),
-  updatedAt: new Date().toISOString(),
+  agentId: "claude-code-agent",
+  runIds: [],
+  prompt: "帮我写一个前后端分离的架构的todolist系统。",
+  output: undefined,
+  createdAt: now,
+  updatedAt: now,
 };
 
 async function requestJson<T>(
