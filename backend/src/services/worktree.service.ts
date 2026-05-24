@@ -4,9 +4,29 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import type { TestSyncResultDto } from "@agenthub/shared";
 
 const execFileAsync = promisify(execFile);
+
+const EBUSY_RETRY_MS = [100, 250, 500];
+const EBUSY_MAX_ATTEMPTS = EBUSY_RETRY_MS.length + 1;
+
+async function rmRetry(target: string, options: { recursive?: boolean; force?: boolean } = {}): Promise<void> {
+  for (let attempt = 0; attempt < EBUSY_MAX_ATTEMPTS; attempt++) {
+    try {
+      await rm(target, { ...options });
+      return;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "EBUSY" && attempt < EBUSY_MAX_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, EBUSY_RETRY_MS[attempt]));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 export interface PreparedWorktree {
   repoPath: string;
@@ -24,14 +44,30 @@ export class WorktreeService {
     await this.cleanupLegacyRepoWorktrees(repoPath);
 
     const shortRun = runId.replace(/^run-/, "run-");
-    const branchName = `agent/${shortRun}/main`;
-    const runRoot = join(tmpdir(), "agenthub", "runs", shortRun);
+    const suffix = randomBytes(3).toString("hex");
+    const uniqueRun = `${shortRun}-${suffix}`;
+    const branchName = `agent/${uniqueRun}/main`;
+    const runRoot = process.env.AGENTHUB_WORKTREE_ROOT
+      ? join(process.env.AGENTHUB_WORKTREE_ROOT, "runs", uniqueRun)
+      : join(tmpdir(), "agenthub", "runs", uniqueRun);
     const worktreesRoot = join(runRoot, "worktrees");
-    const worktreePath = join(worktreesRoot, `${shortRun}-main`);
+    const worktreePath = join(worktreesRoot, `${uniqueRun}-main`);
     const artifactDir = join(runRoot, "artifacts");
 
     await mkdir(worktreesRoot, { recursive: true });
-    await this.removeStaleWorktree(repoPath, worktreesRoot, worktreePath);
+
+    // Try to remove stale worktree, tolerate EBUSY on Windows
+    try {
+      await this.removeStaleWorktree(repoPath, worktreesRoot, worktreePath);
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "EBUSY") {
+        // Silently skip — fresh directory with unique suffix won't conflict
+      } else {
+        throw err;
+      }
+    }
+
     await this.git(repoPath, ["worktree", "add", "-B", branchName, worktreePath, "main"]);
     await mkdir(artifactDir, { recursive: true });
 
@@ -129,7 +165,7 @@ export class WorktreeService {
       throw new Error(`Refusing to remove legacy worktrees outside ${repoRoot}: ${target}`);
     }
 
-    await rm(target, { recursive: true, force: true });
+    await rmRetry(target, { recursive: true, force: true });
   }
 
   private async removeStaleWorktree(repoPath: string, worktreesRoot: string, worktreePath: string): Promise<void> {
@@ -144,7 +180,7 @@ export class WorktreeService {
       await this.git(repoPath, ["worktree", "remove", "--force", worktreePath]);
       await this.git(repoPath, ["worktree", "prune"]);
     } catch {
-      await rm(worktreePath, { recursive: true, force: true });
+      await rmRetry(worktreePath, { recursive: true, force: true });
       await this.git(repoPath, ["worktree", "prune"]);
     }
   }
@@ -153,10 +189,21 @@ export class WorktreeService {
     try {
       await this.git(prepared.repoPath, ["worktree", "remove", "--force", prepared.worktreePath]);
     } catch {
-      await rm(prepared.worktreePath, { recursive: true, force: true });
+      await rmRetry(prepared.worktreePath, { recursive: true, force: true });
     } finally {
       await this.git(prepared.repoPath, ["worktree", "prune"]);
-      await rm(dirname(prepared.worktreePath), { recursive: true, force: true });
+      const runDir = dirname(prepared.worktreePath);
+      try {
+        await rmRetry(runDir, { recursive: true, force: true });
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "EBUSY") {
+          // Windows may still hold handles briefly — tasks can accumulate but won't collide
+          // since each run uses a unique suffix via randomBytes
+        } else {
+          throw err;
+        }
+      }
     }
   }
 }
