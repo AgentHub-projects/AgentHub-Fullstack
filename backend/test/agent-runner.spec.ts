@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRun } from "@agenthub/shared";
-import { AgentRunner, parseClaudeStreamLine } from "../src/services/agent-runner.service";
+import {
+  AgentRunner,
+  buildAgentCommandEnv,
+  buildTodolistEngineeringPrompt,
+  parseClaudeStreamLine
+} from "../src/services/agent-runner.service";
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
@@ -22,6 +27,38 @@ describe("parseClaudeStreamLine", () => {
   it("keeps non-json output as text", () => {
     expect(parseClaudeStreamLine("raw text")).toBe("raw text");
     expect(parseClaudeStreamLine("")).toBeUndefined();
+  });
+});
+
+describe("buildTodolistEngineeringPrompt", () => {
+  it("wraps the user prompt as the required fullstack todolist task", () => {
+    const wrapped = buildTodolistEngineeringPrompt("帮我写一个前后端分离的架构的todolist系统");
+
+    expect(wrapped).toContain("用户原始需求");
+    expect(wrapped).toContain("帮我写一个前后端分离的架构的todolist系统");
+    expect(wrapped).toContain("pnpm workspace");
+    expect(wrapped).toContain("Vite + React + TypeScript");
+    expect(wrapped).toContain("Express + TypeScript");
+    expect(wrapped).toContain("删除或替换当前目标 worktree 内旧的 mock、generated、sentinel、validation 残留内容");
+    expect(wrapped).toContain("不要修改当前目标 worktree 之外");
+  });
+});
+
+describe("buildAgentCommandEnv", () => {
+  it("keeps only local CLI environment entries", () => {
+    const env = buildAgentCommandEnv({
+      PATH: "C:\\bin",
+      CLAUDE_CONFIG_DIR: "C:\\claude",
+      ANTHROPIC_API_KEY: "secret",
+      ANTHROPIC_AUTH_TOKEN: "secret",
+      OPENAI_API_KEY: "secret"
+    });
+
+    expect(env.PATH).toBe("C:\\bin");
+    expect(env.CLAUDE_CONFIG_DIR).toBe("C:\\claude");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
   });
 });
 
@@ -60,7 +97,7 @@ describe("AgentRunner claude cli path", () => {
         ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
         expect.objectContaining({ cwd: tempDir, shell: true })
       );
-      expect(child.stdin.end).toHaveBeenCalledWith("implement this");
+      expect(child.stdin.end).toHaveBeenCalledWith(expect.stringContaining("用户原始需求：\nimplement this"));
 
       child.stdout.emit("data", Buffer.from(`${JSON.stringify({ text: "hello" })}\n`, "utf8"));
       child.emit("close", 0);
@@ -90,11 +127,12 @@ describe("AgentRunner claude cli path", () => {
         ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
         expect.objectContaining({
           cwd: tempDir,
-          env: process.env,
+          env: expect.any(Object),
           shell: true
         })
       );
-      expect(child.stdin.end).toHaveBeenCalledWith("implement this");
+      expect(spawnMock.mock.calls[0]?.[2]?.env).not.toBe(process.env);
+      expect(child.stdin.end).toHaveBeenCalledWith(expect.stringContaining("Express + TypeScript"));
 
       child.stdout.emit("data", Buffer.from("done\n", "utf8"));
       child.emit("close", 0);
@@ -152,6 +190,71 @@ describe("AgentRunner claude cli path", () => {
   });
 });
 
+describe("AgentRunner mock path", () => {
+  afterEach(() => {
+    delete process.env.MOCK_AGENT;
+  });
+
+  it("marks events and output as mock when MOCK_AGENT is enabled", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "agenthub-runner-mock-"));
+    process.env.MOCK_AGENT = "true";
+
+    try {
+      const emit = vi.fn();
+      const runner = new AgentRunner();
+      const result = await runner.run(createContext(tempDir, emit));
+
+      expect(emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "agent_thinking",
+          payload: { mode: "mock", mock: true }
+        })
+      );
+      expect(result.output).toContain("MOCK_AGENT=true mock run");
+      expect(result.output).toContain("Wrapped prompt:");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not pass provider API environment variables to Claude", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "agenthub-runner-"));
+    const child = createMockChild();
+    spawnMock.mockReturnValueOnce(child);
+    const previousEnv = {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR
+    };
+    process.env.ANTHROPIC_API_KEY = "anthropic-secret";
+    process.env.ANTHROPIC_AUTH_TOKEN = "anthropic-token";
+    process.env.OPENAI_API_KEY = "openai-secret";
+    process.env.CLAUDE_CONFIG_DIR = "C:\\claude-config";
+
+    try {
+      const runner = new AgentRunner();
+      const resultPromise = runner.run(createContext(tempDir, vi.fn()));
+
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+      const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv };
+      expect(spawnOptions.env).toMatchObject({ CLAUDE_CONFIG_DIR: "C:\\claude-config" });
+      expect(spawnOptions.env?.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(spawnOptions.env?.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+      expect(spawnOptions.env?.OPENAI_API_KEY).toBeUndefined();
+      expect(Object.keys(spawnOptions.env ?? {}).filter((key) => /^ANTHROPIC_|^OPENAI_/.test(key))).toEqual([]);
+
+      child.stdout.emit("data", Buffer.from("done\n", "utf8"));
+      child.emit("close", 0);
+
+      await expect(resultPromise).resolves.toMatchObject({ output: "done" });
+    } finally {
+      restoreEnv(previousEnv);
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 function createMockChild() {
   return Object.assign(new EventEmitter(), {
     stdout: new EventEmitter(),
@@ -161,6 +264,16 @@ function createMockChild() {
     },
     kill: vi.fn()
   });
+}
+
+function restoreEnv(previousEnv: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 }
 
 function createContext(worktreePath: string, emit: ReturnType<typeof vi.fn>) {
