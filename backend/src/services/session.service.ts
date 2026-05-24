@@ -9,9 +9,24 @@ import type {
 } from "@agenthub/shared";
 import { AgentEventsGateway } from "../realtime/agent-events.gateway";
 import { AgentRunner } from "./agent-runner.service";
+import { AgentService } from "./agent.service";
+import { ConversationService } from "./conversation.service";
 import { ApiHttpException } from "./errors";
 import { createId } from "./ids";
 import { WorktreeService } from "./worktree.service";
+
+function buildActiveRunIds(activeSet: Set<string>): string[] {
+  return [...activeSet];
+}
+
+function computeSessionStatus(runs: Map<string, AgentRun>, activeSet: Set<string>): SessionDto["status"] {
+  if (activeSet.size > 0) return "running";
+  // Check if any runs failed
+  for (const run of runs.values()) {
+    if (run.status === "failed") return "failed";
+  }
+  return "idle";
+}
 
 @Injectable()
 export class SessionService {
@@ -20,17 +35,20 @@ export class SessionService {
     title: "Current Session",
     status: "idle",
     runIds: [],
+    activeRunIds: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
   private readonly runs = new Map<string, AgentRun>();
-  private activeRunId?: string;
+  private activeRunIds = new Set<string>();
   private eventSeq = 0;
 
   constructor(
     @Inject(AgentRunner) private readonly runner: AgentRunner,
     @Inject(WorktreeService) private readonly worktrees: WorktreeService,
-    @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway
+    @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway,
+    @Inject(ConversationService) private readonly conversations: ConversationService,
+    @Inject(AgentService) private readonly agents: AgentService
   ) {}
 
   getCurrentSession(): SessionDto {
@@ -45,17 +63,19 @@ export class SessionService {
         message: "prompt is required"
       });
     }
-    if (this.activeRunId) {
-      throw new ApiHttpException(HttpStatus.CONFLICT, {
-        code: "ACTIVE_RUN_EXISTS",
-        message: "A run is already active in this P0 session."
-      });
-    }
 
     const runId = createId("run");
-    const conversationId = this.current.id;
+    const conversationId = request.conversationId ?? this.current.id;
     const agentId = request.config?.name ?? "claude";
     const now = new Date().toISOString();
+
+    // Add user message to conversation if it exists
+    try {
+      this.conversations.createMessage(conversationId, { content: prompt });
+    } catch {
+      // conversation may not exist — ignore
+    }
+
     const run: AgentRun = {
       id: runId,
       agentId,
@@ -76,13 +96,14 @@ export class SessionService {
     };
 
     this.runs.set(runId, run);
-    this.activeRunId = runId;
+    this.activeRunIds.add(runId);
     this.current = {
       ...this.current,
       status: "running",
       agentId,
       prompt,
       runIds: [...this.current.runIds, runId],
+      activeRunIds: buildActiveRunIds(this.activeRunIds),
       updatedAt: now
     };
 
@@ -113,10 +134,11 @@ export class SessionService {
     run.status = "cancelled";
     run.finishedAt = finishedAt;
     run.runtime.status = "cancelled";
-    this.activeRunId = undefined;
+    this.activeRunIds.delete(runId);
     this.current = {
       ...this.current,
-      status: "idle",
+      status: computeSessionStatus(this.runs, this.activeRunIds),
+      activeRunIds: buildActiveRunIds(this.activeRunIds),
       updatedAt: finishedAt
     };
     this.emit({
@@ -131,13 +153,15 @@ export class SessionService {
   }
 
   cancelCurrent(): CancelRunResponse {
-    if (!this.activeRunId) {
+    if (this.activeRunIds.size === 0) {
       throw new ApiHttpException(HttpStatus.CONFLICT, {
         code: "NO_ACTIVE_RUN",
         message: "There is no active run in this P0 session."
       });
     }
-    return this.cancel(this.activeRunId);
+    // Cancel the most recently added active run
+    const lastRunId = [...this.activeRunIds].at(-1)!;
+    return this.cancel(lastRunId);
   }
 
   private async executeRun(run: AgentRun, request: RunSessionRequest): Promise<void> {
@@ -153,8 +177,10 @@ export class SessionService {
     run.runtime.worktreePath = worktree.worktreePath;
     run.runtime.branchName = worktree.branchName;
 
+    const agent = this.agents.get(run.agentId);
     const result = await this.runner.run({
       run,
+      agent,
       prompt: run.prompt,
       worktree,
       emit: (event) => this.emit(event)
@@ -172,13 +198,14 @@ export class SessionService {
       };
       run.finishedAt = finishedAt;
       run.runtime.status = "failed";
-      this.activeRunId = undefined;
+      this.activeRunIds.delete(run.id);
       this.current = {
         ...this.current,
-        status: "failed",
+        status: computeSessionStatus(this.runs, this.activeRunIds),
         output: result.output,
         error: message,
         testSync,
+        activeRunIds: buildActiveRunIds(this.activeRunIds),
         updatedAt: finishedAt
       };
       this.emit({
@@ -202,14 +229,23 @@ export class SessionService {
     run.output = { text: result.output, testSync };
     run.finishedAt = finishedAt;
     run.runtime.status = "succeeded";
-    this.activeRunId = undefined;
+    this.activeRunIds.delete(run.id);
     this.current = {
       ...this.current,
-      status: "succeeded",
+      status: computeSessionStatus(this.runs, this.activeRunIds),
       output: result.output,
       testSync,
+      activeRunIds: buildActiveRunIds(this.activeRunIds),
       updatedAt: finishedAt
     };
+
+    // Add assistant message
+    try {
+      this.conversations.addAssistantMessage(run.conversationId, result.output);
+    } catch {
+      // ignore
+    }
+
     this.emit({
       type: "agent_completed",
       runId: run.id,
@@ -237,11 +273,12 @@ export class SessionService {
     run.error = { code: "AGENT_RUN_FAILED", message };
     run.finishedAt = finishedAt;
     run.runtime.status = "failed";
-    this.activeRunId = undefined;
+    this.activeRunIds.delete(run.id);
     this.current = {
       ...this.current,
-      status: "failed",
+      status: computeSessionStatus(this.runs, this.activeRunIds),
       error: message,
+      activeRunIds: buildActiveRunIds(this.activeRunIds),
       updatedAt: finishedAt
     };
     this.emit({
