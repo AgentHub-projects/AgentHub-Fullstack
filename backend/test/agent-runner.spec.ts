@@ -7,7 +7,6 @@ import type { AgentRun } from "@agenthub/shared";
 import {
   AgentRunner,
   buildAgentCommandEnv,
-  buildTodolistEngineeringPrompt,
   parseClaudeStreamLine
 } from "../src/services/agent-runner.service";
 
@@ -18,29 +17,24 @@ vi.mock("node:child_process", () => ({
 }));
 
 describe("parseClaudeStreamLine", () => {
-  it("extracts plain text from Claude stream-json shapes", () => {
-    expect(parseClaudeStreamLine(JSON.stringify({ text: "hello" }))).toBe("hello");
-    expect(parseClaudeStreamLine(JSON.stringify({ delta: { text: " world" } }))).toBe(" world");
-    expect(parseClaudeStreamLine(JSON.stringify({ content: [{ type: "text", text: "!" }] }))).toBe("!");
+  it("extracts text from Claude stream-json shapes as ParsedClaudeEvent", () => {
+    const result1 = parseClaudeStreamLine(JSON.stringify({ text: "hello" }));
+    expect(result1?.text).toBe("hello");
+    expect(result1?.agentEventType).toBeTruthy();
+
+    const result2 = parseClaudeStreamLine(JSON.stringify({ delta: { text: " world" } }));
+    expect(result2?.text).toBe(" world");
+
+    const result3 = parseClaudeStreamLine(JSON.stringify({ content: [{ type: "text", text: "!" }] }));
+    expect(result3?.text).toBe("!");
   });
 
-  it("keeps non-json output as text", () => {
-    expect(parseClaudeStreamLine("raw text")).toBe("raw text");
+  it("handles non-json and empty input", () => {
+    const result1 = parseClaudeStreamLine("raw text");
+    expect(result1?.text).toBe("raw text");
+    expect(result1?.agentEventType).toBeTruthy();
+
     expect(parseClaudeStreamLine("")).toBeUndefined();
-  });
-});
-
-describe("buildTodolistEngineeringPrompt", () => {
-  it("wraps the user prompt as the required fullstack todolist task", () => {
-    const wrapped = buildTodolistEngineeringPrompt("帮我写一个前后端分离的架构的todolist系统");
-
-    expect(wrapped).toContain("用户原始需求");
-    expect(wrapped).toContain("帮我写一个前后端分离的架构的todolist系统");
-    expect(wrapped).toContain("pnpm workspace");
-    expect(wrapped).toContain("Vite + React + TypeScript");
-    expect(wrapped).toContain("Express + TypeScript");
-    expect(wrapped).toContain("删除或替换当前目标 worktree 内旧的 mock、generated、sentinel、validation 残留内容");
-    expect(wrapped).toContain("不要修改当前目标 worktree 之外");
   });
 });
 

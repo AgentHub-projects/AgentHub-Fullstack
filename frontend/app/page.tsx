@@ -389,6 +389,9 @@ export default function WorkbenchPage() {
       } else {
         setChatMessages([]);
       }
+    } else {
+      // Team conversations: clear chat messages, use orchestration view
+      setChatMessages([]);
     }
   }
 
@@ -410,23 +413,19 @@ export default function WorkbenchPage() {
         convId = createResult.data.id;
         setConversations((prev) => [createResult.data, ...prev]);
         setCurrentConversationId(convId);
+        setChatMessages([]);
       } else {
         antMessage.error(`无法创建会话: ${createResult.error}`);
         return;
       }
     }
 
-    // Save user message to backend
+    // Save user message locally (backend persists it)
     const userMsg: OpenAIMessage = { role: "user", content: text };
     setChatMessages((prev) => [...prev, userMsg]);
     setChatInput("");
     setIsStreaming(true);
     setStreamingContent("");
-
-    // Persist user message
-    await createMessage(convId!, { content: text }).catch(() => {
-      // non-blocking
-    });
 
     // Get agent model
     const conv = conversations.find((c) => c.id === convId);
@@ -528,6 +527,7 @@ export default function WorkbenchPage() {
         convId = createResult.data.id;
         setConversations((prev) => [createResult.data, ...prev]);
         setCurrentConversationId(convId);
+        setChatMessages([]);
       } else {
         antMessage.error(`无法创建会话: ${createResult.error}`);
         return;

@@ -128,7 +128,7 @@ export class ChatService {
           agentId: agent.id,
         });
         this.conversations.createMessage(request.conversationId, {
-          content: request.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n"),
+          content: request.messages.filter((m) => m.role === "user").at(-1)?.content ?? "",
         });
       } catch {
         // ignore save errors
