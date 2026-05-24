@@ -73,7 +73,7 @@ describe("SessionService", () => {
     expect(runner.cancel).toHaveBeenCalledWith(started.run.id);
   });
 
-  it("keeps agent output and records testSync failure when sync fails", async () => {
+  it("fails the run with TEST_SYNC_FAILED when sync fails", async () => {
     const runner = {
       run: vi.fn(async () => ({
         output: "agent completed",
@@ -107,7 +107,8 @@ describe("SessionService", () => {
     await waitFor(() => service.getCurrentSession().status !== "running");
 
     const session = service.getCurrentSession();
-    expect(session.status).toBe("succeeded");
+    expect(session.status).toBe("failed");
+    expect(session.error).toBe("merge conflict");
     expect(session.output).toBe("agent completed");
     expect(session.testSync).toMatchObject({
       status: "failed",

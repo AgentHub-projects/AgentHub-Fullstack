@@ -64,7 +64,7 @@ export class SessionService {
       runtime: {
         agentId,
         displayName: request.config?.name ?? "Claude",
-        provider: request.config?.provider ?? "anthropic",
+        provider: request.config?.provider ?? "local-cli",
         role: request.config?.role ?? "coding-agent",
         worktreePath: "",
         branchName: "",
@@ -162,6 +162,42 @@ export class SessionService {
 
     const testSync = await this.worktrees.complete(worktree, result.summary);
     const finishedAt = new Date().toISOString();
+    if (testSync.status === "failed") {
+      const message = testSync.error?.message ?? "Test repository sync failed.";
+      run.status = "failed";
+      run.output = { text: result.output, testSync };
+      run.error = {
+        code: testSync.error?.code ?? "TEST_SYNC_FAILED",
+        message
+      };
+      run.finishedAt = finishedAt;
+      run.runtime.status = "failed";
+      this.activeRunId = undefined;
+      this.current = {
+        ...this.current,
+        status: "failed",
+        output: result.output,
+        error: message,
+        testSync,
+        updatedAt: finishedAt
+      };
+      this.emit({
+        type: "agent_failed",
+        runId: run.id,
+        conversationId: run.conversationId,
+        agentId: run.agentId,
+        payload: run.error
+      });
+      this.emit({
+        type: "done",
+        runId: run.id,
+        conversationId: run.conversationId,
+        agentId: run.agentId,
+        payload: { status: "failed" }
+      });
+      return;
+    }
+
     run.status = "succeeded";
     run.output = { text: result.output, testSync };
     run.finishedAt = finishedAt;

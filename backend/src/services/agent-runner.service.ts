@@ -17,6 +17,54 @@ export interface RunnerResult {
   summary: string;
 }
 
+const AGENT_COMMAND_ENV_ALLOWLIST = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SystemRoot",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "HOME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ComSpec",
+  "PSModulePath",
+  "CLAUDE_CONFIG_DIR"
+] as const;
+
+export function buildAgentCommandEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of AGENT_COMMAND_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+export function buildTodolistEngineeringPrompt(userPrompt: string): string {
+  return [
+    "你是 AgentHub 调用的本地 Claude CLI 编码代理。请只在当前工作目录这个目标 git worktree 内修改文件。",
+    "",
+    "用户原始需求：",
+    userPrompt,
+    "",
+    "请把该需求实现为一个完整可运行的 TypeScript 前后端分离 todolist 系统，要求：",
+    "- 根目录使用 pnpm workspace，并提供可直接安装和运行的 package.json / pnpm-workspace.yaml。",
+    "- frontend/ 使用 Vite + React + TypeScript。",
+    "- backend/ 使用 Express + TypeScript。",
+    "- 实现基础 Todo CRUD：创建、读取列表、更新完成状态或标题、删除。",
+    "- 前端必须通过后端 HTTP API 完成数据读写，不使用纯前端假数据作为最终实现。",
+    "- 提供 README，说明安装、开发启动、API 和项目结构。",
+    "- 删除或替换当前目标 worktree 内旧的 mock、generated、sentinel、validation 残留内容，避免最终项目仍依赖这些占位实现。",
+    "- 不要修改当前目标 worktree 之外的任何文件或目录。",
+    "- 完成后确保目标项目文件是可提交状态。"
+  ].join("\n");
+}
+
 export function parseClaudeStreamLine(line: string): string | undefined {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -67,12 +115,13 @@ export class AgentRunner {
   }
 
   private async runMock(context: RunnerContext): Promise<RunnerResult> {
+    const wrappedPrompt = buildTodolistEngineeringPrompt(context.prompt);
     context.emit({
       type: "agent_thinking",
       runId: context.run.id,
       conversationId: context.run.conversationId,
       agentId: context.run.agentId,
-      payload: { mode: "mock" }
+      payload: { mode: "mock", mock: true }
     });
 
     const backendDir = join(context.worktree.worktreePath, "backend", "src", "generated");
@@ -107,7 +156,7 @@ export class AgentRunner {
       "utf8"
     );
 
-    const output = `MOCK_AGENT generated todo examples for prompt: ${context.prompt}`;
+    const output = `MOCK_AGENT=true mock run generated todo examples. Wrapped prompt:\n${wrappedPrompt}`;
     await writeFile(context.worktree.logPath, `${output}\n`, "utf8");
     context.emit({
       type: "text_delta",
@@ -124,6 +173,7 @@ export class AgentRunner {
   }
 
   private async runClaude(context: RunnerContext): Promise<RunnerResult> {
+    const wrappedPrompt = buildTodolistEngineeringPrompt(context.prompt);
     const command = process.env.AGENT_COMMAND ?? "claude";
     const args = ["--print", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
     const evidence = {
@@ -148,7 +198,7 @@ export class AgentRunner {
       try {
         child = spawn(command, args, {
           cwd: context.worktree.worktreePath,
-          env: process.env,
+          env: buildAgentCommandEnv(),
           shell: true
         });
       } catch (error) {
@@ -213,7 +263,7 @@ export class AgentRunner {
         });
       });
 
-      child.stdin.end(context.prompt);
+      child.stdin.end(wrappedPrompt);
     });
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -23,9 +24,10 @@ export class WorktreeService {
 
     const shortRun = runId.replace(/^run-/, "run-");
     const branchName = `agent/${shortRun}/main`;
-    const worktreesRoot = join(repoPath, ".agenthub", "worktrees");
+    const runRoot = join(tmpdir(), "agenthub", "runs", shortRun);
+    const worktreesRoot = join(runRoot, "worktrees");
     const worktreePath = join(worktreesRoot, `${shortRun}-main`);
-    const artifactDir = join(worktreePath, ".agenthub", "artifacts", shortRun);
+    const artifactDir = join(runRoot, "artifacts");
 
     await mkdir(worktreesRoot, { recursive: true });
     await this.removeStaleWorktree(repoPath, worktreesRoot, worktreePath);
@@ -57,8 +59,10 @@ export class WorktreeService {
       await mkdir(dirname(prepared.summaryPath), { recursive: true });
       await writeFile(prepared.summaryPath, summary, "utf8");
 
-      await this.git(prepared.worktreePath, ["add", "-A"]);
-      const hasChanges = (await this.git(prepared.worktreePath, ["status", "--porcelain"])).stdout.trim().length > 0;
+      await this.stageTargetChanges(prepared.worktreePath);
+      const hasChanges = (await this.git(prepared.worktreePath, ["diff", "--cached", "--name-only"])).stdout
+        .trim()
+        .length > 0;
       let commitSha: string | undefined;
 
       if (hasChanges) {
@@ -70,6 +74,7 @@ export class WorktreeService {
 
       await this.git(prepared.repoPath, ["checkout", "main"]);
       await this.git(prepared.repoPath, ["merge", "--no-ff", prepared.branchName, "-m", `merge ${prepared.branchName}`]);
+      await this.cleanupRunWorktree(prepared);
 
       return {
         status: "synced",
@@ -78,6 +83,11 @@ export class WorktreeService {
         summaryPath: prepared.summaryPath
       };
     } catch (error) {
+      try {
+        await this.cleanupRunWorktree(prepared);
+      } catch {
+        // Keep the original sync error so callers report TEST_SYNC_FAILED for the real failure.
+      }
       return this.fail(error);
     }
   }
@@ -97,6 +107,18 @@ export class WorktreeService {
     return execFileAsync("git", args, { cwd });
   }
 
+  private async stageTargetChanges(worktreePath: string): Promise<void> {
+    await this.git(worktreePath, ["add", "-A", "--", ".", ":(exclude).agenthub"]);
+
+    const deletedAgentHubFiles = (await this.git(worktreePath, ["ls-files", "--deleted", "--", ".agenthub"])).stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (deletedAgentHubFiles.length > 0) {
+      await this.git(worktreePath, ["rm", "--quiet", "--ignore-unmatch", "--", ...deletedAgentHubFiles]);
+    }
+  }
+
   private async removeStaleWorktree(repoPath: string, worktreesRoot: string, worktreePath: string): Promise<void> {
     const root = resolve(worktreesRoot);
     const target = resolve(worktreePath);
@@ -111,6 +133,17 @@ export class WorktreeService {
     } catch {
       await rm(worktreePath, { recursive: true, force: true });
       await this.git(repoPath, ["worktree", "prune"]);
+    }
+  }
+
+  private async cleanupRunWorktree(prepared: PreparedWorktree): Promise<void> {
+    try {
+      await this.git(prepared.repoPath, ["worktree", "remove", "--force", prepared.worktreePath]);
+    } catch {
+      await rm(prepared.worktreePath, { recursive: true, force: true });
+    } finally {
+      await this.git(prepared.repoPath, ["worktree", "prune"]);
+      await rm(dirname(prepared.worktreePath), { recursive: true, force: true });
     }
   }
 }
