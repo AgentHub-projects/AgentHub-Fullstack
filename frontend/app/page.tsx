@@ -1,15 +1,49 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { AgentEvent, SessionDto } from "@agenthub/shared";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import type {
+  AgentDto,
+  AgentEvent,
+  ConversationDto,
+  ConversationType,
+  MessageDto,
+  SessionDto,
+  TeamDto,
+  TeamMemberConfig,
+  TeamMemberRole,
+  TeamRunDto,
+} from "@agenthub/shared";
 import {
-  cancelAgentRun,
   connectSessionSocket,
   getCurrentSession,
   initialEvents,
   initialSession,
-  runSession,
+  listConversations,
+  createConversation,
+  listMessages,
+  createMessage,
+  listAgents,
+  createAgent,
+  listTeams,
+  createTeam,
+  startTeamRun,
 } from "../lib/agenthub-api";
+import { streamChat, type OpenAIMessage } from "../lib/openai-client";
+
+// antd imports
+import {
+  Button,
+  Checkbox,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Tag,
+  message as antMessage,
+} from "antd";
+import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+
+// ---- Types ----
 
 type SocketState = "connecting" | "connected" | "disconnected" | "unavailable";
 type TeamStatus = "view" | "active" | "waiting" | "done" | "error";
@@ -24,16 +58,24 @@ type TeamMember = {
   accent: string;
 };
 
-const DEFAULT_PROMPT = "帮我写一个前后端分离的架构的todolist系统。";
-
-const claudeAgent = {
-  id: "claude-code-agent",
-  name: "Claude Code",
-  provider: "Claude Code agent",
-  role: "单聊执行入口 / 真实 run 状态",
+type TeamMemberWithStatus = TeamDto["members"][number] & {
+  status: TeamStatus;
 };
 
-const teamMembers: TeamMember[] = [
+// ---- Constants ----
+
+const DEFAULT_PROMPT = "帮我写一个前后端分离的架构的todolist系统。";
+
+const TEAM_MEMBER_COLORS: Record<string, string> = {
+  orchestrator: "#5f6f52",
+  frontend: "#2563eb",
+  backend: "#0f766e",
+  review: "#a16207",
+  test: "#7c3aed",
+  merge: "#475569",
+};
+
+const defaultTeamMembers: TeamMember[] = [
   {
     id: "orchestrator-agent",
     name: "Orchestrator",
@@ -90,6 +132,8 @@ const teamMembers: TeamMember[] = [
   },
 ];
 
+// ---- Helpers ----
+
 function formatTime(value: string | number) {
   const date = typeof value === "number" ? new Date(value) : new Date(value);
   return new Intl.DateTimeFormat("zh-CN", {
@@ -120,32 +164,23 @@ function teamStatusLabel(status: TeamStatus) {
 }
 
 function stringifyPayload(payload: unknown) {
-  if (typeof payload === "string") {
-    return payload;
-  }
-
+  if (typeof payload === "string") return payload;
   return JSON.stringify(payload, null, 2);
 }
 
 function payloadSummary(event: AgentEvent) {
-  if (typeof event.payload === "string") {
-    return event.payload;
-  }
-
+  if (typeof event.payload === "string") return event.payload;
   if (event.payload && typeof event.payload === "object") {
-    const payload = event.payload as Record<string, unknown>;
-    const message = payload.message ?? payload.title ?? payload.status;
-    if (typeof message === "string") {
-      return message;
-    }
+    const p = event.payload as Record<string, unknown>;
+    const msg = p.message ?? p.title ?? p.status;
+    if (typeof msg === "string") return msg;
   }
-
   return event.type.replace(/_/g, " ");
 }
 
 function getAgentMeta(agentId: string) {
   return (
-    teamMembers.find((agent) => agent.id === agentId) ?? {
+    defaultTeamMembers.find((a) => a.id === agentId) ?? {
       id: agentId,
       name: agentId,
       shortName: agentId.slice(0, 2).toUpperCase(),
@@ -157,23 +192,73 @@ function getAgentMeta(agentId: string) {
   );
 }
 
+function agentAvatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = [
+    "#2563eb", "#0f766e", "#a16207", "#7c3aed", "#b42318",
+    "#475569", "#0891b2", "#be185d", "#4f46e5", "#15803d",
+  ];
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function agentInitials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
+
+// ---- Main Page ----
+
 export default function WorkbenchPage() {
+  // Session / Events (backward compat)
   const [session, setSession] = useState<SessionDto>(initialSession);
   const [events, setEvents] = useState<AgentEvent[]>(initialEvents);
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [notice, setNotice] = useState(
-    "尚未确认后端连接；当前不会展示 mock 成功结果。",
-  );
   const [socketState, setSocketState] = useState<SocketState>("connecting");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
-  const latestEvent = events.at(-1);
-  const isRunning = session.status === "running" || isSubmitting;
-  const hasBackendSession = session.id !== initialSession.id;
-  const visibleRunIds =
-    session.runIds.length > 0 ? session.runIds.join(", ") : "后端暂未返回 runId";
+  // Conversations
+  const [conversations, setConversations] = useState<ConversationDto[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [conversationSearch, setConversationSearch] = useState("");
+
+  // Chat
+  const [chatMessages, setChatMessages] = useState<OpenAIMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
+  const chatViewRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Agents & Teams
+  const [agents, setAgents] = useState<AgentDto[]>([]);
+  const [teams, setTeams] = useState<TeamDto[]>([]);
+
+  // Team run state
+  const [activeTeamRun, setActiveTeamRun] = useState<TeamRunDto | null>(null);
+  const [teamMembersWithStatus, setTeamMembersWithStatus] = useState<TeamMemberWithStatus[]>([]);
+
+  // Modals
+  const [showNewConvModal, setShowNewConvModal] = useState(false);
+  const [showNewAgentModal, setShowNewAgentModal] = useState(false);
+  const [showNewTeamModal, setShowNewTeamModal] = useState(false);
+
+  // Modal forms
+  const [newConvForm] = Form.useForm();
+  const [newAgentForm] = Form.useForm();
+  const [newTeamForm] = Form.useForm();
+
+  // Notice bar
+  const [notice, setNotice] = useState("");
+
+  // ---- Computed ----
+
+  const currentConversation = conversations.find((c) => c.id === currentConversationId);
+
+  const filteredConversations = useMemo(() => {
+    if (!conversationSearch.trim()) return conversations;
+    const q = conversationSearch.toLowerCase();
+    return conversations.filter((c) => c.title.toLowerCase().includes(q));
+  }, [conversations, conversationSearch]);
 
   const eventGroups = useMemo(() => {
     return events.reduce<
@@ -185,140 +270,291 @@ export default function WorkbenchPage() {
         last.events.push(event);
         return groups;
       }
-
-      groups.push({
-        agent,
-        events: [event],
-        key: `${agent.id}-${event.eventId}`,
-      });
+      groups.push({ agent, events: [event], key: `${agent.id}-${event.eventId}` });
       return groups;
     }, []);
   }, [events]);
 
-  const contractFields = useMemo(
-    () => [
-      ["GET", "/api/session/current"],
-      ["POST", "/api/session/run"],
-      ["POST", "/api/agent-runs/:runId/cancel"],
-      ["Socket", "AgentEvent / agent:event / session:event"],
-      ["SessionDto.id", session.id],
-      ["SessionDto.status", session.status],
-      ["SessionDto.agentId", session.agentId ?? claudeAgent.id],
-      ["SessionDto.output", session.output ?? "无后端输出"],
-      ["SessionDto.error", session.error ?? "无"],
-      ["SessionDto.runIds", visibleRunIds],
-      ["RunSessionResponse.run.id", currentRunId ?? "等待后端返回"],
-      ["testSync.status", session.testSync?.status ?? "pending"],
-      ["testSync.targetBranch", session.testSync?.targetBranch ?? "main"],
-      ["testSync.summaryPath", session.testSync?.summaryPath ?? "未返回"],
-      ["AgentEvent.type", latestEvent?.type ?? "无事件"],
-      ["AgentEvent.payload", latestEvent ? "已接收" : "无"],
-    ],
-    [currentRunId, latestEvent, session, visibleRunIds],
-  );
+  // ---- Auto-scroll ----
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, streamingContent]);
+
+  // ---- Data loading ----
 
   useEffect(() => {
     let ignore = false;
+    async function load() {
+      const [convRes, agentRes, teamRes, sessionRes] = await Promise.all([
+        listConversations(),
+        listAgents(),
+        listTeams(),
+        getCurrentSession(),
+      ]);
+      if (ignore) return;
 
-    async function refresh() {
-      const result = await getCurrentSession();
-      if (ignore) {
-        return;
+      if (convRes.ok) {
+        setConversations(convRes.data.items);
       }
-
-      if (result.ok) {
-        if (result.data.session) {
-          setSession(result.data.session);
-          const latestRunId = result.data.session.runIds.at(-1) ?? null;
-          setCurrentRunId((current) => current ?? latestRunId);
+      if (agentRes.ok) {
+        setAgents(agentRes.data.items);
+      }
+      if (teamRes.ok) {
+        setTeams(teamRes.data.items);
+      }
+      if (sessionRes.ok) {
+        if (sessionRes.data.session) {
+          setSession(sessionRes.data.session);
         }
-        setEvents(result.data.events);
-        setNotice("已从 GET /api/session/current 同步真实会话。");
+        setEvents(sessionRes.data.events);
+        setNotice("已从后端同步数据。");
       } else {
-        setNotice(`后端未连接：GET /api/session/current ${result.error}`);
+        setNotice("后端未连接，部分功能不可用。");
       }
     }
 
-    void refresh();
-    const timer = window.setInterval(refresh, 3500);
+    void load();
+    const timer = window.setInterval(load, 6000);
     return () => {
       ignore = true;
       window.clearInterval(timer);
     };
   }, []);
 
+  // Socket connection
   useEffect(() => {
     const disconnect = connectSessionSocket(
-      session.id,
+      currentConversationId,
       (event) => {
         setEvents((current) => {
-          if (current.some((item) => item.eventId === event.eventId)) {
-            return current;
-          }
+          if (current.some((item) => item.eventId === event.eventId)) return current;
           return [...current, event].sort((a, b) => a.seq - b.seq);
         });
       },
       (state) => setSocketState(state),
     );
-
     return disconnect;
-  }, [session.id]);
+  }, [currentConversationId]);
 
-  async function handleRun() {
-    const value = prompt.trim();
-    if (!value) {
-      setNotice("请输入口令。");
-      return;
+  // ---- Conversation handlers ----
+
+  async function handleNewConversation() {
+    try {
+      const values = await newConvForm.validateFields();
+      const type: ConversationType = values.type ?? "direct";
+      const body: { title: string; agentId?: string; type: ConversationType; teamId?: string } = {
+        title: values.title,
+        type,
+      };
+      if (type === "direct" && values.agentId) {
+        body.agentId = values.agentId;
+      }
+      if (type === "team" && values.teamId) {
+        body.teamId = values.teamId;
+      }
+
+      const result = await createConversation(body);
+      if (result.ok) {
+        const newConv = result.data;
+        setConversations((prev) => [newConv, ...prev]);
+        setCurrentConversationId(newConv.id);
+        setChatMessages([]);
+        setShowNewConvModal(false);
+        newConvForm.resetFields();
+        antMessage.success("会话已创建");
+      } else {
+        antMessage.error(`创建失败: ${result.error}`);
+      }
+    } catch {
+      // validation failed
     }
-
-    setIsSubmitting(true);
-    setCurrentRunId(null);
-    setNotice("正在调用 POST /api/session/run，等待后端返回真实 run。");
-
-    const result = await runSession(value);
-    setIsSubmitting(false);
-
-    if (result.ok) {
-      setSession(result.data.session);
-      setCurrentRunId(result.data.run.id);
-      setNotice("已启动真实 Claude Code agent run。");
-      return;
-    }
-
-    setSession((current) => ({
-      ...current,
-      status: "idle",
-      prompt: value,
-      output: undefined,
-      error: undefined,
-      updatedAt: new Date().toISOString(),
-    }));
-    setNotice(`后端未启动 run：POST /api/session/run ${result.error}`);
   }
 
-  async function handleCancel() {
-    if (!currentRunId) {
-      setNotice("暂无可取消的 runId；Cancel 需要后端返回 RunSessionResponse.run.id。");
-      return;
+  async function handleSwitchConversation(convId: string) {
+    setCurrentConversationId(convId);
+    setStreamingContent("");
+    setIsStreaming(false);
+
+    // Load messages for chat mode
+    const conv = conversations.find((c) => c.id === convId);
+    if (conv?.type === "direct") {
+      const result = await listMessages(convId);
+      if (result.ok) {
+        const msgs: OpenAIMessage[] = result.data.items.map((m: MessageDto) => ({
+          role: m.role as OpenAIMessage["role"],
+          content: m.content,
+        }));
+        setChatMessages(msgs);
+      } else {
+        setChatMessages([]);
+      }
     }
-
-    setIsCancelling(true);
-    setNotice("正在调用 POST /api/agent-runs/:runId/cancel。");
-    const result = await cancelAgentRun(currentRunId);
-    setIsCancelling(false);
-
-    if (result.ok) {
-      setSession(result.data.session);
-      setCurrentRunId(result.data.run.id);
-      setNotice("已发送真实 Cancel 请求。");
-      return;
-    }
-
-    setNotice(`Cancel 请求未完成：${result.error}`);
   }
+
+  // ---- Chat send ----
+
+  async function handleSend() {
+    const text = chatInput.trim();
+    if (!text || isStreaming) return;
+
+    // Create conversation if none selected
+    let convId = currentConversationId;
+    if (!convId) {
+      const createResult = await createConversation({
+        title: text.slice(0, 50),
+        type: "direct",
+        agentId: agents.find((a) => a.id === "claude")?.id ?? agents[0]?.id ?? "claude",
+      });
+      if (createResult.ok) {
+        convId = createResult.data.id;
+        setConversations((prev) => [createResult.data, ...prev]);
+        setCurrentConversationId(convId);
+      } else {
+        antMessage.error(`无法创建会话: ${createResult.error}`);
+        return;
+      }
+    }
+
+    // Save user message to backend
+    const userMsg: OpenAIMessage = { role: "user", content: text };
+    setChatMessages((prev) => [...prev, userMsg]);
+    setChatInput("");
+    setIsStreaming(true);
+    setStreamingContent("");
+
+    // Persist user message
+    await createMessage(convId!, { content: text }).catch(() => {
+      // non-blocking
+    });
+
+    // Get agent model
+    const conv = conversations.find((c) => c.id === convId);
+    const model = conv?.agentId ?? agents[0]?.id ?? "claude";
+
+    // Stream assistant response
+    let fullContent = "";
+    try {
+      const messages = [...chatMessages, userMsg];
+      for await (const chunk of streamChat(messages, model, convId!)) {
+        fullContent += chunk;
+        setStreamingContent(fullContent);
+      }
+      // Append final assistant message
+      setChatMessages((prev) => [...prev, { role: "assistant", content: fullContent }]);
+      setStreamingContent("");
+    } catch (err) {
+      antMessage.error(`流式请求失败: ${err instanceof Error ? err.message : String(err)}`);
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `[错误] ${err instanceof Error ? err.message : String(err)}` },
+      ]);
+      setStreamingContent("");
+    } finally {
+      setIsStreaming(false);
+    }
+  }
+
+  // ---- Agent creation ----
+
+  async function handleCreateAgent() {
+    try {
+      const values = await newAgentForm.validateFields();
+      const tags: string[] = values.tags
+        ? values.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
+        : [];
+      const body = {
+        name: values.name,
+        description: values.description ?? "",
+        provider: values.provider ?? "local-cli",
+        role: values.role ?? "",
+        tags,
+        systemPrompt: values.systemPrompt ?? "",
+      };
+      const result = await createAgent(body);
+      if (result.ok) {
+        setAgents((prev) => [...prev, result.data]);
+        setShowNewAgentModal(false);
+        newAgentForm.resetFields();
+        antMessage.success("Agent 已创建");
+      } else {
+        antMessage.error(`创建失败: ${result.error}`);
+      }
+    } catch {
+      // validation failed
+    }
+  }
+
+  // ---- Team creation ----
+
+  async function handleCreateTeam() {
+    try {
+      const values = await newTeamForm.validateFields();
+      const members: TeamMemberConfig[] = values.members ?? [];
+      const result = await createTeam({
+        name: values.name,
+        description: values.description ?? "",
+        members,
+      });
+      if (result.ok) {
+        setTeams((prev) => [...prev, result.data]);
+        setShowNewTeamModal(false);
+        newTeamForm.resetFields();
+        antMessage.success("Team 已创建");
+      } else {
+        antMessage.error(`创建失败: ${result.error}`);
+      }
+    } catch {
+      // validation failed
+    }
+  }
+
+  // ---- Team run ----
+
+  async function handleStartTeamRun(teamId: string) {
+    const text = chatInput.trim();
+    if (!text) return;
+
+    let convId = currentConversationId;
+    if (!convId) {
+      const team = teams.find((t) => t.id === teamId);
+      const createResult = await createConversation({
+        title: text.slice(0, 50),
+        type: "team",
+        teamId,
+        agentId: team?.members.find((m) => m.role === "leader")?.agentId,
+      });
+      if (createResult.ok) {
+        convId = createResult.data.id;
+        setConversations((prev) => [createResult.data, ...prev]);
+        setCurrentConversationId(convId);
+      } else {
+        antMessage.error(`无法创建会话: ${createResult.error}`);
+        return;
+      }
+    }
+
+    setChatInput("");
+    setNotice("启动团队编排运行...");
+
+    const result = await startTeamRun(teamId, { prompt: text, conversationId: convId! });
+    if (result.ok) {
+      setActiveTeamRun(result.data);
+      setNotice("团队编排已启动");
+      antMessage.success("团队任务已分发");
+    } else {
+      setNotice(`团队启动失败: ${result.error}`);
+      antMessage.error(`启动失败: ${result.error}`);
+    }
+  }
+
+  // ---- Render ----
+
+  const convType = Form.useWatch("type", newConvForm) ?? "direct";
 
   return (
     <main className="workspaceShell">
+      {/* ---- Icon Rail ---- */}
       <nav className="iconRail" aria-label="主导航">
         <div className="brandMark">A</div>
         <button className="railIcon active" type="button" title="Workbench">
@@ -333,227 +569,347 @@ export default function WorkbenchPage() {
         <span className={`railSocket ${socketState}`} title={socketState} />
       </nav>
 
+      {/* ---- Sidebar ---- */}
       <aside className="sessionColumn" aria-label="会话与 Agent">
         <section className="columnTop">
           <div>
             <strong>AgentHub</strong>
-            <span>Lobe-like workbench</span>
+            <span>Multi-agent workbench</span>
           </div>
           <span className={`statusPill ${session.status}`}>
             {statusLabel(session.status)}
           </span>
         </section>
 
+        {/* Conversations */}
         <section className="panelBlock">
           <div className="sectionHeader">
-            <span>Sessions</span>
-            <small>{hasBackendSession ? "API" : "offline"}</small>
+            <span>Conversations</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setShowNewConvModal(true)}
+              title="新建会话"
+            />
           </div>
-          <button className="sessionCard active" type="button">
-            <span>{session.title ?? "Current Session"}</span>
-            <small>{session.id}</small>
-          </button>
-          <button className="sessionCard muted" type="button">
-            <span>Agent team 状态视图</span>
-            <small>只展示前端状态，不伪造后端多 agent 调度</small>
-          </button>
-        </section>
-
-        <section className="panelBlock">
-          <div className="sectionHeader">
-            <span>Single Chat Agent</span>
-            <small>{claudeAgent.provider}</small>
-          </div>
-          <div className="agentCard selected">
-            <span className="agentAvatar">CC</span>
-            <div>
-              <strong>{claudeAgent.name}</strong>
-              <small>{claudeAgent.role}</small>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索会话..."
+            size="small"
+            value={conversationSearch}
+            onChange={(e) => setConversationSearch(e.target.value)}
+            allowClear
+            style={{ marginBottom: 4 }}
+          />
+          {filteredConversations.length === 0 ? (
+            <div className="emptyEvents" style={{ padding: "8px 0" }}>
+              <span>暂无会话，点击 + 创建</span>
             </div>
-          </div>
+          ) : (
+            filteredConversations.map((conv) => (
+              <button
+                key={conv.id}
+                className={`sessionCard ${conv.id === currentConversationId ? "active" : ""}`}
+                type="button"
+                onClick={() => handleSwitchConversation(conv.id)}
+              >
+                <span>{conv.title}</span>
+                <small>
+                  {conv.type === "team" ? "Team" : "Direct"} · {conv.messageCount} msgs
+                </small>
+              </button>
+            ))
+          )}
         </section>
 
+        {/* Agents */}
+        <section className="panelBlock">
+          <div className="sectionHeader">
+            <span>Agents</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setShowNewAgentModal(true)}
+              title="新建 Agent"
+            />
+          </div>
+          {agents.length === 0 ? (
+            <div className="agentCard">
+              <span className="agentAvatar">CC</span>
+              <div>
+                <strong>Claude Code</strong>
+                <small>默认 Agent</small>
+              </div>
+            </div>
+          ) : (
+            agents.map((agent) => (
+              <div className="agentCard" key={agent.id}>
+                <span
+                  className="agentAvatar"
+                  style={{ background: agentAvatarColor(agent.name) }}
+                >
+                  {agentInitials(agent.name)}
+                </span>
+                <div>
+                  <strong>{agent.name}</strong>
+                  <small>{agent.role || agent.description}</small>
+                  {agent.tags && agent.tags.length > 0 && (
+                    <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {agent.tags.slice(0, 3).map((tag) => (
+                        <Tag key={tag} color="blue" style={{ fontSize: 10, margin: 0 }}>
+                          {tag}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        {/* Teams */}
         <section className="panelBlock teamBlock">
           <div className="sectionHeader">
-            <span>Group Status</span>
-            <small>frontend view</small>
+            <span>Teams</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setShowNewTeamModal(true)}
+              title="新建 Team"
+            />
           </div>
-          {teamMembers.map((agent) => (
-            <div className="teamMember" key={agent.id}>
-              <span
-                className="teamAvatar"
-                style={{ "--agent-accent": agent.accent } as CSSProperties}
-              >
-                {agent.shortName}
-              </span>
-              <div>
-                <strong>{agent.name}</strong>
-                <small>{agent.role}</small>
-              </div>
-              <i className={agent.status}>{teamStatusLabel(agent.status)}</i>
+          {teams.length === 0 ? (
+            <div style={{ padding: "8px 0", color: "var(--muted)", fontSize: 13 }}>
+              暂无团队，点击 + 创建
             </div>
-          ))}
+          ) : (
+            teams.map((team) => (
+              <div className="teamMember" key={team.id}>
+                <span
+                  className="teamAvatar"
+                  style={{ "--agent-accent": agentAvatarColor(team.name) } as CSSProperties}
+                >
+                  {agentInitials(team.name)}
+                </span>
+                <div>
+                  <strong>{team.name}</strong>
+                  <small>{team.description || `${team.members.length} 名成员`}</small>
+                </div>
+                <button
+                  className="miniRunBtn"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStartTeamRun(team.id);
+                  }}
+                  title="启动团队运行"
+                >
+                  Run
+                </button>
+              </div>
+            ))
+          )}
+          {activeTeamRun && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
+              <Tag color="processing">团队运行中: {activeTeamRun.status}</Tag>
+            </div>
+          )}
         </section>
       </aside>
 
-      <section className="chatWorkbench" aria-label="单聊与事件流">
-        <header className="chatHeader">
-          <div>
-            <span className="eyebrow">Claude Code agent / Session {session.id}</span>
-            <h1>{session.prompt ?? DEFAULT_PROMPT}</h1>
-          </div>
-          <div className="headerBadges">
-            <span className={`socketBadge ${socketState}`}>
-              Socket {socketState}
-            </span>
-            <span className={`runBadge ${session.status}`}>
-              {isSubmitting ? "请求中" : statusLabel(session.status)}
-            </span>
-            <time>{formatTime(session.updatedAt)}</time>
-          </div>
-        </header>
-
-        <div className="threadPane">
-          <article className="messageRow userMessage">
-            <div className="messageBubble">
-              <span className="messageMeta">User Prompt</span>
-              <p>{session.prompt ?? prompt}</p>
+      {/* ---- Chat Workbench ---- */}
+      <section className="chatWorkbench" aria-label="会话区域">
+        {!currentConversationId ? (
+          /* Welcome Screen */
+          <div className="welcomeScreen">
+            <div className="welcomeContent">
+              <h2>AgentHub Workbench</h2>
+              <p>IM 风格多智能体协作平台</p>
+              <div className="welcomeCards">
+                <div className="welcomeCard">
+                  <strong>快速开始</strong>
+                  <span>点击左侧 + 创建新会话，或选择已有会话开始对话</span>
+                </div>
+                <div className="welcomeCard">
+                  <strong>可用 Agents</strong>
+                  <span>{agents.length > 0 ? `${agents.length} 个 Agent 就绪` : "默认 Claude Code Agent"}</span>
+                </div>
+                <div className="welcomeCard">
+                  <strong>可用 Teams</strong>
+                  <span>{teams.length > 0 ? `${teams.length} 个 Team 就绪` : "暂无团队"}</span>
+                </div>
+              </div>
             </div>
-          </article>
-
-          <article className={`messageRow assistantMessage ${session.status}`}>
-            <div className="assistantAvatar">CC</div>
-            <div className="messageBubble">
-              <span className="messageMeta">
-                Claude Code agent · {isSubmitting ? "请求中" : statusLabel(session.status)}
-              </span>
-              {session.output ? (
-                <p>{session.output}</p>
-              ) : (
-                <p className="emptyCopy">
-                  {isSubmitting
-                    ? "请求已发出，等待后端创建 run 与事件流。"
-                    : "暂无后端输出。连接后端并启动 run 后，这里只展示真实返回内容。"}
-                </p>
-              )}
-              {session.error ? <pre>{session.error}</pre> : null}
-            </div>
-          </article>
-
-          <section className="groupThread" aria-label="群聊事件流">
-            <div className="groupTitle">
-              <span>Group Event Stream</span>
-              <small>真实 Socket AgentEvent；无事件时为空态</small>
-            </div>
-            {eventGroups.length > 0 ? (
-              eventGroups.map((group) => (
-                <article className="agentEventGroup" key={group.key}>
-                  <div
-                    className="eventAgentAvatar"
-                    style={{ "--agent-accent": group.agent.accent } as CSSProperties}
+            {/* Composer for quick start */}
+            <footer className="composer">
+              <textarea
+                aria-label="输入消息"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="输入消息，按 Enter 发送..."
+              />
+              <div className="composerFooter">
+                <span>{notice || "选择或创建会话开始对话"}</span>
+                <div className="runControls">
+                  <Button
+                    type="primary"
+                    loading={isStreaming}
+                    onClick={handleSend}
+                    disabled={!chatInput.trim() || isStreaming}
                   >
-                    {group.agent.shortName}
+                    发送
+                  </Button>
+                </div>
+              </div>
+            </footer>
+          </div>
+        ) : (
+          <>
+            {/* Chat Header */}
+            <header className="chatHeader">
+              <div>
+                <span className="eyebrow">
+                  {currentConversation?.type === "team" ? "Team Chat" : "Direct Chat"} ·{" "}
+                  {currentConversation?.agentId ?? "Agent"}
+                </span>
+                <h1>{currentConversation?.title ?? "会话"}</h1>
+              </div>
+              <div className="headerBadges">
+                <span className={`socketBadge ${socketState}`}>Socket {socketState}</span>
+                <span className={`runBadge ${session.status}`}>
+                  {isStreaming ? "流式中" : statusLabel(session.status)}
+                </span>
+                {currentConversation?.createdAt && (
+                  <time>{formatTime(currentConversation.createdAt)}</time>
+                )}
+              </div>
+            </header>
+
+            {/* Chat Messages */}
+            <div className="threadPane" ref={chatViewRef}>
+              {chatMessages.length === 0 && !streamingContent && (
+                <div className="emptyEvents">
+                  <strong>开始对话</strong>
+                  <span>在下方输入消息，与 Agent 开始对话。</span>
+                </div>
+              )}
+              {chatMessages.map((msg, idx) => (
+                <article
+                  key={idx}
+                  className={`messageRow ${msg.role === "user" ? "userMessage" : "assistantMessage"}`}
+                >
+                  {msg.role === "assistant" && <div className="assistantAvatar">AI</div>}
+                  <div className="messageBubble">
+                    <span className="messageMeta">
+                      {msg.role === "user" ? "You" : "Assistant"}
+                    </span>
+                    <p>{msg.content}</p>
                   </div>
-                  <div className="eventStack">
-                    <div className="eventAgentHeader">
-                      <strong>{group.agent.name}</strong>
-                      <span>{group.agent.provider}</span>
-                    </div>
-                    {group.events.map((event) => (
-                      <details className="eventCard" key={event.eventId} open>
-                        <summary>
-                          <span>{event.type}</span>
-                          <small>
-                            seq {event.seq} · {formatTime(event.ts)}
-                          </small>
-                        </summary>
-                        <p>{payloadSummary(event)}</p>
-                        <pre>{stringifyPayload(event.payload)}</pre>
-                      </details>
-                    ))}
+                  {msg.role === "user" && <div className="assistantAvatar" style={{ background: "#2563eb" }}>U</div>}
+                </article>
+              ))}
+              {streamingContent && (
+                <article className="messageRow assistantMessage running">
+                  <div className="assistantAvatar">AI</div>
+                  <div className="messageBubble">
+                    <span className="messageMeta">Assistant · 流式输出中</span>
+                    <p>{streamingContent}</p>
                   </div>
                 </article>
-              ))
-            ) : (
-              <div className="emptyEvents">
-                <strong>暂无 AgentEvent</strong>
-                <span>
-                  群聊区域只渲染后端 Socket 或 GET /api/session/current 返回的真实事件。
-                </span>
-              </div>
-            )}
-          </section>
-        </div>
-
-        <footer className="composer">
-          <textarea
-            aria-label="默认任务口令"
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="输入任务口令..."
-            value={prompt}
-          />
-          <div className="composerFooter">
-            <span>{notice}</span>
-            <div className="runControls">
-              <button
-                className="secondary"
-                disabled={!isRunning || !currentRunId || isCancelling}
-                onClick={handleCancel}
-                type="button"
-                title={currentRunId ? "Cancel current run" : "等待 runId"}
-              >
-                {isCancelling ? "Cancelling" : "Cancel"}
-              </button>
-              <button disabled={isSubmitting} onClick={handleRun} type="button">
-                {isSubmitting ? "Running" : "Run"}
-              </button>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-          </div>
-        </footer>
+
+            {/* Composer */}
+            <footer className="composer">
+              <textarea
+                aria-label="输入消息"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="输入消息，按 Enter 发送..."
+                disabled={isStreaming}
+              />
+              <div className="composerFooter">
+                <span>{notice || (isStreaming ? "Agent 正在回复..." : "Ready")}</span>
+                <div className="runControls">
+                  <Button
+                    type="primary"
+                    loading={isStreaming}
+                    onClick={handleSend}
+                    disabled={!chatInput.trim() || isStreaming}
+                  >
+                    发送
+                  </Button>
+                </div>
+              </div>
+            </footer>
+          </>
+        )}
       </section>
 
+      {/* ---- Inspector Panel ---- */}
       <aside className="inspectorPanel" aria-label="运行检查器与 artifacts">
         <section className="inspectorSection heroStatus">
           <div className="sectionHeader">
             <span>Run Inspector</span>
-            <small>{hasBackendSession ? "真实会话" : "离线空态"}</small>
+            <small>{session.id !== initialSession.id ? "真实会话" : "离线空态"}</small>
           </div>
-          <strong>{isSubmitting ? "请求中" : statusLabel(session.status)}</strong>
-          <p>{currentRunId ?? "等待 RunSessionResponse.run.id"}</p>
+          <strong>{isStreaming ? "流式中" : statusLabel(session.status)}</strong>
+          <p>Conversation: {currentConversationId ?? "未选择"}</p>
         </section>
 
         <section className="inspectorSection">
           <div className="sectionHeader">
             <span>Contract Fields</span>
-            <small>{contractFields.length}</small>
+            <small>会话数据</small>
           </div>
           <dl className="kvList">
-            {contractFields.map(([key, value]) => (
-              <div key={key}>
-                <dt>{key}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
+            <div><dt>Session ID</dt><dd>{session.id}</dd></div>
+            <div><dt>Status</dt><dd>{session.status}</dd></div>
+            <div><dt>Agent ID</dt><dd>{session.agentId ?? "N/A"}</dd></div>
+            <div><dt>Conversation ID</dt><dd>{currentConversationId ?? "N/A"}</dd></div>
+            <div><dt>Events</dt><dd>{events.length}</dd></div>
+            <div><dt>Socket</dt><dd>{socketState}</dd></div>
           </dl>
         </section>
 
         <section className="inspectorSection">
           <div className="sectionHeader">
             <span>Artifacts</span>
-            <small>API data only</small>
+            <small>数据快照</small>
           </div>
           <div className="artifactList">
             <div>
-              <span>Events</span>
-              <strong>{events.length} AgentEvent records</strong>
+              <span>Conversations</span>
+              <strong>{conversations.length} 个会话</strong>
             </div>
             <div>
-              <span>Summary</span>
-              <strong>{session.testSync?.summaryPath ?? "后端未返回 summaryPath"}</strong>
+              <span>Agents</span>
+              <strong>{agents.length} 个 Agent</strong>
             </div>
             <div>
-              <span>Target branch</span>
-              <strong>{session.testSync?.targetBranch ?? "main"}</strong>
+              <span>Teams</span>
+              <strong>{teams.length} 个 Team</strong>
+            </div>
+            <div>
+              <span>Messages</span>
+              <strong>{chatMessages.length} 条消息</strong>
             </div>
           </div>
         </section>
@@ -561,13 +917,240 @@ export default function WorkbenchPage() {
         <section className="inspectorSection notePanel">
           <div className="sectionHeader">
             <span>Boundary</span>
-            <small>no mock success</small>
+            <small>no mock</small>
           </div>
           <p>
-            群聊列表是前端状态视图；实际运行、取消和事件内容均来自后端 API 或 Socket。
+            会话列表、消息记录、Agent 和 Team 管理均来自后端 API。IM 风格聊天支持流式输出与历史回放。
           </p>
         </section>
       </aside>
+
+      {/* ---- New Conversation Modal ---- */}
+      <Modal
+        title="新建会话"
+        open={showNewConvModal}
+        onOk={handleNewConversation}
+        onCancel={() => {
+          setShowNewConvModal(false);
+          newConvForm.resetFields();
+        }}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form form={newConvForm} layout="vertical" initialValues={{ type: "direct" }}>
+          <Form.Item
+            name="title"
+            label="会话标题"
+            rules={[{ required: true, message: "请输入会话标题" }]}
+          >
+            <Input placeholder="输入会话标题" />
+          </Form.Item>
+          <Form.Item name="type" label="会话类型" initialValue="direct">
+            <Select
+              onChange={(value) => {
+                newConvForm.setFieldsValue({ agentId: undefined, teamId: undefined });
+              }}
+            >
+              <Select.Option value="direct">Direct（单聊）</Select.Option>
+              <Select.Option value="team">Team（团队）</Select.Option>
+            </Select>
+          </Form.Item>
+          {convType === "direct" ? (
+            <Form.Item
+              name="agentId"
+              label="选择 Agent"
+              rules={[{ required: true, message: "请选择 Agent" }]}
+            >
+              <Select placeholder="选择 Agent">
+                {agents.map((a) => (
+                  <Select.Option key={a.id} value={a.id}>
+                    {a.name} ({a.role})
+                  </Select.Option>
+                ))}
+                {agents.length === 0 && <Select.Option value="claude">Claude Code</Select.Option>}
+              </Select>
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="teamId"
+              label="选择 Team"
+              rules={[{ required: true, message: "请选择 Team" }]}
+            >
+              <Select placeholder="选择 Team">
+                {teams.map((t) => (
+                  <Select.Option key={t.id} value={t.id}>
+                    {t.name} ({t.members.length} members)
+                  </Select.Option>
+                ))}
+                {teams.length === 0 && (
+                  <Select.Option value="" disabled>
+                    暂无 Team，请先创建
+                  </Select.Option>
+                )}
+              </Select>
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
+
+      {/* ---- New Agent Modal ---- */}
+      <Modal
+        title="新建 Agent"
+        open={showNewAgentModal}
+        onOk={handleCreateAgent}
+        onCancel={() => {
+          setShowNewAgentModal(false);
+          newAgentForm.resetFields();
+        }}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+        width={520}
+      >
+        <Form form={newAgentForm} layout="vertical" initialValues={{ provider: "local-cli" }}>
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: "请输入 Agent 名称" }]}
+          >
+            <Input placeholder="e.g. Frontend Builder" />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input placeholder="简要描述 Agent 功能" />
+          </Form.Item>
+          <Form.Item
+            name="provider"
+            label="Provider"
+            rules={[{ required: true, message: "请输入 Provider" }]}
+          >
+            <Select>
+              <Select.Option value="local-cli">local-cli</Select.Option>
+              <Select.Option value="openai">openai</Select.Option>
+              <Select.Option value="anthropic">anthropic</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="role"
+            label="角色"
+            rules={[{ required: true, message: "请输入角色描述" }]}
+          >
+            <Input placeholder="e.g. 前端开发专家" />
+          </Form.Item>
+          <Form.Item name="tags" label="标签（逗号分隔）">
+            <Input placeholder="e.g. frontend, react, ui" />
+          </Form.Item>
+          <Form.Item name="systemPrompt" label="System Prompt">
+            <Input.TextArea rows={4} placeholder="系统提示词..." />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---- New Team Modal ---- */}
+      <Modal
+        title="新建 Team"
+        open={showNewTeamModal}
+        onOk={handleCreateTeam}
+        onCancel={() => {
+          setShowNewTeamModal(false);
+          newTeamForm.resetFields();
+        }}
+        okText="创建"
+        cancelText="取消"
+        destroyOnClose
+        width={560}
+      >
+        <Form form={newTeamForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="Team 名称"
+            rules={[{ required: true, message: "请输入 Team 名称" }]}
+          >
+            <Input placeholder="e.g. Full-Stack Team" />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input placeholder="简要描述 Team 用途" />
+          </Form.Item>
+          <Form.Item
+            name="members"
+            label="成员选择"
+            rules={[{ required: true, message: "请至少选择一名成员", type: "array", min: 1 }]}
+          >
+            <Checkbox.Group style={{ width: "100%" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {agents.length === 0 ? (
+                  <span style={{ color: "var(--muted)", fontSize: 13 }}>
+                    暂无 Agent，请先创建 Agent
+                  </span>
+                ) : (
+                  agents.map((agent) => {
+                    const fieldName = `memberRole_${agent.id}`;
+                    return (
+                      <div
+                        key={agent.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "8px 12px",
+                          border: "1px solid var(--line)",
+                          borderRadius: 8,
+                          background: "var(--surface)",
+                        }}
+                      >
+                        <Checkbox
+                          value={agent.id}
+                          onChange={(e) => {
+                            const currentMembers: TeamMemberConfig[] =
+                              newTeamForm.getFieldValue("members") ?? [];
+                            if (e.target.checked) {
+                              const role: TeamMemberRole =
+                                newTeamForm.getFieldValue(fieldName) ?? "worker";
+                              newTeamForm.setFieldsValue({
+                                members: [...currentMembers, { agentId: agent.id, role }],
+                              });
+                            } else {
+                              newTeamForm.setFieldsValue({
+                                members: currentMembers.filter(
+                                  (m: TeamMemberConfig) => m.agentId !== agent.id,
+                                ),
+                              });
+                            }
+                          }}
+                        />
+                        <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>
+                          {agent.name}
+                        </span>
+                        <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                          {agent.role}
+                        </span>
+                        <Select
+                          size="small"
+                          defaultValue="worker"
+                          style={{ width: 100 }}
+                          onChange={(role: TeamMemberRole) => {
+                            newTeamForm.setFieldValue(fieldName, role);
+                            const currentMembers: TeamMemberConfig[] =
+                              newTeamForm.getFieldValue("members") ?? [];
+                            newTeamForm.setFieldsValue({
+                              members: currentMembers.map((m: TeamMemberConfig) =>
+                                m.agentId === agent.id ? { ...m, role } : m,
+                              ),
+                            });
+                          }}
+                        >
+                          <Select.Option value="leader">Leader</Select.Option>
+                          <Select.Option value="worker">Worker</Select.Option>
+                        </Select>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </Checkbox.Group>
+          </Form.Item>
+        </Form>
+      </Modal>
     </main>
   );
 }

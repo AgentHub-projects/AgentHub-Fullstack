@@ -1,9 +1,18 @@
 import type {
+  AgentDto,
   AgentEvent,
   AgentRun,
   ApiErrorDto,
+  ConversationDto,
+  CreateConversationRequest,
+  CreateMessageRequest,
+  CreateTeamRequest,
+  MessageDto,
   RunSessionRequest,
   SessionDto,
+  TeamDto,
+  TeamRunDto,
+  StartTeamRunRequest,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
 
@@ -39,6 +48,7 @@ export const initialSession: SessionDto = {
   status: "idle",
   agentId: "claude-code-agent",
   runIds: [],
+  activeRunIds: [],
   prompt: "帮我写一个前后端分离的架构的todolist系统。",
   output: undefined,
   createdAt: now,
@@ -81,10 +91,15 @@ async function requestJson<T>(
   }
 }
 
+// ---- Session ----
+
 export async function runSession(
   prompt: string,
+  conversationId?: string,
+  mode?: "single" | "team",
+  teamId?: string,
 ): Promise<ApiResult<RunSessionResponse>> {
-  const body: RunSessionRequest = { prompt };
+  const body: RunSessionRequest = { prompt, conversationId, mode, teamId };
   return requestJson<RunSessionResponse>("/api/session/run", {
     method: "POST",
     body: JSON.stringify(body),
@@ -132,6 +147,102 @@ export async function cancelAgentRun(
     },
   );
 }
+
+// ---- Conversations ----
+
+export async function listConversations(): Promise<ApiResult<{ items: ConversationDto[] }>> {
+  return requestJson<{ items: ConversationDto[] }>("/api/conversations");
+}
+
+export async function createConversation(
+  body: CreateConversationRequest,
+): Promise<ApiResult<ConversationDto>> {
+  return requestJson<ConversationDto>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getConversation(id: string): Promise<ApiResult<ConversationDto>> {
+  return requestJson<ConversationDto>(`/api/conversations/${encodeURIComponent(id)}`);
+}
+
+export async function deleteConversation(id: string): Promise<ApiResult<{ ok: boolean }>> {
+  return requestJson<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listMessages(
+  conversationId: string,
+): Promise<ApiResult<{ conversationId: string; items: MessageDto[] }>> {
+  return requestJson<{ conversationId: string; items: MessageDto[] }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+  );
+}
+
+export async function createMessage(
+  conversationId: string,
+  body: CreateMessageRequest,
+): Promise<ApiResult<MessageDto>> {
+  return requestJson<MessageDto>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+// ---- Agents ----
+
+export async function listAgents(): Promise<ApiResult<{ items: AgentDto[] }>> {
+  return requestJson<{ items: AgentDto[] }>("/api/agents");
+}
+
+export async function createAgent(
+  body: Omit<AgentDto, "id" | "createdAt">,
+): Promise<ApiResult<AgentDto>> {
+  return requestJson<AgentDto>("/api/agents", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getAgent(id: string): Promise<ApiResult<AgentDto>> {
+  return requestJson<AgentDto>(`/api/agents/${encodeURIComponent(id)}`);
+}
+
+// ---- Teams ----
+
+export async function listTeams(): Promise<ApiResult<{ items: TeamDto[] }>> {
+  return requestJson<{ items: TeamDto[] }>("/api/teams");
+}
+
+export async function createTeam(
+  body: CreateTeamRequest,
+): Promise<ApiResult<TeamDto>> {
+  return requestJson<TeamDto>("/api/teams", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getTeam(id: string): Promise<ApiResult<TeamDto>> {
+  return requestJson<TeamDto>(`/api/teams/${encodeURIComponent(id)}`);
+}
+
+export async function startTeamRun(
+  teamId: string,
+  body: StartTeamRunRequest,
+): Promise<ApiResult<TeamRunDto>> {
+  return requestJson<TeamRunDto>(`/api/teams/${encodeURIComponent(teamId)}/run`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ---- Socket ----
 
 export function joinConversation(
   socket: Socket | null,

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AgentHub Workbench",
-  description: "AgentHub P0 session workspace",
+  description: "AgentHub multi-agent collaboration platform",
 };
 
 export default function RootLayout({
