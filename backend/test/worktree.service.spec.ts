@@ -67,6 +67,27 @@ describe("WorktreeService", () => {
     expect(trackedAgentHubFiles).toBe("");
   });
 
+  it("removes legacy target repo .agenthub worktrees on complete without touching other .agenthub content", async () => {
+    repoPath = await mkdtemp(join(tmpdir(), "agenthub-legacy-worktrees-"));
+    await initRepo(repoPath);
+    await mkdir(join(repoPath, ".agenthub", "worktrees", "legacy-empty"), { recursive: true });
+    await mkdir(join(repoPath, ".agenthub", "kept"), { recursive: true });
+    await writeFile(join(repoPath, ".agenthub", "kept", "note.txt"), "keep\n", "utf8");
+
+    const service = new WorktreeService();
+    const prepared = await service.prepare("run-904", repoPath);
+    await expect(access(join(repoPath, ".agenthub", "worktrees"))).rejects.toThrow();
+
+    await mkdir(join(repoPath, ".agenthub", "worktrees", "legacy-after-prepare"), { recursive: true });
+    await writeFile(join(repoPath, ".agenthub", "worktrees", "legacy-after-prepare", "old.txt"), "old\n", "utf8");
+    await writeFile(join(prepared.worktreePath, "generated.txt"), "hello\n", "utf8");
+    const result = await service.complete(prepared, "# Summary\n");
+
+    expect(result.status).toBe("synced");
+    await expect(access(join(repoPath, ".agenthub", "worktrees"))).rejects.toThrow();
+    await expect(readFile(join(repoPath, ".agenthub", "kept", "note.txt"), "utf8")).resolves.toBe("keep\n");
+  });
+
   it("syncs MOCK_AGENT generated backend and frontend files back to main", async () => {
     repoPath = await mkdtemp(join(tmpdir(), "agenthub-mock-"));
     await initRepo(repoPath);

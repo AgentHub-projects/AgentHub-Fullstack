@@ -21,6 +21,7 @@ export class WorktreeService {
   async prepare(runId: string, requestedRepoPath?: string): Promise<PreparedWorktree> {
     const repoPath = requestedRepoPath ?? process.env.AGENTHUB_TEST_REPO_PATH ?? "D:\\agent\\AgentHub-Test";
     await this.git(repoPath, ["rev-parse", "--is-inside-work-tree"]);
+    await this.cleanupLegacyRepoWorktrees(repoPath);
 
     const shortRun = runId.replace(/^run-/, "run-");
     const branchName = `agent/${shortRun}/main`;
@@ -74,6 +75,7 @@ export class WorktreeService {
 
       await this.git(prepared.repoPath, ["checkout", "main"]);
       await this.git(prepared.repoPath, ["merge", "--no-ff", prepared.branchName, "-m", `merge ${prepared.branchName}`]);
+      await this.cleanupLegacyRepoWorktrees(prepared.repoPath);
       await this.cleanupRunWorktree(prepared);
 
       return {
@@ -117,6 +119,17 @@ export class WorktreeService {
     if (deletedAgentHubFiles.length > 0) {
       await this.git(worktreePath, ["rm", "--quiet", "--ignore-unmatch", "--", ...deletedAgentHubFiles]);
     }
+  }
+
+  private async cleanupLegacyRepoWorktrees(repoPath: string): Promise<void> {
+    const repoRoot = resolve(repoPath);
+    const target = resolve(repoRoot, ".agenthub", "worktrees");
+    const relativeTarget = relative(repoRoot, target);
+    if (relativeTarget !== join(".agenthub", "worktrees") || isAbsolute(relativeTarget)) {
+      throw new Error(`Refusing to remove legacy worktrees outside ${repoRoot}: ${target}`);
+    }
+
+    await rm(target, { recursive: true, force: true });
   }
 
   private async removeStaleWorktree(repoPath: string, worktreesRoot: string, worktreePath: string): Promise<void> {
