@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventsGateway } from "../src/realtime/agent-events.gateway";
+import { AgentEventsGateway, toFrontendAgentEvent } from "../src/realtime/agent-events.gateway";
 
 describe("AgentEventsGateway", () => {
-  it("emits frontend-compatible agent:event messages to conversation rooms", () => {
+  it("maps text_delta to frontend-safe public_text messages", () => {
     const emit = vi.fn();
     const to = vi.fn(() => ({ emit }));
     const gateway = new AgentEventsGateway();
@@ -23,8 +23,33 @@ describe("AgentEventsGateway", () => {
     expect(emit).toHaveBeenCalledWith(
       "agent:event",
       expect.objectContaining({
+        type: "public_text",
         runId: "run-001"
       })
     );
+  });
+
+  it("does not expose Claude tool or thinking events to the frontend", () => {
+    expect(toFrontendAgentEvent({
+      eventId: "event-002",
+      type: "tool_use",
+      runId: "run-001",
+      conversationId: "session-current",
+      agentId: "claude",
+      payload: { toolName: "Bash" },
+      seq: 2,
+      ts: 2
+    })).toBeNull();
+
+    expect(toFrontendAgentEvent({
+      eventId: "event-003",
+      type: "agent_thinking",
+      runId: "run-001",
+      conversationId: "session-current",
+      agentId: "claude",
+      payload: { thinking: "internal" },
+      seq: 3,
+      ts: 3
+    })).toBeNull();
   });
 });

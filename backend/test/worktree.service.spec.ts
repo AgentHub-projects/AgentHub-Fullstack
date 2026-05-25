@@ -67,6 +67,28 @@ describe("WorktreeService", () => {
     expect(trackedAgentHubFiles).toBe("");
   });
 
+  it("does not sync generated dependency or build directories back to main", async () => {
+    repoPath = await mkdtemp(join(tmpdir(), "agenthub-ignore-generated-"));
+    await initRepo(repoPath);
+
+    const service = new WorktreeService();
+    const prepared = await service.prepare("run-905", repoPath);
+    await mkdir(join(prepared.worktreePath, "backend", "node_modules", "leftpad"), { recursive: true });
+    await mkdir(join(prepared.worktreePath, "frontend", "dist"), { recursive: true });
+    await writeFile(join(prepared.worktreePath, "backend", "node_modules", "leftpad", "index.js"), "module.exports = 1;\n", "utf8");
+    await writeFile(join(prepared.worktreePath, "frontend", "dist", "index.html"), "<div>built</div>\n", "utf8");
+    await writeFile(join(prepared.worktreePath, "backend", "src.ts"), "export const ok = true;\n", "utf8");
+    const preview = await service.getDiffPreview(prepared);
+    const result = await service.complete(prepared, "# Summary\n");
+
+    expect(preview.changedFiles).toContain("backend/src.ts");
+    expect(preview.changedFiles.some((file) => file.includes("node_modules") || file.includes("dist"))).toBe(false);
+    expect(result.status).toBe("synced");
+    await expect(readFile(join(repoPath, "backend", "src.ts"), "utf8")).resolves.toContain("ok");
+    await expect(access(join(repoPath, "backend", "node_modules"))).rejects.toThrow();
+    await expect(access(join(repoPath, "frontend", "dist"))).rejects.toThrow();
+  });
+
   it("removes legacy target repo .agenthub worktrees on complete without touching other .agenthub content", async () => {
     repoPath = await mkdtemp(join(tmpdir(), "agenthub-legacy-worktrees-"));
     await initRepo(repoPath);

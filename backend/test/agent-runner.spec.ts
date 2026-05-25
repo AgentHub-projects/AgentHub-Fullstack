@@ -126,7 +126,7 @@ describe("AgentRunner claude cli path", () => {
         })
       );
       expect(spawnMock.mock.calls[0]?.[2]?.env).not.toBe(process.env);
-      expect(child.stdin.end).toHaveBeenCalledWith(expect.stringContaining("Express + TypeScript"));
+      expect(child.stdin.end).toHaveBeenCalledWith(expect.stringContaining("用户原始需求：\nimplement this"));
 
       child.stdout.emit("data", Buffer.from("done\n", "utf8"));
       child.emit("close", 0);
