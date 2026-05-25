@@ -26,6 +26,7 @@ import {
   listTeams,
   createTeam,
   startTeamRun,
+  getTeamRun,
 } from "../lib/agenthub-api";
 import { streamChat, type OpenAIMessage } from "../lib/openai-client";
 
@@ -37,6 +38,7 @@ import {
   Input,
   Modal,
   Select,
+  Space,
   Tag,
   message as antMessage,
 } from "antd";
@@ -330,11 +332,27 @@ export default function WorkbenchPage() {
           if (current.some((item) => item.eventId === event.eventId)) return current;
           return [...current, event].sort((a, b) => a.seq - b.seq);
         });
+        // If team event, refresh team run
+        if (event.teamRunId && activeTeamRun?.id === event.teamRunId) {
+          getTeamRun(event.teamRunId!).then((r) => {
+            if (r.ok) setActiveTeamRun(r.data);
+          });
+        }
       },
       (state) => setSocketState(state),
     );
     return disconnect;
-  }, [currentConversationId]);
+  }, [currentConversationId, activeTeamRun?.id]);
+
+  // Poll team run status
+  useEffect(() => {
+    if (!activeTeamRun || activeTeamRun.status === "succeeded" || activeTeamRun.status === "failed") return;
+    const timer = window.setInterval(async () => {
+      const result = await getTeamRun(activeTeamRun.id);
+      if (result.ok) setActiveTeamRun(result.data);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeTeamRun?.id, activeTeamRun?.status]);
 
   // ---- Conversation handlers ----
 
@@ -794,37 +812,175 @@ export default function WorkbenchPage() {
               </div>
             </header>
 
-            {/* Chat Messages */}
+            {/* Chat Messages or Team Run View */}
             <div className="threadPane" ref={chatViewRef}>
-              {chatMessages.length === 0 && !streamingContent && (
-                <div className="emptyEvents">
-                  <strong>开始对话</strong>
-                  <span>在下方输入消息，与 Agent 开始对话。</span>
+              {currentConversation?.type === "team" ? (
+                /* ---- Team Run View ---- */
+                <div className="team-run-view" style={{ padding: 16 }}>
+                  {!activeTeamRun ? (
+                    <div className="emptyEvents">
+                      <strong>团队会话</strong>
+                      <span>发送消息启动团队编排运行</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Status Banner */}
+                      <div className="team-run-banner" style={{
+                        padding: "12px 16px", borderRadius: 8, marginBottom: 16,
+                        background: activeTeamRun.status === "succeeded" ? "#f0fdf4" :
+                          activeTeamRun.status === "failed" ? "#fef2f2" : "#eff6ff",
+                        border: `1px solid ${activeTeamRun.status === "succeeded" ? "#bbf7d0" :
+                          activeTeamRun.status === "failed" ? "#fecaca" : "#bfdbfe"}`,
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <strong style={{ fontSize: 15 }}>
+                            {activeTeamRun.status === "planning" ? "🔍 规划中..." :
+                             activeTeamRun.status === "executing" ? "⚡ 执行中..." :
+                             activeTeamRun.status === "verifying" ? "✅ 验证中..." :
+                             activeTeamRun.status === "succeeded" ? "🎉 完成" :
+                             activeTeamRun.status === "failed" ? "❌ 失败" : activeTeamRun.status}
+                          </strong>
+                          <Tag color={activeTeamRun.status === "succeeded" ? "success" :
+                            activeTeamRun.status === "failed" ? "error" : "processing"}>
+                            {activeTeamRun.status}
+                          </Tag>
+                        </div>
+                        {activeTeamRun.plan && (
+                          <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--muted)" }}>
+                            {activeTeamRun.plan.summary}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Plan Tasks */}
+                      {activeTeamRun.plan && (
+                        <div style={{ marginBottom: 16 }}>
+                          <strong style={{ fontSize: 14 }}>📋 任务计划</strong>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                            {activeTeamRun.plan.tasks.map((task, i) => {
+                              const result = activeTeamRun.taskResults.find((tr) => tr.agentId === task.agentId);
+                              const isDone = result?.status === "succeeded";
+                              const isRunning = !result && activeTeamRun.status === "executing";
+                              const agents = activeTeamRun.taskResults.filter(() => true);
+                              const agentIndex = activeTeamRun.taskResults.findIndex((tr) => tr.agentId === task.agentId);
+                              const prevDone = task.dependsOn.every((depId) =>
+                                activeTeamRun.taskResults.some((tr) => tr.agentId === depId && tr.status === "succeeded")
+                              );
+                              return (
+                                <div key={i} style={{
+                                  padding: "10px 14px", borderRadius: 6,
+                                  background: isDone ? "#f0fdf4" : isRunning ? "#eff6ff" : "#f8fafc",
+                                  border: `1px solid ${isDone ? "#bbf7d0" : isRunning ? "#bfdbfe" : "#e2e8f0"}`,
+                                  opacity: (!prevDone && !isDone && !isRunning) ? 0.5 : 1,
+                                }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <Space size={8}>
+                                      <Tag color="blue">{task.agentId}</Tag>
+                                      <span style={{ fontSize: 13, fontWeight: 500 }}>
+                                        {task.task.slice(0, 60)}{task.task.length > 60 ? "..." : ""}
+                                      </span>
+                                    </Space>
+                                    <span style={{ fontSize: 12 }}>
+                                      {isDone ? "✅ Done" : isRunning ? "⏳ Running..." : "⏸️ Waiting"}
+                                    </span>
+                                  </div>
+                                  {task.dependsOn.length > 0 && (
+                                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                                      依赖: {task.dependsOn.join(", ")}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Task Outputs */}
+                      {activeTeamRun.taskResults.filter((tr) => tr.output).length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <strong style={{ fontSize: 14 }}>📦 Agent 输出</strong>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+                            {activeTeamRun.taskResults.filter((tr) => tr.output).map((tr) => (
+                              <div key={tr.agentId} style={{
+                                padding: 12, borderRadius: 6, background: "#f8fafc",
+                                border: "1px solid #e2e8f0",
+                              }}>
+                                <Space size={8} style={{ marginBottom: 8 }}>
+                                  <Tag color={tr.status === "succeeded" ? "success" : "error"}>
+                                    {tr.agentId}
+                                  </Tag>
+                                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                                    {tr.status === "succeeded" ? "已完成" : "失败"}
+                                  </span>
+                                </Space>
+                                <pre style={{
+                                  fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                                  maxHeight: 300, overflow: "auto", background: "#fff",
+                                  padding: 8, borderRadius: 4, margin: 0,
+                                }}>
+                                  {tr.output.slice(0, 2000)}
+                                  {tr.output.length > 2000 ? "\n... (output truncated)" : ""}
+                                </pre>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Verdict */}
+                      {activeTeamRun.verdict && (
+                        <div style={{
+                          padding: "12px 16px", borderRadius: 6, marginTop: 12,
+                          background: activeTeamRun.verdict.verdict === "complete" ? "#f0fdf4" : "#fefce8",
+                          border: `1px solid ${activeTeamRun.verdict.verdict === "complete" ? "#bbf7d0" : "#fde68a"}`,
+                        }}>
+                          <Space>
+                            <Tag color={activeTeamRun.verdict.verdict === "complete" ? "success" : "warning"}>
+                              {activeTeamRun.verdict.verdict === "complete" ? "Complete" : "Needs Rework"}
+                            </Tag>
+                            <strong style={{ fontSize: 14 }}>Verdict</strong>
+                          </Space>
+                          <p style={{ fontSize: 13, margin: "8px 0 0" }}>{activeTeamRun.verdict.summary}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-              )}
-              {chatMessages.map((msg, idx) => (
-                <article
-                  key={idx}
-                  className={`messageRow ${msg.role === "user" ? "userMessage" : "assistantMessage"}`}
-                >
-                  {msg.role === "assistant" && <div className="assistantAvatar">AI</div>}
-                  <div className="messageBubble">
-                    <span className="messageMeta">
-                      {msg.role === "user" ? "You" : "Assistant"}
-                    </span>
-                    <p>{msg.content}</p>
-                  </div>
-                  {msg.role === "user" && <div className="assistantAvatar" style={{ background: "#2563eb" }}>U</div>}
-                </article>
-              ))}
-              {streamingContent && (
-                <article className="messageRow assistantMessage running">
-                  <div className="assistantAvatar">AI</div>
-                  <div className="messageBubble">
-                    <span className="messageMeta">Assistant · 流式输出中</span>
-                    <p>{streamingContent}</p>
-                  </div>
-                </article>
+              ) : (
+                /* ---- Direct Chat Messages ---- */
+                <>
+                  {chatMessages.length === 0 && !streamingContent && (
+                    <div className="emptyEvents">
+                      <strong>开始对话</strong>
+                      <span>在下方输入消息，与 Agent 开始对话。</span>
+                    </div>
+                  )}
+                  {chatMessages.map((msg, idx) => (
+                    <article
+                      key={idx}
+                      className={`messageRow ${msg.role === "user" ? "userMessage" : "assistantMessage"}`}
+                    >
+                      {msg.role === "assistant" && <div className="assistantAvatar">AI</div>}
+                      <div className="messageBubble">
+                        <span className="messageMeta">
+                          {msg.role === "user" ? "You" : "Assistant"}
+                        </span>
+                        <p>{msg.content}</p>
+                      </div>
+                      {msg.role === "user" && <div className="assistantAvatar" style={{ background: "#2563eb" }}>U</div>}
+                    </article>
+                  ))}
+                  {streamingContent && (
+                    <article className="messageRow assistantMessage running">
+                      <div className="assistantAvatar">AI</div>
+                      <div className="messageBubble">
+                        <span className="messageMeta">Assistant · 流式输出中</span>
+                        <p>{streamingContent}</p>
+                      </div>
+                    </article>
+                  )}
+                </>
               )}
               <div ref={messagesEndRef} />
             </div>

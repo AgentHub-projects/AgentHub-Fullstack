@@ -36,7 +36,7 @@ export type ApiResult<T> =
   | { ok: false; error: string };
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3001";
 
 const now = new Date().toISOString();
 
@@ -240,6 +240,12 @@ export async function startTeamRun(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export async function getTeamRun(
+  id: string,
+): Promise<ApiResult<TeamRunDto>> {
+  return requestJson<TeamRunDto>(`/api/team-runs/${encodeURIComponent(id)}`);
 }
 
 // ---- Socket ----
