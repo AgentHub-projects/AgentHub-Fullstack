@@ -1,288 +1,233 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type {
-  AgentDto,
-  AgentEvent,
-  ConversationDto,
-  ConversationType,
-  MessageDto,
-  SessionDto,
-  TeamDto,
-  TeamMemberConfig,
-  TeamMemberRole,
-  TeamRunDto,
+import {
+  DEFAULT_WORKSPACE_PATH,
+  type AgentDto,
+  type AgentEvent,
+  type CodeDiffPreview,
+  type ConversationDto,
+  type MessageDto,
+  type PlanCardPayload,
+  type ResultCardPayload,
+  type SessionDto,
+  type TeamDto,
+  type TeamMemberConfig,
 } from "@agenthub/shared";
 import {
   connectSessionSocket,
+  createAgent,
+  createConversation,
+  createTeam,
   getCurrentSession,
+  getTeamRun,
   initialEvents,
   initialSession,
-  listConversations,
-  createConversation,
-  listMessages,
   listAgents,
-  createAgent,
+  listConversations,
+  listMessages,
   listTeams,
-  createTeam,
+  pinMessage,
   startTeamRun,
-  getTeamRun,
+  updateConversation,
 } from "../lib/agenthub-api";
 import { streamChat, type OpenAIMessage } from "../lib/openai-client";
-
-// antd imports
 import {
-  Button,
-  Checkbox,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Tag,
-  message as antMessage,
-} from "antd";
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-
-// ---- Types ----
+  CodeOutlined,
+  CopyOutlined,
+  DownOutlined,
+  EditOutlined,
+  EllipsisOutlined,
+  FolderOpenOutlined,
+  GlobalOutlined,
+  InboxOutlined,
+  MessageOutlined,
+  PlusOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+  RightOutlined,
+  RobotOutlined,
+  SearchOutlined,
+  SendOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
+import { Button, Form, Input, Modal, Select, Tag, message as antMessage } from "antd";
 
 type SocketState = "connecting" | "connected" | "disconnected" | "unavailable";
-type TeamStatus = "view" | "active" | "waiting" | "done" | "error";
+type FeedItem =
+  | { id: string; ts: number; kind: "message"; message: MessageDto }
+  | { id: string; ts: number; kind: "event"; event: AgentEvent };
 
-type TeamMember = {
-  id: string;
-  name: string;
-  shortName: string;
-  role: string;
-  provider: string;
-  status: TeamStatus;
-  accent: string;
-};
-
-type TeamMemberWithStatus = TeamDto["members"][number] & {
-  status: TeamStatus;
-};
-
-// ---- Constants ----
-
-const DEFAULT_PROMPT = "帮我写一个前后端分离的架构的todolist系统。";
-
-const TEAM_MEMBER_COLORS: Record<string, string> = {
-  orchestrator: "#5f6f52",
-  frontend: "#2563eb",
-  backend: "#0f766e",
-  review: "#a16207",
-  test: "#7c3aed",
-  merge: "#475569",
-};
-
-const defaultTeamMembers: TeamMember[] = [
-  {
-    id: "orchestrator-agent",
-    name: "Orchestrator",
-    shortName: "OR",
-    role: "任务拆解与阶段汇总",
-    provider: "Frontend status view",
-    status: "view",
-    accent: "#5f6f52",
-  },
-  {
-    id: "frontend-agent",
-    name: "Frontend",
-    shortName: "FE",
-    role: "界面实现与 API 接线",
-    provider: "Frontend status view",
-    status: "active",
-    accent: "#2563eb",
-  },
-  {
-    id: "backend-agent",
-    name: "Backend",
-    shortName: "BE",
-    role: "会话 API / Socket",
-    provider: "Frontend status view",
-    status: "waiting",
-    accent: "#0f766e",
-  },
-  {
-    id: "review-agent",
-    name: "Review",
-    shortName: "RV",
-    role: "契约与回归审查",
-    provider: "Frontend status view",
-    status: "waiting",
-    accent: "#a16207",
-  },
-  {
-    id: "test-agent",
-    name: "Test",
-    shortName: "TS",
-    role: "typecheck / integration",
-    provider: "Frontend status view",
-    status: "waiting",
-    accent: "#7c3aed",
-  },
-  {
-    id: "merge-agent",
-    name: "Merge",
-    shortName: "MG",
-    role: "提交集成状态",
-    provider: "Frontend status view",
-    status: "waiting",
-    accent: "#475569",
-  },
-];
-
-// ---- Helpers ----
+const WORKSPACE_NAME = "AgentHub-Test";
+const PREVIEW_URL = process.env.NEXT_PUBLIC_PREVIEW_URL ?? "http://localhost:3000";
+const PUBLIC_EVENT_TYPES = new Set<AgentEvent["type"]>([
+  "public_text",
+  "plan_card",
+  "assignment_card",
+  "result_card",
+  "code_diff",
+  "preview_card",
+  "agent_completed",
+  "agent_failed",
+  "agent_cancelled",
+  "done",
+]);
 
 function formatTime(value: string | number) {
-  const date = typeof value === "number" ? new Date(value) : new Date(value);
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  }).format(new Date(value));
 }
 
-function statusLabel(status: SessionDto["status"]) {
-  const labels: Record<SessionDto["status"], string> = {
-    idle: "待命",
-    running: "运行中",
-    succeeded: "已完成",
-    failed: "失败",
-  };
-  return labels[status];
+function formatTopicTime(value: string | number) {
+  const diffMs = Math.max(0, Date.now() - new Date(value).getTime());
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))} 分`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)} 小时`;
+  return `${Math.floor(diffMs / day)} 天`;
 }
 
-function teamStatusLabel(status: TeamStatus) {
-  const labels: Record<TeamStatus, string> = {
-    view: "视图",
-    active: "当前",
-    waiting: "等待",
-    done: "完成",
-    error: "异常",
-  };
-  return labels[status];
-}
-
-function stringifyPayload(payload: unknown) {
-  if (typeof payload === "string") return payload;
-  return JSON.stringify(payload, null, 2);
-}
-
-function payloadSummary(event: AgentEvent) {
-  if (typeof event.payload === "string") return event.payload;
-  if (event.payload && typeof event.payload === "object") {
-    const p = event.payload as Record<string, unknown>;
-    const msg = p.message ?? p.title ?? p.status;
-    if (typeof msg === "string") return msg;
-  }
-  return event.type.replace(/_/g, " ");
-}
-
-function getAgentMeta(agentId: string) {
-  return (
-    defaultTeamMembers.find((a) => a.id === agentId) ?? {
-      id: agentId,
-      name: agentId,
-      shortName: agentId.slice(0, 2).toUpperCase(),
-      role: "后端事件来源",
-      provider: "Socket AgentEvent",
-      status: "view" as const,
-      accent: "#334155",
-    }
-  );
-}
-
-function agentAvatarColor(name: string): string {
+function agentColor(seed: string) {
+  const colors = ["#2f6f73", "#315b8c", "#94612d", "#7d4a8f", "#8b3f3f", "#4d6351", "#6f5a2f"];
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const colors = [
-    "#2563eb", "#0f766e", "#a16207", "#7c3aed", "#b42318",
-    "#475569", "#0891b2", "#be185d", "#4f46e5", "#15803d",
-  ];
   return colors[Math.abs(hash) % colors.length];
 }
 
-function agentInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+function initials(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return "AI";
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
-// ---- Main Page ----
+function textPayload(payload: unknown) {
+  if (typeof payload === "string") return payload;
+  if (payload && typeof payload === "object") {
+    const p = payload as { text?: unknown; output?: unknown; result?: unknown; summary?: unknown; message?: unknown };
+    const value = p.text ?? p.output ?? p.result ?? p.summary ?? p.message;
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function isTeamRunning(status?: string) {
+  return status === "planning" || status === "executing" || status === "verifying";
+}
+
+function RichText({ text }: { text: string }) {
+  const parts = text.split(/```/g);
+  return (
+    <div className="richText">
+      {parts.map((part, index) => {
+        if (index % 2 === 1) {
+          const code = part.replace(/^[a-zA-Z0-9_-]+\n/, "");
+          return <pre key={index}>{code.trim()}</pre>;
+        }
+        return part
+          .split(/\n{2,}/)
+          .filter(Boolean)
+          .map((paragraph, pIndex) => <p key={`${index}-${pIndex}`}>{paragraph}</p>);
+      })}
+    </div>
+  );
+}
+
+function getAgent(agents: AgentDto[], agentId?: string) {
+  return agents.find((agent) => agent.id === agentId);
+}
+
+function agentMarketSummary(agent: AgentDto) {
+  const summaries: Record<string, string> = {
+    orchestrator: "拆解需求、分派任务、验收结果，是群聊里的主协调者。",
+    "backend-agent": "负责 Express / TypeScript API、数据模型、鉴权与接口契约。",
+    "frontend-agent": "负责 React / TypeScript 页面、组件状态、API 接线与交互。",
+    "test-agent": "负责单元、集成、端到端测试与关键路径回归。",
+    "review-agent": "负责代码审查、安全风险、可维护性和实现质量反馈。",
+    claude: "适合单聊的通用 Claude Code 编码助手。",
+  };
+  return summaries[agent.id] ?? agent.description;
+}
 
 export default function WorkbenchPage() {
-  // Session / Events (backward compat)
   const [session, setSession] = useState<SessionDto>(initialSession);
   const [events, setEvents] = useState<AgentEvent[]>(initialEvents);
   const [socketState, setSocketState] = useState<SocketState>("connecting");
-
-  // Conversations
   const [conversations, setConversations] = useState<ConversationDto[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [conversationSearch, setConversationSearch] = useState("");
-
-  // Chat
-  const [chatMessages, setChatMessages] = useState<OpenAIMessage[]>([]);
+  const [messages, setMessages] = useState<MessageDto[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [quotedMessage, setQuotedMessage] = useState<MessageDto | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  const chatViewRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Agents & Teams
   const [agents, setAgents] = useState<AgentDto[]>([]);
   const [teams, setTeams] = useState<TeamDto[]>([]);
-
-  // Team run state
-  const [activeTeamRun, setActiveTeamRun] = useState<TeamRunDto | null>(null);
-  const [teamMembersWithStatus, setTeamMembersWithStatus] = useState<TeamMemberWithStatus[]>([]);
-
-  // Modals
-  const [showNewConvModal, setShowNewConvModal] = useState(false);
+  const [activeTeamRunId, setActiveTeamRunId] = useState<string | null>(null);
+  const [activeTeamRunStatus, setActiveTeamRunStatus] = useState<string | null>(null);
+  const [notice, setNotice] = useState("正在连接后端...");
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
   const [showNewTeamModal, setShowNewTeamModal] = useState(false);
-
-  // Modal forms
-  const [newConvForm] = Form.useForm();
+  const [showAgentMarketModal, setShowAgentMarketModal] = useState(false);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
+  const [activeTool, setActiveTool] = useState<"browser" | "review">("review");
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [newAgentForm] = Form.useForm();
   const [newTeamForm] = Form.useForm();
+  const endRef = useRef<HTMLDivElement>(null);
+  const currentConversationIdRef = useRef<string | null>(null);
+  const creatingDefaultConversationRef = useRef(false);
 
-  // Notice bar
-  const [notice, setNotice] = useState("");
-
-  // ---- Computed ----
-
-  const currentConversation = conversations.find((c) => c.id === currentConversationId);
-
+  const currentConversation = conversations.find((conv) => conv.id === currentConversationId) ?? null;
+  const defaultTeam = teams.find((team) => team.id === "team-default") ?? teams[0] ?? null;
+  const currentWorkspacePath = currentConversation?.workspacePath ?? DEFAULT_WORKSPACE_PATH;
+  const workspaceConversations = useMemo(() => {
+    return conversations.filter((conv) => conv.type === "team" && !conv.isArchived);
+  }, [conversations]);
   const filteredConversations = useMemo(() => {
-    if (!conversationSearch.trim()) return conversations;
-    const q = conversationSearch.toLowerCase();
-    return conversations.filter((c) => c.title.toLowerCase().includes(q));
-  }, [conversations, conversationSearch]);
+    const q = conversationSearch.trim().toLowerCase();
+    if (!q) return workspaceConversations;
+    return workspaceConversations.filter((conv) => conv.title.toLowerCase().includes(q));
+  }, [conversationSearch, workspaceConversations]);
 
-  const eventGroups = useMemo(() => {
-    return events.reduce<
-      Array<{ agent: TeamMember; events: AgentEvent[]; key: string }>
-    >((groups, event) => {
-      const agent = getAgentMeta(event.agentId);
-      const last = groups.at(-1);
-      if (last?.agent.id === agent.id) {
-        last.events.push(event);
-        return groups;
-      }
-      groups.push({ agent, events: [event], key: `${agent.id}-${event.eventId}` });
-      return groups;
-    }, []);
-  }, [events]);
+  const visibleEvents = useMemo(() => {
+    return events
+      .filter((event) => event.conversationId === currentConversationId)
+      .filter((event) => PUBLIC_EVENT_TYPES.has(event.type));
+  }, [currentConversationId, events]);
 
-  // ---- Auto-scroll ----
+  const feedItems = useMemo<FeedItem[]>(() => {
+    const messageItems: FeedItem[] = messages.map((message) => ({
+      id: message.id,
+      ts: new Date(message.createdAt).getTime(),
+      kind: "message",
+      message,
+    }));
+    const eventItems: FeedItem[] = visibleEvents.map((event) => ({
+      id: event.eventId,
+      ts: event.ts,
+      kind: "event",
+      event,
+    }));
+    return [...messageItems, ...eventItems].sort((a, b) => a.ts - b.ts);
+  }, [messages, visibleEvents]);
+
+  const diffEvents = useMemo(() => {
+    return visibleEvents.filter((event) => event.type === "code_diff").slice(-4).reverse();
+  }, [visibleEvents]);
+  const latestDiff = diffEvents[0]?.payload as CodeDiffPreview | undefined;
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, streamingContent]);
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [feedItems.length, streamingContent]);
 
-  // ---- Data loading ----
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
 
   useEffect(() => {
     let ignore = false;
@@ -295,218 +240,286 @@ export default function WorkbenchPage() {
       ]);
       if (ignore) return;
 
-      if (convRes.ok) {
-        setConversations(convRes.data.items);
-      }
-      if (agentRes.ok) {
-        setAgents(agentRes.data.items);
-      }
-      if (teamRes.ok) {
-        setTeams(teamRes.data.items);
-      }
-      if (sessionRes.ok) {
-        if (sessionRes.data.session) {
-          setSession(sessionRes.data.session);
-        }
-        setEvents(sessionRes.data.events);
-        setNotice("已从后端同步数据。");
-      } else {
-        setNotice("后端未连接，部分功能不可用。");
-      }
-    }
+      let conversationItems = convRes.ok ? convRes.data.items : [];
+      const teamItems = teamRes.ok ? teamRes.data.items : [];
+      const bootTeam = teamItems.find((team) => team.id === "team-default") ?? teamItems[0];
 
+      if (convRes.ok && conversationItems.length === 0 && bootTeam && !creatingDefaultConversationRef.current) {
+        creatingDefaultConversationRef.current = true;
+        const created = await createConversation({
+          title: bootTeam.name,
+          type: "team",
+          teamId: bootTeam.id,
+          agentId: bootTeam.members.find((member) => member.role === "leader")?.agentId,
+          workspacePath: DEFAULT_WORKSPACE_PATH,
+        });
+        creatingDefaultConversationRef.current = false;
+        if (!ignore && created.ok) {
+          conversationItems = [created.data];
+        }
+      }
+
+      if (convRes.ok) {
+        setConversations(conversationItems);
+        const selectedStillExists = conversationItems.some((conv) => conv.id === currentConversationIdRef.current);
+        if ((!currentConversationIdRef.current || !selectedStillExists) && conversationItems[0]) {
+          currentConversationIdRef.current = conversationItems[0].id;
+          setCurrentConversationId(conversationItems[0].id);
+          await loadConversationMessages(conversationItems[0].id);
+        }
+      }
+      if (agentRes.ok) setAgents(agentRes.data.items);
+      if (teamRes.ok) setTeams(teamRes.data.items);
+      if (sessionRes.ok) {
+        if (sessionRes.data.session) setSession(sessionRes.data.session);
+        setEvents((prev) => mergeEvents(prev, sessionRes.data.events));
+        setNotice("后端已连接，群聊链路就绪。");
+      } else {
+        setNotice(`后端不可用：${sessionRes.error}`);
+      }
+      setIsBootstrapping(false);
+    }
     void load();
-    const timer = window.setInterval(load, 6000);
+    const timer = window.setInterval(load, 7000);
     return () => {
       ignore = true;
       window.clearInterval(timer);
     };
   }, []);
 
-  // Socket connection
   useEffect(() => {
     const disconnect = connectSessionSocket(
       currentConversationId,
       (event) => {
-        setEvents((current) => {
-          if (current.some((item) => item.eventId === event.eventId)) return current;
-          return [...current, event].sort((a, b) => a.seq - b.seq);
-        });
-        // If team event, refresh team run
-        if (event.teamRunId && activeTeamRun?.id === event.teamRunId) {
-          getTeamRun(event.teamRunId!).then((r) => {
-            if (r.ok) setActiveTeamRun(r.data);
-          });
+        setEvents((prev) => mergeEvents(prev, [event]));
+        if (event.teamRunId) {
+          setActiveTeamRunId(event.teamRunId);
+          void refreshTeamRun(event.teamRunId);
         }
       },
-      (state) => setSocketState(state),
+      setSocketState,
     );
     return disconnect;
-  }, [currentConversationId, activeTeamRun?.id]);
+  }, [currentConversationId]);
 
-  // Poll team run status
   useEffect(() => {
-    if (!activeTeamRun || activeTeamRun.status === "succeeded" || activeTeamRun.status === "failed") return;
-    const timer = window.setInterval(async () => {
-      const result = await getTeamRun(activeTeamRun.id);
-      if (result.ok) setActiveTeamRun(result.data);
-    }, 3000);
+    if (!activeTeamRunId || !isTeamRunning(activeTeamRunStatus ?? undefined)) return;
+    const timer = window.setInterval(() => {
+      void refreshTeamRun(activeTeamRunId);
+    }, 2500);
     return () => window.clearInterval(timer);
-  }, [activeTeamRun?.id, activeTeamRun?.status]);
+  }, [activeTeamRunId, activeTeamRunStatus]);
 
-  // ---- Conversation handlers ----
-
-  async function handleNewConversation() {
-    try {
-      const values = await newConvForm.validateFields();
-      const type: ConversationType = values.type ?? "direct";
-      const body: { title: string; agentId?: string; type: ConversationType; teamId?: string } = {
-        title: values.title,
-        type,
-      };
-      if (type === "direct" && values.agentId) {
-        body.agentId = values.agentId;
-      }
-      if (type === "team" && values.teamId) {
-        body.teamId = values.teamId;
-      }
-
-      const result = await createConversation(body);
-      if (result.ok) {
-        const newConv = result.data;
-        setConversations((prev) => [newConv, ...prev]);
-        setCurrentConversationId(newConv.id);
-        setChatMessages([]);
-        setShowNewConvModal(false);
-        newConvForm.resetFields();
-        antMessage.success("会话已创建");
-      } else {
-        antMessage.error(`创建失败: ${result.error}`);
-      }
-    } catch {
-      // validation failed
+  async function refreshTeamRun(runId: string) {
+    const result = await getTeamRun(runId);
+    if (result.ok) {
+      setActiveTeamRunStatus(result.data.status);
+      setSession((current) => ({
+        ...current,
+        status: isTeamRunning(result.data.status) ? "running" : result.data.status === "succeeded" ? "succeeded" : "failed",
+        updatedAt: result.data.updatedAt,
+      }));
     }
   }
 
-  async function handleSwitchConversation(convId: string) {
-    setCurrentConversationId(convId);
-    setStreamingContent("");
-    setIsStreaming(false);
-
-    // Load messages for chat mode
-    const conv = conversations.find((c) => c.id === convId);
-    if (conv?.type === "direct") {
-      const result = await listMessages(convId);
-      if (result.ok) {
-        const msgs: OpenAIMessage[] = result.data.items.map((m: MessageDto) => ({
-          role: m.role as OpenAIMessage["role"],
-          content: m.content,
-        }));
-        setChatMessages(msgs);
-      } else {
-        setChatMessages([]);
-      }
+  async function loadConversationMessages(conversationId: string) {
+    const result = await listMessages(conversationId);
+    if (result.ok) {
+      setMessages(result.data.items);
     } else {
-      // Team conversations: clear chat messages, use orchestration view
-      setChatMessages([]);
+      setMessages([]);
+      antMessage.warning(`消息加载失败：${result.error}`);
     }
   }
 
-  // ---- Chat send ----
+  async function handleSwitchConversation(conversationId: string) {
+    setCurrentConversationId(conversationId);
+    setStreamingContent("");
+    setQuotedMessage(null);
+    setIsSubmitting(false);
+    await loadConversationMessages(conversationId);
+  }
+
+  async function createWorkspaceConversation(title?: string): Promise<ConversationDto | null> {
+    const team = defaultTeam;
+    if (!team) {
+      antMessage.error("没有可用 Team，无法创建 Agent 群聊。");
+      return null;
+    }
+
+    const result = await createConversation({
+      title: title?.trim() || `新 Agent 群聊 ${workspaceConversations.length + 1}`,
+      type: "team",
+      teamId: team.id,
+      agentId: team.members.find((member) => member.role === "leader")?.agentId,
+      workspacePath: DEFAULT_WORKSPACE_PATH,
+    });
+    if (!result.ok) {
+      antMessage.error(`创建失败：${result.error}`);
+      return null;
+    }
+
+    setConversations((prev) => [result.data, ...prev.filter((conv) => conv.id !== result.data.id)]);
+    setCurrentConversationId(result.data.id);
+    setMessages([]);
+    setWorkspaceExpanded(true);
+    antMessage.success("群聊已创建");
+    return result.data;
+  }
+
+  async function ensureConversation(text: string): Promise<ConversationDto | null> {
+    if (currentConversation) return currentConversation;
+    const team = defaultTeam;
+    const fallbackAgent = agents.find((agent) => agent.id === "claude") ?? agents[0];
+    if (team) {
+      return createWorkspaceConversation(text.slice(0, 42) || "新 Agent 群聊");
+    }
+
+    const result = await createConversation({
+      title: text.slice(0, 42) || "新群聊",
+      type: "direct",
+      agentId: fallbackAgent?.id ?? "claude",
+      workspacePath: DEFAULT_WORKSPACE_PATH,
+    });
+    if (!result.ok) {
+      antMessage.error(`无法创建会话：${result.error}`);
+      return null;
+    }
+    setConversations((prev) => [result.data, ...prev]);
+    setCurrentConversationId(result.data.id);
+    setMessages([]);
+    return result.data;
+  }
 
   async function handleSend() {
     const text = chatInput.trim();
-    if (!text || isStreaming) return;
+    if (!text || isSubmitting) return;
 
-    // Create conversation if none selected
-    let convId = currentConversationId;
-    if (!convId) {
-      const createResult = await createConversation({
-        title: text.slice(0, 50),
-        type: "direct",
-        agentId: agents.find((a) => a.id === "claude")?.id ?? agents[0]?.id ?? "claude",
-      });
-      if (createResult.ok) {
-        convId = createResult.data.id;
-        setConversations((prev) => [createResult.data, ...prev]);
-        setCurrentConversationId(convId);
-        setChatMessages([]);
-      } else {
-        antMessage.error(`无法创建会话: ${createResult.error}`);
-        return;
-      }
-    }
+    const conversation = await ensureConversation(text);
+    if (!conversation) return;
+    const quotedPrefix = quotedMessage
+      ? `引用消息（${quotedMessage.role === "user" ? "用户" : quotedMessage.agentId ?? "assistant"}）：${quotedMessage.content}\n\n`
+      : "";
+    const promptText = `${quotedPrefix}${text}`;
 
-    // Save user message locally (backend persists it)
-    const userMsg: OpenAIMessage = { role: "user", content: text };
-    setChatMessages((prev) => [...prev, userMsg]);
+    const userMessage: MessageDto = {
+      id: `local-${Date.now()}`,
+      conversationId: conversation.id,
+      role: "user",
+      content: text,
+      ...(quotedMessage && { quotedMessageId: quotedMessage.id }),
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
     setChatInput("");
-    setIsStreaming(true);
+    setQuotedMessage(null);
+    setIsSubmitting(true);
     setStreamingContent("");
 
-    // Get agent model
-    const conv = conversations.find((c) => c.id === convId);
-    const model = conv?.agentId ?? agents[0]?.id ?? "claude";
+    if (conversation.type === "team") {
+      const teamId = conversation.teamId ?? defaultTeam?.id;
+      if (!teamId) {
+        antMessage.error("没有可用 Team，请先创建群聊团队。");
+        setIsSubmitting(false);
+        return;
+      }
+      const result = await startTeamRun(teamId, {
+        prompt: promptText,
+        conversationId: conversation.id,
+        repositoryPath: conversation.workspacePath ?? DEFAULT_WORKSPACE_PATH,
+      });
+      if (result.ok) {
+        setActiveTeamRunId(result.data.id);
+        setActiveTeamRunStatus(result.data.status);
+        setNotice("Orchestrator 已接管，正在分派 Claude Code 实例。");
+      } else {
+        antMessage.error(`启动失败：${result.error}`);
+        setNotice(`团队启动失败：${result.error}`);
+      }
+      setIsSubmitting(false);
+      return;
+    }
 
-    // Stream assistant response
+    const model = conversation.agentId ?? agents[0]?.id ?? "claude";
+    const history: OpenAIMessage[] = [
+      ...messages
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({ role: message.role as OpenAIMessage["role"], content: message.content })),
+      { role: "user", content: promptText },
+    ];
     let fullContent = "";
     try {
-      const messages = [...chatMessages, userMsg];
-      for await (const chunk of streamChat(messages, model, convId!)) {
+      for await (const chunk of streamChat(history, model, conversation.id)) {
         fullContent += chunk;
         setStreamingContent(fullContent);
       }
-      // Append final assistant message
-      setChatMessages((prev) => [...prev, { role: "assistant", content: fullContent }]);
-      setStreamingContent("");
-    } catch (err) {
-      antMessage.error(`流式请求失败: ${err instanceof Error ? err.message : String(err)}`);
-      setChatMessages((prev) => [
+      setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `[错误] ${err instanceof Error ? err.message : String(err)}` },
+        {
+          id: `local-assistant-${Date.now()}`,
+          conversationId: conversation.id,
+          role: "assistant",
+          content: fullContent,
+          agentId: model,
+          createdAt: new Date().toISOString(),
+        },
       ]);
       setStreamingContent("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      antMessage.error(`流式请求失败：${message}`);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-error-${Date.now()}`,
+          conversationId: conversation.id,
+          role: "assistant",
+          content: `请求失败：${message}`,
+          agentId: model,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
     } finally {
-      setIsStreaming(false);
+      setIsSubmitting(false);
     }
   }
-
-  // ---- Agent creation ----
 
   async function handleCreateAgent() {
     try {
       const values = await newAgentForm.validateFields();
-      const tags: string[] = values.tags
-        ? values.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
-        : [];
-      const body = {
+      const result = await createAgent({
         name: values.name,
         description: values.description ?? "",
         provider: values.provider ?? "local-cli",
-        role: values.role ?? "",
-        tags,
+        role: values.role ?? "assistant",
+        tags: String(values.tags ?? "")
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
         systemPrompt: values.systemPrompt ?? "",
-      };
-      const result = await createAgent(body);
+      });
       if (result.ok) {
         setAgents((prev) => [...prev, result.data]);
         setShowNewAgentModal(false);
         newAgentForm.resetFields();
         antMessage.success("Agent 已创建");
       } else {
-        antMessage.error(`创建失败: ${result.error}`);
+        antMessage.error(`创建失败：${result.error}`);
       }
     } catch {
-      // validation failed
+      // form validation
     }
   }
-
-  // ---- Team creation ----
 
   async function handleCreateTeam() {
     try {
       const values = await newTeamForm.validateFields();
-      const members: TeamMemberConfig[] = values.members ?? [];
+      const members: TeamMemberConfig[] = [
+        { agentId: values.leaderAgentId, role: "leader" },
+        ...(values.workerAgentIds as string[])
+          .filter((agentId) => agentId !== values.leaderAgentId)
+          .map((agentId) => ({ agentId, role: "worker" as const })),
+      ];
       const result = await createTeam({
         name: values.name,
         description: values.description ?? "",
@@ -518,638 +531,396 @@ export default function WorkbenchPage() {
         newTeamForm.resetFields();
         antMessage.success("Team 已创建");
       } else {
-        antMessage.error(`创建失败: ${result.error}`);
+        antMessage.error(`创建失败：${result.error}`);
       }
     } catch {
-      // validation failed
+      // form validation
     }
   }
 
-  // ---- Team run ----
-
-  async function handleStartTeamRun(teamId: string) {
-    const text = chatInput.trim();
-    if (!text) return;
-
-    let convId = currentConversationId;
-    if (!convId) {
-      const team = teams.find((t) => t.id === teamId);
-      const createResult = await createConversation({
-        title: text.slice(0, 50),
-        type: "team",
-        teamId,
-        agentId: team?.members.find((m) => m.role === "leader")?.agentId,
-      });
-      if (createResult.ok) {
-        convId = createResult.data.id;
-        setConversations((prev) => [createResult.data, ...prev]);
-        setCurrentConversationId(convId);
-        setChatMessages([]);
-      } else {
-        antMessage.error(`无法创建会话: ${createResult.error}`);
-        return;
-      }
+  async function handleToggleConversationPin(conversation: ConversationDto) {
+    const result = await updateConversation(conversation.id, { isPinned: !conversation.isPinned });
+    if (!result.ok) {
+      antMessage.error(`更新失败：${result.error}`);
+      return;
     }
+    setConversations((prev) =>
+      prev
+        .map((item) => (item.id === result.data.id ? result.data : item))
+        .sort((a, b) => {
+          if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        }),
+    );
+  }
 
-    setChatInput("");
-    setNotice("启动团队编排运行...");
-
-    const result = await startTeamRun(teamId, { prompt: text, conversationId: convId! });
-    if (result.ok) {
-      setActiveTeamRun(result.data);
-      setNotice("团队编排已启动");
-      antMessage.success("团队任务已分发");
-    } else {
-      setNotice(`团队启动失败: ${result.error}`);
-      antMessage.error(`启动失败: ${result.error}`);
+  async function handleArchiveConversation(conversation: ConversationDto) {
+    const result = await updateConversation(conversation.id, { isArchived: true });
+    if (!result.ok) {
+      antMessage.error(`归档失败：${result.error}`);
+      return;
+    }
+    setConversations((prev) => prev.map((item) => (item.id === result.data.id ? result.data : item)));
+    if (currentConversationId === conversation.id) {
+      const next = conversations.find((item) => item.id !== conversation.id && item.type === "team" && !item.isArchived);
+      setCurrentConversationId(next?.id ?? null);
+      setMessages([]);
     }
   }
 
-  // ---- Render ----
+  async function handleCopyMessage(content: string) {
+    await navigator.clipboard.writeText(content);
+    antMessage.success("已复制");
+  }
 
-  const convType = Form.useWatch("type", newConvForm) ?? "direct";
+  async function handleToggleMessagePin(message: MessageDto) {
+    const result = await pinMessage(message.conversationId, message.id, { pinned: !message.pinned });
+    if (!result.ok) {
+      antMessage.error(`Pin 失败：${result.error}`);
+      return;
+    }
+    setMessages((prev) => prev.map((item) => (item.id === result.data.id ? result.data : item)));
+  }
+
+  const activeTeam = currentConversation?.teamId
+    ? teams.find((team) => team.id === currentConversation.teamId) ?? defaultTeam
+    : defaultTeam;
 
   return (
     <main className="workspaceShell">
-      {/* ---- Icon Rail ---- */}
-      <nav className="iconRail" aria-label="主导航">
-        <div className="brandMark">A</div>
-        <button className="railIcon active" type="button" title="Workbench">
-          W
-        </button>
-        <button className="railIcon" type="button" title="Agents">
-          G
-        </button>
-        <button className="railIcon" type="button" title="Artifacts">
-          F
-        </button>
-        <span className={`railSocket ${socketState}`} title={socketState} />
-      </nav>
+      <aside className="sessionColumn">
+        <nav className="sidebarMenu" aria-label="主菜单">
+          <button
+            className="sidebarMenuItem"
+            type="button"
+            onClick={() => void createWorkspaceConversation()}
+          >
+            <MessageOutlined />
+            <span>新项目</span>
+          </button>
+          <button
+            className="sidebarMenuItem"
+            type="button"
+            onClick={() => document.getElementById("conversation-search")?.focus()}
+          >
+            <SearchOutlined />
+            <span>搜索</span>
+          </button>
+          <button className="sidebarMenuItem" type="button" onClick={() => setShowAgentMarketModal(true)}>
+            <RobotOutlined />
+            <span>Agent 市场</span>
+          </button>
+        </nav>
 
-      {/* ---- Sidebar ---- */}
-      <aside className="sessionColumn" aria-label="会话与 Agent">
-        <section className="columnTop">
-          <div>
-            <strong>AgentHub</strong>
-            <span>Multi-agent workbench</span>
+        <section className="panelBlock chatGroupBlock">
+          <div className="sectionHeader">
+            <span>群聊</span>
+            <span className={`sideSocket ${socketState}`} title={socketState} />
           </div>
-          <span className={`statusPill ${session.status}`}>
-            {statusLabel(session.status)}
-          </span>
+          <div className="workspaceTopic">
+            <div className="workspaceProjectRow">
+              <button
+                className="workspaceProjectButton"
+                type="button"
+                onClick={() => setWorkspaceExpanded((expanded) => !expanded)}
+                title={workspaceExpanded ? "收起群聊话题" : "展开群聊话题"}
+              >
+                {workspaceExpanded ? <DownOutlined /> : <RightOutlined />}
+                <FolderOpenOutlined />
+                <span>{WORKSPACE_NAME}</span>
+              </button>
+              <button
+                className="workspaceIconButton"
+                type="button"
+                onClick={() => setShowAgentMarketModal(true)}
+                title="查看工作区 Agent"
+              >
+                <EllipsisOutlined />
+              </button>
+              <button
+                className="workspaceIconButton"
+                type="button"
+                onClick={() => void createWorkspaceConversation()}
+                title={`在 ${WORKSPACE_NAME} 中开始新对话`}
+              >
+                <EditOutlined />
+              </button>
+            </div>
+
+            {workspaceExpanded && (
+              <>
+                <Input
+                  id="conversation-search"
+                  prefix={<SearchOutlined />}
+                  size="small"
+                  value={conversationSearch}
+                  onChange={(event) => setConversationSearch(event.target.value)}
+                  placeholder="搜索群聊"
+                  allowClear
+                />
+                <div className="sessionList">
+                  {filteredConversations.length === 0 ? (
+                    <div className="emptyMini">
+                      {isBootstrapping
+                        ? "正在加载群聊..."
+                        : workspaceConversations.length === 0
+                          ? "还没有群聊，点击新项目创建。"
+                          : "没有匹配的群聊。"}
+                    </div>
+                  ) : (
+                    filteredConversations.map((conv) => (
+                      <button
+                        className={`sessionCard ${conv.id === currentConversationId ? "active" : ""}`}
+                        type="button"
+                        key={conv.id}
+                        onClick={() => void handleSwitchConversation(conv.id)}
+                      >
+                        <span className="sessionTitle">
+                          {conv.isPinned && <PushpinFilled />}
+                          {conv.title}
+                        </span>
+                        <small>{conv.messageCount} 条 · {formatTopicTime(conv.updatedAt)}</small>
+                        <span className="sessionActions">
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="miniActionButton"
+                            title={conv.isPinned ? "取消置顶" : "置顶会话"}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleToggleConversationPin(conv);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.stopPropagation();
+                                void handleToggleConversationPin(conv);
+                              }
+                            }}
+                          >
+                            {conv.isPinned ? <PushpinFilled /> : <PushpinOutlined />}
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="miniActionButton"
+                            title="归档会话"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleArchiveConversation(conv);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.stopPropagation();
+                                void handleArchiveConversation(conv);
+                              }
+                            }}
+                          >
+                            <InboxOutlined />
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </section>
 
-        {/* Conversations */}
-        <section className="panelBlock">
-          <div className="sectionHeader">
-            <span>Conversations</span>
-            <Button
-              type="text"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() => setShowNewConvModal(true)}
-              title="新建会话"
-            />
-          </div>
-          <Input
-            prefix={<SearchOutlined />}
-            placeholder="搜索会话..."
-            size="small"
-            value={conversationSearch}
-            onChange={(e) => setConversationSearch(e.target.value)}
-            allowClear
-            style={{ marginBottom: 4 }}
+        <button className="settingsItem" type="button">
+          <SettingOutlined />
+          <span>设置</span>
+        </button>
+      </aside>
+
+      <section className="chatWorkbench">
+        <div className="threadPane">
+          {feedItems.map((item) =>
+            item.kind === "message" ? (
+              <MessageBubble
+                key={item.id}
+                message={item.message}
+                agents={agents}
+                onCopy={handleCopyMessage}
+                onQuote={setQuotedMessage}
+                onTogglePin={handleToggleMessagePin}
+              />
+            ) : (
+              <EventBubble key={item.id} event={item.event} agents={agents} />
+            ),
+          )}
+
+          {streamingContent && (
+            <article className="messageRow assistantMessage running">
+              <Avatar label="AI" color="#315b8c" />
+              <div className="messageBubble">
+                <span className="messageMeta">Assistant · 流式输出中</span>
+                <RichText text={streamingContent} />
+              </div>
+            </article>
+          )}
+          <div ref={endRef} />
+        </div>
+
+        <footer className="composer">
+          {quotedMessage && (
+            <div className="quotePreview">
+              <span>引用：{quotedMessage.content.slice(0, 120)}</span>
+              <button type="button" onClick={() => setQuotedMessage(null)}>取消</button>
+            </div>
+          )}
+          <textarea
+            aria-label="输入消息"
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void handleSend();
+              }
+            }}
+            placeholder="描述需求，Orchestrator 会拆解并分派给群聊 Agent"
+            disabled={isSubmitting}
           />
-          {filteredConversations.length === 0 ? (
-            <div className="emptyEvents" style={{ padding: "8px 0" }}>
-              <span>暂无会话，点击 + 创建</span>
+          <div className="composerFooter">
+            <span>{notice}</span>
+            <Button type="primary" icon={<SendOutlined />} loading={isSubmitting} disabled={!chatInput.trim()} onClick={() => void handleSend()}>
+              发送
+            </Button>
+          </div>
+        </footer>
+      </section>
+
+      <aside className="inspectorPanel">
+        <section className="inspectorSection toolDockPanel">
+          <div className="sectionHeader">
+            <span>工具</span>
+            <small>{currentConversation?.title ?? "当前群聊"}</small>
+          </div>
+          <div className="workspacePathLine">
+            <FolderOpenOutlined />
+            <code>{currentWorkspacePath}</code>
+          </div>
+          <div className="toolCards">
+            <button
+              className={`toolCard ${activeTool === "browser" ? "active" : ""}`}
+              type="button"
+              onClick={() => {
+                setActiveTool("browser");
+                window.open(PREVIEW_URL, "_blank", "noopener,noreferrer");
+              }}
+            >
+              <GlobalOutlined />
+              <strong>浏览器</strong>
+              <span>打开网站</span>
+            </button>
+            <button
+              className={`toolCard ${activeTool === "review" ? "active" : ""}`}
+              type="button"
+              onClick={() => setActiveTool("review")}
+            >
+              <CodeOutlined />
+              <strong>审查</strong>
+              <span>查看代码更改</span>
+            </button>
+          </div>
+          <ToolDetail
+            activeTool={activeTool}
+            latestDiff={latestDiff}
+            previewUrl={PREVIEW_URL}
+            workspacePath={currentWorkspacePath}
+          />
+        </section>
+
+        <section className="inspectorSection acceptancePanel">
+          <div className="sectionHeader">
+            <span>验收任务</span>
+            <small>建议输入</small>
+          </div>
+          <p>帮我写一份前后端分离的 todolist, 要求能实现简单的注册 / 登录，添加 todo, 给 todo 打勾，删除 todo。</p>
+          <Button
+            icon={<CopyOutlined />}
+            onClick={() => void handleCopyMessage("帮我写一份前后端分离的 todolist, 要求能实现简单的注册 / 登录，添加 todo, 给 todo 打勾，删除 todo。")}
+          >
+            复制任务
+          </Button>
+        </section>
+
+        <section className="inspectorSection agentRosterPanel">
+          <div className="sectionHeader">
+            <span>当前群聊 Agent</span>
+            <small>{activeTeam?.members.length ?? 0} 名</small>
+          </div>
+          {activeTeam ? (
+            <div className="agentRosterList">
+              {activeTeam.members.map((member) => {
+                const agent = getAgent(agents, member.agentId);
+                const agentName = agent?.name ?? member.agentId;
+                return (
+                  <article className="rosterAgentCard" key={`${activeTeam.id}-${member.agentId}`}>
+                    <span className="agentAvatar" style={{ "--agent-color": agentColor(member.agentId) } as CSSProperties}>
+                      {initials(agentName)}
+                    </span>
+                    <div>
+                      <strong>{agentName}</strong>
+                      <small>{member.role === "leader" ? "Orchestrator / Leader" : agent?.role ?? "worker"}</small>
+                    </div>
+                    <Tag color={member.role === "leader" ? "blue" : "default"}>
+                      {member.role === "leader" ? "主控" : "成员"}
+                    </Tag>
+                  </article>
+                );
+              })}
             </div>
           ) : (
-            filteredConversations.map((conv) => (
-              <button
-                key={conv.id}
-                className={`sessionCard ${conv.id === currentConversationId ? "active" : ""}`}
-                type="button"
-                onClick={() => handleSwitchConversation(conv.id)}
-              >
-                <span>{conv.title}</span>
-                <small>
-                  {conv.type === "team" ? "Team" : "Direct"} · {conv.messageCount} msgs
-                </small>
-              </button>
-            ))
+            <div className="emptyMini">当前还没有群聊成员。</div>
           )}
         </section>
+      </aside>
 
-        {/* Agents */}
-        <section className="panelBlock">
-          <div className="sectionHeader">
-            <span>Agents</span>
+      <Modal
+        title="Agent 市场"
+        open={showAgentMarketModal}
+        onCancel={() => setShowAgentMarketModal(false)}
+        footer={null}
+        width={820}
+        destroyOnHidden
+      >
+        <div className="agentMarket">
+          <div className="marketIntro">
+            <strong>预设 Agent</strong>
+            <span>这些 Agent 已接入当前平台，可直接用于群聊编排或单聊。</span>
             <Button
-              type="text"
-              size="small"
+              type="primary"
               icon={<PlusOutlined />}
-              onClick={() => setShowNewAgentModal(true)}
-              title="新建 Agent"
-            />
+              onClick={() => {
+                setShowAgentMarketModal(false);
+                setShowNewAgentModal(true);
+              }}
+            >
+              自定义 Agent
+            </Button>
           </div>
-          {agents.length === 0 ? (
-            <div className="agentCard">
-              <span className="agentAvatar">CC</span>
-              <div>
-                <strong>Claude Code</strong>
-                <small>默认 Agent</small>
-              </div>
-            </div>
-          ) : (
-            agents.map((agent) => (
-              <div className="agentCard" key={agent.id}>
-                <span
-                  className="agentAvatar"
-                  style={{ background: agentAvatarColor(agent.name) }}
-                >
-                  {agentInitials(agent.name)}
+          <div className="marketGrid">
+            {agents.map((agent) => (
+              <article className="marketAgentCard" key={agent.id}>
+                <span className="agentAvatar large" style={{ "--agent-color": agentColor(agent.id) } as CSSProperties}>
+                  {initials(agent.name)}
                 </span>
                 <div>
                   <strong>{agent.name}</strong>
-                  <small>{agent.role || agent.description}</small>
-                  {agent.tags && agent.tags.length > 0 && (
-                    <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {agent.tags.slice(0, 3).map((tag) => (
-                        <Tag key={tag} color="blue" style={{ fontSize: 10, margin: 0 }}>
-                          {tag}
-                        </Tag>
-                      ))}
-                    </div>
-                  )}
+                  <small>{agent.provider} · {agent.role}</small>
+                  <p>{agentMarketSummary(agent)}</p>
+                  <div className="marketTags">
+                    {agent.tags.slice(0, 4).map((tag) => <Tag key={tag}>{tag}</Tag>)}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </section>
-
-        {/* Teams */}
-        <section className="panelBlock teamBlock">
-          <div className="sectionHeader">
-            <span>Teams</span>
-            <Button
-              type="text"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() => setShowNewTeamModal(true)}
-              title="新建 Team"
-            />
+              </article>
+            ))}
           </div>
-          {teams.length === 0 ? (
-            <div style={{ padding: "8px 0", color: "var(--muted)", fontSize: 13 }}>
-              暂无团队，点击 + 创建
-            </div>
-          ) : (
-            teams.map((team) => (
-              <div className="teamMember" key={team.id}>
-                <span
-                  className="teamAvatar"
-                  style={{ "--agent-accent": agentAvatarColor(team.name) } as CSSProperties}
-                >
-                  {agentInitials(team.name)}
-                </span>
-                <div>
-                  <strong>{team.name}</strong>
-                  <small>{team.description || `${team.members.length} 名成员`}</small>
-                </div>
-                <button
-                  className="miniRunBtn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleStartTeamRun(team.id);
-                  }}
-                  title="启动团队运行"
-                >
-                  Run
-                </button>
-              </div>
-            ))
-          )}
-          {activeTeamRun && (
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
-              <Tag color="processing">团队运行中: {activeTeamRun.status}</Tag>
-            </div>
-          )}
-        </section>
-      </aside>
-
-      {/* ---- Chat Workbench ---- */}
-      <section className="chatWorkbench" aria-label="会话区域">
-        {!currentConversationId ? (
-          /* Welcome Screen */
-          <div className="welcomeScreen">
-            <div className="welcomeContent">
-              <h2>AgentHub Workbench</h2>
-              <p>IM 风格多智能体协作平台</p>
-              <div className="welcomeCards">
-                <div className="welcomeCard">
-                  <strong>快速开始</strong>
-                  <span>点击左侧 + 创建新会话，或选择已有会话开始对话</span>
-                </div>
-                <div className="welcomeCard">
-                  <strong>可用 Agents</strong>
-                  <span>{agents.length > 0 ? `${agents.length} 个 Agent 就绪` : "默认 Claude Code Agent"}</span>
-                </div>
-                <div className="welcomeCard">
-                  <strong>可用 Teams</strong>
-                  <span>{teams.length > 0 ? `${teams.length} 个 Team 就绪` : "暂无团队"}</span>
-                </div>
-              </div>
-            </div>
-            {/* Composer for quick start */}
-            <footer className="composer">
-              <textarea
-                aria-label="输入消息"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="输入消息，按 Enter 发送..."
-              />
-              <div className="composerFooter">
-                <span>{notice || "选择或创建会话开始对话"}</span>
-                <div className="runControls">
-                  <Button
-                    type="primary"
-                    loading={isStreaming}
-                    onClick={handleSend}
-                    disabled={!chatInput.trim() || isStreaming}
-                  >
-                    发送
-                  </Button>
-                </div>
-              </div>
-            </footer>
-          </div>
-        ) : (
-          <>
-            {/* Chat Header */}
-            <header className="chatHeader">
-              <div>
-                <span className="eyebrow">
-                  {currentConversation?.type === "team" ? "Team Chat" : "Direct Chat"} ·{" "}
-                  {currentConversation?.agentId ?? "Agent"}
-                </span>
-                <h1>{currentConversation?.title ?? "会话"}</h1>
-              </div>
-              <div className="headerBadges">
-                <span className={`socketBadge ${socketState}`}>Socket {socketState}</span>
-                <span className={`runBadge ${session.status}`}>
-                  {isStreaming ? "流式中" : statusLabel(session.status)}
-                </span>
-                {currentConversation?.createdAt && (
-                  <time>{formatTime(currentConversation.createdAt)}</time>
-                )}
-              </div>
-            </header>
-
-            {/* Chat Messages or Team Run View */}
-            <div className="threadPane" ref={chatViewRef}>
-              {currentConversation?.type === "team" ? (
-                /* ---- Team Run View ---- */
-                <div className="team-run-view" style={{ padding: 16 }}>
-                  {!activeTeamRun ? (
-                    <div className="emptyEvents">
-                      <strong>团队会话</strong>
-                      <span>发送消息启动团队编排运行</span>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Status Banner */}
-                      <div className="team-run-banner" style={{
-                        padding: "12px 16px", borderRadius: 8, marginBottom: 16,
-                        background: activeTeamRun.status === "succeeded" ? "#f0fdf4" :
-                          activeTeamRun.status === "failed" ? "#fef2f2" : "#eff6ff",
-                        border: `1px solid ${activeTeamRun.status === "succeeded" ? "#bbf7d0" :
-                          activeTeamRun.status === "failed" ? "#fecaca" : "#bfdbfe"}`,
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <strong style={{ fontSize: 15 }}>
-                            {activeTeamRun.status === "planning" ? "🔍 规划中..." :
-                             activeTeamRun.status === "executing" ? "⚡ 执行中..." :
-                             activeTeamRun.status === "verifying" ? "✅ 验证中..." :
-                             activeTeamRun.status === "succeeded" ? "🎉 完成" :
-                             activeTeamRun.status === "failed" ? "❌ 失败" : activeTeamRun.status}
-                          </strong>
-                          <Tag color={activeTeamRun.status === "succeeded" ? "success" :
-                            activeTeamRun.status === "failed" ? "error" : "processing"}>
-                            {activeTeamRun.status}
-                          </Tag>
-                        </div>
-                        {activeTeamRun.plan && (
-                          <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--muted)" }}>
-                            {activeTeamRun.plan.summary}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Plan Tasks */}
-                      {activeTeamRun.plan && (
-                        <div style={{ marginBottom: 16 }}>
-                          <strong style={{ fontSize: 14 }}>📋 任务计划</strong>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                            {activeTeamRun.plan.tasks.map((task, i) => {
-                              const result = activeTeamRun.taskResults.find((tr) => tr.agentId === task.agentId);
-                              const isDone = result?.status === "succeeded";
-                              const isRunning = !result && activeTeamRun.status === "executing";
-                              const agents = activeTeamRun.taskResults.filter(() => true);
-                              const agentIndex = activeTeamRun.taskResults.findIndex((tr) => tr.agentId === task.agentId);
-                              const prevDone = task.dependsOn.every((depId) =>
-                                activeTeamRun.taskResults.some((tr) => tr.agentId === depId && tr.status === "succeeded")
-                              );
-                              return (
-                                <div key={i} style={{
-                                  padding: "10px 14px", borderRadius: 6,
-                                  background: isDone ? "#f0fdf4" : isRunning ? "#eff6ff" : "#f8fafc",
-                                  border: `1px solid ${isDone ? "#bbf7d0" : isRunning ? "#bfdbfe" : "#e2e8f0"}`,
-                                  opacity: (!prevDone && !isDone && !isRunning) ? 0.5 : 1,
-                                }}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <Space size={8}>
-                                      <Tag color="blue">{task.agentId}</Tag>
-                                      <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                        {task.task.slice(0, 60)}{task.task.length > 60 ? "..." : ""}
-                                      </span>
-                                    </Space>
-                                    <span style={{ fontSize: 12 }}>
-                                      {isDone ? "✅ Done" : isRunning ? "⏳ Running..." : "⏸️ Waiting"}
-                                    </span>
-                                  </div>
-                                  {task.dependsOn.length > 0 && (
-                                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                                      依赖: {task.dependsOn.join(", ")}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Task Outputs */}
-                      {activeTeamRun.taskResults.filter((tr) => tr.output).length > 0 && (
-                        <div style={{ marginBottom: 16 }}>
-                          <strong style={{ fontSize: 14 }}>📦 Agent 输出</strong>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-                            {activeTeamRun.taskResults.filter((tr) => tr.output).map((tr) => (
-                              <div key={tr.agentId} style={{
-                                padding: 12, borderRadius: 6, background: "#f8fafc",
-                                border: "1px solid #e2e8f0",
-                              }}>
-                                <Space size={8} style={{ marginBottom: 8 }}>
-                                  <Tag color={tr.status === "succeeded" ? "success" : "error"}>
-                                    {tr.agentId}
-                                  </Tag>
-                                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                                    {tr.status === "succeeded" ? "已完成" : "失败"}
-                                  </span>
-                                </Space>
-                                <pre style={{
-                                  fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                                  maxHeight: 300, overflow: "auto", background: "#fff",
-                                  padding: 8, borderRadius: 4, margin: 0,
-                                }}>
-                                  {tr.output.slice(0, 2000)}
-                                  {tr.output.length > 2000 ? "\n... (output truncated)" : ""}
-                                </pre>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Verdict */}
-                      {activeTeamRun.verdict && (
-                        <div style={{
-                          padding: "12px 16px", borderRadius: 6, marginTop: 12,
-                          background: activeTeamRun.verdict.verdict === "complete" ? "#f0fdf4" : "#fefce8",
-                          border: `1px solid ${activeTeamRun.verdict.verdict === "complete" ? "#bbf7d0" : "#fde68a"}`,
-                        }}>
-                          <Space>
-                            <Tag color={activeTeamRun.verdict.verdict === "complete" ? "success" : "warning"}>
-                              {activeTeamRun.verdict.verdict === "complete" ? "Complete" : "Needs Rework"}
-                            </Tag>
-                            <strong style={{ fontSize: 14 }}>Verdict</strong>
-                          </Space>
-                          <p style={{ fontSize: 13, margin: "8px 0 0" }}>{activeTeamRun.verdict.summary}</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : (
-                /* ---- Direct Chat Messages ---- */
-                <>
-                  {chatMessages.length === 0 && !streamingContent && (
-                    <div className="emptyEvents">
-                      <strong>开始对话</strong>
-                      <span>在下方输入消息，与 Agent 开始对话。</span>
-                    </div>
-                  )}
-                  {chatMessages.map((msg, idx) => (
-                    <article
-                      key={idx}
-                      className={`messageRow ${msg.role === "user" ? "userMessage" : "assistantMessage"}`}
-                    >
-                      {msg.role === "assistant" && <div className="assistantAvatar">AI</div>}
-                      <div className="messageBubble">
-                        <span className="messageMeta">
-                          {msg.role === "user" ? "You" : "Assistant"}
-                        </span>
-                        <p>{msg.content}</p>
-                      </div>
-                      {msg.role === "user" && <div className="assistantAvatar" style={{ background: "#2563eb" }}>U</div>}
-                    </article>
-                  ))}
-                  {streamingContent && (
-                    <article className="messageRow assistantMessage running">
-                      <div className="assistantAvatar">AI</div>
-                      <div className="messageBubble">
-                        <span className="messageMeta">Assistant · 流式输出中</span>
-                        <p>{streamingContent}</p>
-                      </div>
-                    </article>
-                  )}
-                </>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Composer */}
-            <footer className="composer">
-              <textarea
-                aria-label="输入消息"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="输入消息，按 Enter 发送..."
-                disabled={isStreaming}
-              />
-              <div className="composerFooter">
-                <span>{notice || (isStreaming ? "Agent 正在回复..." : "Ready")}</span>
-                <div className="runControls">
-                  <Button
-                    type="primary"
-                    loading={isStreaming}
-                    onClick={handleSend}
-                    disabled={!chatInput.trim() || isStreaming}
-                  >
-                    发送
-                  </Button>
-                </div>
-              </div>
-            </footer>
-          </>
-        )}
-      </section>
-
-      {/* ---- Inspector Panel ---- */}
-      <aside className="inspectorPanel" aria-label="运行检查器与 artifacts">
-        <section className="inspectorSection heroStatus">
-          <div className="sectionHeader">
-            <span>Run Inspector</span>
-            <small>{session.id !== initialSession.id ? "真实会话" : "离线空态"}</small>
-          </div>
-          <strong>{isStreaming ? "流式中" : statusLabel(session.status)}</strong>
-          <p>Conversation: {currentConversationId ?? "未选择"}</p>
-        </section>
-
-        <section className="inspectorSection">
-          <div className="sectionHeader">
-            <span>Contract Fields</span>
-            <small>会话数据</small>
-          </div>
-          <dl className="kvList">
-            <div><dt>Session ID</dt><dd>{session.id}</dd></div>
-            <div><dt>Status</dt><dd>{session.status}</dd></div>
-            <div><dt>Agent ID</dt><dd>{session.agentId ?? "N/A"}</dd></div>
-            <div><dt>Conversation ID</dt><dd>{currentConversationId ?? "N/A"}</dd></div>
-            <div><dt>Events</dt><dd>{events.length}</dd></div>
-            <div><dt>Socket</dt><dd>{socketState}</dd></div>
-          </dl>
-        </section>
-
-        <section className="inspectorSection">
-          <div className="sectionHeader">
-            <span>Artifacts</span>
-            <small>数据快照</small>
-          </div>
-          <div className="artifactList">
-            <div>
-              <span>Conversations</span>
-              <strong>{conversations.length} 个会话</strong>
-            </div>
-            <div>
-              <span>Agents</span>
-              <strong>{agents.length} 个 Agent</strong>
-            </div>
-            <div>
-              <span>Teams</span>
-              <strong>{teams.length} 个 Team</strong>
-            </div>
-            <div>
-              <span>Messages</span>
-              <strong>{chatMessages.length} 条消息</strong>
-            </div>
-          </div>
-        </section>
-
-        <section className="inspectorSection notePanel">
-          <div className="sectionHeader">
-            <span>Boundary</span>
-            <small>no mock</small>
-          </div>
-          <p>
-            会话列表、消息记录、Agent 和 Team 管理均来自后端 API。IM 风格聊天支持流式输出与历史回放。
-          </p>
-        </section>
-      </aside>
-
-      {/* ---- New Conversation Modal ---- */}
-      <Modal
-        title="新建会话"
-        open={showNewConvModal}
-        onOk={handleNewConversation}
-        onCancel={() => {
-          setShowNewConvModal(false);
-          newConvForm.resetFields();
-        }}
-        okText="创建"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <Form form={newConvForm} layout="vertical" initialValues={{ type: "direct" }}>
-          <Form.Item
-            name="title"
-            label="会话标题"
-            rules={[{ required: true, message: "请输入会话标题" }]}
-          >
-            <Input placeholder="输入会话标题" />
-          </Form.Item>
-          <Form.Item name="type" label="会话类型" initialValue="direct">
-            <Select
-              onChange={(value) => {
-                newConvForm.setFieldsValue({ agentId: undefined, teamId: undefined });
-              }}
-            >
-              <Select.Option value="direct">Direct（单聊）</Select.Option>
-              <Select.Option value="team">Team（团队）</Select.Option>
-            </Select>
-          </Form.Item>
-          {convType === "direct" ? (
-            <Form.Item
-              name="agentId"
-              label="选择 Agent"
-              rules={[{ required: true, message: "请选择 Agent" }]}
-            >
-              <Select placeholder="选择 Agent">
-                {agents.map((a) => (
-                  <Select.Option key={a.id} value={a.id}>
-                    {a.name} ({a.role})
-                  </Select.Option>
-                ))}
-                {agents.length === 0 && <Select.Option value="claude">Claude Code</Select.Option>}
-              </Select>
-            </Form.Item>
-          ) : (
-            <Form.Item
-              name="teamId"
-              label="选择 Team"
-              rules={[{ required: true, message: "请选择 Team" }]}
-            >
-              <Select placeholder="选择 Team">
-                {teams.map((t) => (
-                  <Select.Option key={t.id} value={t.id}>
-                    {t.name} ({t.members.length} members)
-                  </Select.Option>
-                ))}
-                {teams.length === 0 && (
-                  <Select.Option value="" disabled>
-                    暂无 Team，请先创建
-                  </Select.Option>
-                )}
-              </Select>
-            </Form.Item>
-          )}
-        </Form>
+        </div>
       </Modal>
 
-      {/* ---- New Agent Modal ---- */}
       <Modal
         title="新建 Agent"
         open={showNewAgentModal}
@@ -1160,48 +931,22 @@ export default function WorkbenchPage() {
         }}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
-        width={520}
+        destroyOnHidden
       >
         <Form form={newAgentForm} layout="vertical" initialValues={{ provider: "local-cli" }}>
-          <Form.Item
-            name="name"
-            label="名称"
-            rules={[{ required: true, message: "请输入 Agent 名称" }]}
-          >
-            <Input placeholder="e.g. Frontend Builder" />
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
+            <Input placeholder="Frontend Agent" />
           </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input placeholder="简要描述 Agent 功能" />
+          <Form.Item name="description" label="描述"><Input placeholder="负责 React UI 和 API 接线" /></Form.Item>
+          <Form.Item name="provider" label="Provider"><Select><Select.Option value="local-cli">local-cli</Select.Option></Select></Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true, message: "请输入角色" }]}>
+            <Input placeholder="frontend-developer" />
           </Form.Item>
-          <Form.Item
-            name="provider"
-            label="Provider"
-            rules={[{ required: true, message: "请输入 Provider" }]}
-          >
-            <Select>
-              <Select.Option value="local-cli">local-cli</Select.Option>
-              <Select.Option value="openai">openai</Select.Option>
-              <Select.Option value="anthropic">anthropic</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item
-            name="role"
-            label="角色"
-            rules={[{ required: true, message: "请输入角色描述" }]}
-          >
-            <Input placeholder="e.g. 前端开发专家" />
-          </Form.Item>
-          <Form.Item name="tags" label="标签（逗号分隔）">
-            <Input placeholder="e.g. frontend, react, ui" />
-          </Form.Item>
-          <Form.Item name="systemPrompt" label="System Prompt">
-            <Input.TextArea rows={4} placeholder="系统提示词..." />
-          </Form.Item>
+          <Form.Item name="tags" label="标签"><Input placeholder="frontend, react, ui" /></Form.Item>
+          <Form.Item name="systemPrompt" label="System Prompt"><Input.TextArea rows={5} /></Form.Item>
         </Form>
       </Modal>
 
-      {/* ---- New Team Modal ---- */}
       <Modal
         title="新建 Team"
         open={showNewTeamModal}
@@ -1212,100 +957,237 @@ export default function WorkbenchPage() {
         }}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
-        width={560}
+        destroyOnHidden
       >
         <Form form={newTeamForm} layout="vertical">
-          <Form.Item
-            name="name"
-            label="Team 名称"
-            rules={[{ required: true, message: "请输入 Team 名称" }]}
-          >
-            <Input placeholder="e.g. Full-Stack Team" />
+          <Form.Item name="name" label="Team 名称" rules={[{ required: true, message: "请输入 Team 名称" }]}>
+            <Input placeholder="Full-Stack Team" />
           </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input placeholder="简要描述 Team 用途" />
+          <Form.Item name="description" label="描述"><Input placeholder="默认全栈协作团队" /></Form.Item>
+          <Form.Item name="leaderAgentId" label="Leader" rules={[{ required: true, message: "请选择 Leader" }]}>
+            <Select placeholder="选择 Orchestrator">
+              {agents.map((agent) => <Select.Option key={agent.id} value={agent.id}>{agent.name}</Select.Option>)}
+            </Select>
           </Form.Item>
           <Form.Item
-            name="members"
-            label="成员选择"
-            rules={[{ required: true, message: "请至少选择一名成员", type: "array", min: 1 }]}
+            name="workerAgentIds"
+            label="Workers"
+            rules={[{ required: true, type: "array", min: 1, message: "至少选择一个 Worker" }]}
           >
-            <Checkbox.Group style={{ width: "100%" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {agents.length === 0 ? (
-                  <span style={{ color: "var(--muted)", fontSize: 13 }}>
-                    暂无 Agent，请先创建 Agent
-                  </span>
-                ) : (
-                  agents.map((agent) => {
-                    const fieldName = `memberRole_${agent.id}`;
-                    return (
-                      <div
-                        key={agent.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: "8px 12px",
-                          border: "1px solid var(--line)",
-                          borderRadius: 8,
-                          background: "var(--surface)",
-                        }}
-                      >
-                        <Checkbox
-                          value={agent.id}
-                          onChange={(e) => {
-                            const currentMembers: TeamMemberConfig[] =
-                              newTeamForm.getFieldValue("members") ?? [];
-                            if (e.target.checked) {
-                              const role: TeamMemberRole =
-                                newTeamForm.getFieldValue(fieldName) ?? "worker";
-                              newTeamForm.setFieldsValue({
-                                members: [...currentMembers, { agentId: agent.id, role }],
-                              });
-                            } else {
-                              newTeamForm.setFieldsValue({
-                                members: currentMembers.filter(
-                                  (m: TeamMemberConfig) => m.agentId !== agent.id,
-                                ),
-                              });
-                            }
-                          }}
-                        />
-                        <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>
-                          {agent.name}
-                        </span>
-                        <span style={{ color: "var(--muted)", fontSize: 12 }}>
-                          {agent.role}
-                        </span>
-                        <Select
-                          size="small"
-                          defaultValue="worker"
-                          style={{ width: 100 }}
-                          onChange={(role: TeamMemberRole) => {
-                            newTeamForm.setFieldValue(fieldName, role);
-                            const currentMembers: TeamMemberConfig[] =
-                              newTeamForm.getFieldValue("members") ?? [];
-                            newTeamForm.setFieldsValue({
-                              members: currentMembers.map((m: TeamMemberConfig) =>
-                                m.agentId === agent.id ? { ...m, role } : m,
-                              ),
-                            });
-                          }}
-                        >
-                          <Select.Option value="leader">Leader</Select.Option>
-                          <Select.Option value="worker">Worker</Select.Option>
-                        </Select>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </Checkbox.Group>
+            <Select mode="multiple" placeholder="选择 Backend / Frontend Agent">
+              {agents.map((agent) => <Select.Option key={agent.id} value={agent.id}>{agent.name}</Select.Option>)}
+            </Select>
           </Form.Item>
         </Form>
       </Modal>
     </main>
+  );
+}
+
+function mergeEvents(current: AgentEvent[], incoming: AgentEvent[]) {
+  const map = new Map(current.map((event) => [event.eventId, event]));
+  for (const event of incoming) {
+    map.set(event.eventId, event);
+  }
+  return [...map.values()].sort((a, b) => a.seq - b.seq);
+}
+
+function Avatar({ label, color }: { label: string; color: string }) {
+  return <span className="assistantAvatar" style={{ "--agent-color": color } as CSSProperties}>{label}</span>;
+}
+
+function ToolDetail({
+  activeTool,
+  latestDiff,
+  previewUrl,
+  workspacePath,
+}: {
+  activeTool: "browser" | "review";
+  latestDiff?: CodeDiffPreview;
+  previewUrl: string;
+  workspacePath: string;
+}) {
+  if (activeTool === "browser") {
+    return (
+      <div className="toolDetail">
+        <div className="toolDetailHeader">
+          <strong>浏览器</strong>
+          <button type="button" onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}>
+            打开
+          </button>
+        </div>
+        <code>{previewUrl}</code>
+        <small>使用当前群聊工作区预览：{workspacePath}</small>
+      </div>
+    );
+  }
+
+  const changedFiles = latestDiff?.changedFiles ?? [];
+  return (
+    <div className="toolDetail">
+      <div className="toolDetailHeader">
+        <strong>审查</strong>
+        <span>{changedFiles.length} 个文件</span>
+      </div>
+      {latestDiff && changedFiles.length > 0 ? (
+        <>
+          {latestDiff.stat && <pre>{latestDiff.stat}</pre>}
+          <div className="reviewFiles">
+            {changedFiles.slice(0, 10).map((file) => <Tag key={file}>{file}</Tag>)}
+          </div>
+        </>
+      ) : (
+        <div className="emptyMini">当前群聊还没有代码更改。</div>
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  agents,
+  onCopy,
+  onQuote,
+  onTogglePin,
+}: {
+  message: MessageDto;
+  agents: AgentDto[];
+  onCopy: (content: string) => void | Promise<void>;
+  onQuote: (message: MessageDto) => void;
+  onTogglePin: (message: MessageDto) => void | Promise<void>;
+}) {
+  const isUser = message.role === "user";
+  const agent = getAgent(agents, message.agentId);
+  const name = isUser ? "你" : agent?.name ?? "Assistant";
+  const color = isUser ? "#315b8c" : agentColor(agent?.id ?? "assistant");
+  return (
+    <article className={`messageRow ${isUser ? "userMessage" : "assistantMessage"}`}>
+      {!isUser && <Avatar label={initials(name)} color={color} />}
+      <div className="messageBubble">
+        <div className="messageTopLine">
+          <span className="messageMeta">
+            {name} · {formatTime(message.createdAt)}
+            {message.pinned && <em>已 Pin</em>}
+          </span>
+          <span className="messageActions">
+            <button type="button" title="复制消息" onClick={() => void onCopy(message.content)}>
+              <CopyOutlined />
+            </button>
+            <button type="button" title="引用回复" onClick={() => onQuote(message)}>
+              <MessageOutlined />
+            </button>
+            <button type="button" title={message.pinned ? "取消 Pin" : "Pin 为上下文"} onClick={() => void onTogglePin(message)}>
+              {message.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </button>
+          </span>
+        </div>
+        {message.quotedMessageId && <div className="quotedLine">引用消息：{message.quotedMessageId}</div>}
+        <RichText text={message.content} />
+      </div>
+      {isUser && <Avatar label="你" color={color} />}
+    </article>
+  );
+}
+
+function EventBubble({ event, agents }: { event: AgentEvent; agents: AgentDto[] }) {
+  const agent = getAgent(agents, event.agentId);
+  const name = agent?.name ?? event.agentId;
+  const color = agentColor(event.agentId);
+  const failed = event.type === "agent_failed" || event.type === "agent_cancelled";
+
+  return (
+    <article className={`messageRow assistantMessage ${failed ? "failed" : ""}`}>
+      <Avatar label={initials(name)} color={color} />
+      <div className={`messageBubble eventBubble ${event.type}`}>
+        <span className="messageMeta">{name} · {formatTime(event.ts)}</span>
+        <EventContent event={event} agentName={name} />
+      </div>
+    </article>
+  );
+}
+
+function EventContent({ event, agentName }: { event: AgentEvent; agentName: string }) {
+  if (event.type === "public_text") {
+    return <RichText text={textPayload(event.payload)} />;
+  }
+
+  if (event.type === "plan_card") {
+    const payload = event.payload as PlanCardPayload;
+    return (
+      <div className="artifactCard planCard">
+        <strong>任务计划</strong>
+        <p>{payload.plan.summary}</p>
+        <div className="taskList">
+          {payload.plan.tasks.map((task) => (
+            <div key={`${task.agentId}-${task.task}`}>
+              <Tag color="blue">{task.agentId}</Tag>
+              <span>{task.task}</span>
+              {task.dependsOn.length > 0 && <small>依赖：{task.dependsOn.join(", ")}</small>}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (event.type === "assignment_card") {
+    const payload = event.payload as { agentId: string; task: string; dependsOn: string[] };
+    return (
+      <div className="artifactCard assignmentCard">
+        <strong>任务分派给 {payload.agentId}</strong>
+        <p>{payload.task}</p>
+        {payload.dependsOn.length > 0 && <small>依赖：{payload.dependsOn.join(", ")}</small>}
+      </div>
+    );
+  }
+
+  if (event.type === "result_card") {
+    const payload = event.payload as ResultCardPayload;
+    return (
+      <div className={`artifactCard resultCard ${payload.status}`}>
+        <strong>{payload.title || `${agentName} 结果`}</strong>
+        <RichText text={payload.summary} />
+      </div>
+    );
+  }
+
+  if (event.type === "code_diff") {
+    return <DiffCard diff={event.payload as CodeDiffPreview} />;
+  }
+
+  if (event.type === "preview_card") {
+    return (
+      <div className="artifactCard previewCard">
+        <strong>预览卡片</strong>
+        <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+      </div>
+    );
+  }
+
+  if (event.type === "agent_failed" || event.type === "agent_cancelled") {
+    return (
+      <div className="artifactCard resultCard failed">
+        <strong>{event.type === "agent_cancelled" ? "任务已取消" : "任务失败"}</strong>
+        <RichText text={textPayload(event.payload) || JSON.stringify(event.payload, null, 2)} />
+      </div>
+    );
+  }
+
+  return <RichText text={textPayload(event.payload) || event.type} />;
+}
+
+function DiffCard({ diff }: { diff: CodeDiffPreview }) {
+  return (
+    <details className="artifactCard diffCard" open>
+      <summary>
+        <strong>已编辑文件</strong>
+        <span>{diff.changedFiles.length} 个文件</span>
+      </summary>
+      <div className="diffFiles">
+        {diff.changedFiles.slice(0, 8).map((file) => <Tag key={file}>{file}</Tag>)}
+      </div>
+      {diff.stat && <pre>{diff.stat}</pre>}
+      {diff.patch && <pre className="patchBlock">{diff.patch}{diff.truncated ? "\n... diff 已截断" : ""}</pre>}
+    </details>
   );
 }
