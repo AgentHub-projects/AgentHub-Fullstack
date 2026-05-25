@@ -5,6 +5,8 @@ export type AgentRunStatus =
   | "failed"
   | "cancelled";
 
+export const DEFAULT_WORKSPACE_PATH = "D:\\agent\\AgentHub-Test";
+
 export type AgentEventType =
   | "agent_started"
   | "agent_thinking"
@@ -26,7 +28,12 @@ export type AgentEventType =
   | "team_verifying"
   | "team_verdict_ready"
   | "team_completed"
-  | "team_failed";
+  | "team_failed"
+  // Frontend-safe public events
+  | "public_text"
+  | "plan_card"
+  | "assignment_card"
+  | "result_card";
 
 export type AgentRuntimeStatus =
   | "idle"
@@ -106,6 +113,38 @@ export interface AgentEvent {
   ts: number;
 }
 
+export interface PublicTextPayload {
+  text: string;
+  title?: string;
+  variant?: "info" | "success" | "warning" | "error";
+}
+
+export interface PlanCardPayload {
+  plan: TeamPlan;
+}
+
+export interface AssignmentCardPayload {
+  agentId: string;
+  task: string;
+  dependsOn: string[];
+}
+
+export interface ResultCardPayload {
+  agentId: string;
+  title: string;
+  summary: string;
+  status: "succeeded" | "failed";
+}
+
+export interface CodeDiffPreview {
+  worktreePath: string;
+  branchName: string;
+  changedFiles: string[];
+  stat: string;
+  patch: string;
+  truncated: boolean;
+}
+
 export interface SessionDto {
   id: string;
   title?: string;
@@ -165,8 +204,14 @@ export interface ConversationDto {
   agentId: string;
   type: ConversationType;
   teamId?: string;
+  workspacePath: string;
   status: SessionStatus;
+  isPinned: boolean;
+  isArchived: boolean;
   messageCount: number;
+  pinnedMessageIds: string[];
+  pinnedAt?: string;
+  archivedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -177,6 +222,8 @@ export interface MessageDto {
   role: "user" | "assistant" | "system";
   content: string;
   agentId?: string;
+  quotedMessageId?: string;
+  pinned?: boolean;
   createdAt: string;
 }
 
@@ -185,11 +232,24 @@ export interface CreateConversationRequest {
   agentId?: string;
   type?: ConversationType;
   teamId?: string;
+  workspacePath?: string;
 }
 
 export interface CreateMessageRequest {
   content: string;
   agentId?: string;
+  quotedMessageId?: string;
+}
+
+export interface UpdateConversationRequest {
+  title?: string;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  workspacePath?: string;
+}
+
+export interface PinMessageRequest {
+  pinned: boolean;
 }
 
 // ---- Agent types ----
@@ -260,6 +320,8 @@ export interface TeamTaskResult {
   runId: string;
   status: "succeeded" | "failed";
   output: string;
+  diffPreview?: CodeDiffPreview;
+  sync?: TestSyncResultDto;
 }
 
 export interface TeamRunDto {

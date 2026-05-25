@@ -4,6 +4,7 @@ import { AgentRunner } from "./agent-runner.service";
 import { AgentService } from "./agent.service";
 import { WorktreeService } from "./worktree.service";
 import { ConversationService } from "./conversation.service";
+import { DEFAULT_WORKSPACE_PATH } from "@agenthub/shared";
 import type { AgentDto, AgentEvent, AgentRun } from "@agenthub/shared";
 
 export interface OpenAIChatMessage {
@@ -117,22 +118,21 @@ export class ChatService {
 
     let fullContent = "";
 
-    // If using an existing conversation, save the user message first
-    if (request.conversationId) {
-      try {
-        this.conversations.getOrCreate(request.conversationId, {
-          title: request.messages
-            .filter((m) => m.role === "user")
-            .map((m) => m.content.slice(0, 40))
-            .join(" | ") || "Chat",
-          agentId: agent.id,
-        });
-        this.conversations.createMessage(request.conversationId, {
-          content: request.messages.filter((m) => m.role === "user").at(-1)?.content ?? "",
-        });
-      } catch {
-        // ignore save errors
-      }
+    const conversation = this.conversations.getOrCreate(conversationId, {
+      title: request.messages
+        .filter((m) => m.role === "user")
+        .map((m) => m.content.slice(0, 40))
+        .join(" | ") || "Chat",
+      agentId: agent.id,
+      type: "direct",
+      workspacePath: DEFAULT_WORKSPACE_PATH,
+    });
+    const lastUserContent = request.messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
+    if (lastUserContent) {
+      this.conversations.createMessage(conversationId, {
+        content: lastUserContent,
+        agentId: agent.id,
+      });
     }
 
     const run: AgentRun = {
@@ -154,7 +154,7 @@ export class ChatService {
       startedAt: now,
     };
 
-    const worktree = await this.worktrees.prepare(runId);
+    const worktree = await this.worktrees.prepare(runId, conversation.workspacePath);
 
     await this.runner.run({
       run,
@@ -186,7 +186,34 @@ export class ChatService {
           // Optionally emit as reasoning_content
         }
       },
-    }).then((result) => {
+    }).then(async (result) => {
+      const diffPreview = await this.worktrees.getDiffPreview(worktree);
+      const sync = await this.worktrees.complete(worktree, result.summary);
+      if (sync.status === "failed") {
+        throw new Error(sync.error?.message ?? "Agent changes failed to sync back to the workspace");
+      }
+
+      let finalContent = fullContent || result.output;
+      if (diffPreview.changedFiles.length > 0 || diffPreview.patch.trim()) {
+        const syncNote = `\n\n已同步到工作区 ${conversation.workspacePath}，变更文件：${diffPreview.changedFiles.join(", ") || "无"}。`;
+        finalContent += syncNote;
+        onChunk({
+          id: runId,
+          object: "chat.completion.chunk",
+          created,
+          model: request.model,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: syncNote,
+              },
+              finish_reason: null,
+            },
+          ],
+        });
+      }
+
       // Final chunk with finish_reason = "stop"
       onChunk({
         id: runId,
@@ -202,30 +229,8 @@ export class ChatService {
         ],
       });
 
-      // Save assistant message to conversation
-      try {
-        if (request.conversationId) {
-          // Reuse existing conversation
-          this.conversations.addAssistantMessage(request.conversationId, fullContent || result.output);
-        } else {
-          // Create new conversation for stateless calls
-          const conv = this.conversations.create({
-            title: request.messages
-              .filter((m) => m.role === "user")
-              .map((m) => m.content.slice(0, 30))
-              .join(" | "),
-            agentId: agent.id,
-          });
-          this.conversations.createMessage(conv.id, {
-            content: prompt,
-          });
-          this.conversations.addAssistantMessage(conv.id, fullContent || result.output);
-        }
-      } catch {
-        // ignore conversation save errors
-      }
-
-      onDone(fullContent || result.output);
+      this.conversations.addAssistantMessage(conversationId, finalContent, agent.id);
+      onDone(finalContent);
     }).catch((error) => {
       onError(error instanceof Error ? error : new Error(String(error)));
     });

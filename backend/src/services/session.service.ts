@@ -47,8 +47,8 @@ export class SessionService {
     @Inject(AgentRunner) private readonly runner: AgentRunner,
     @Inject(WorktreeService) private readonly worktrees: WorktreeService,
     @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway,
-    @Inject(ConversationService) private readonly conversations: ConversationService,
-    @Inject(AgentService) private readonly agents: AgentService
+    @Inject(ConversationService) private readonly conversations: ConversationService = new ConversationService(),
+    @Inject(AgentService) private readonly agents: AgentService = new AgentService()
   ) {}
 
   getCurrentSession(): SessionDto {
@@ -61,6 +61,12 @@ export class SessionService {
       throw new ApiHttpException(HttpStatus.BAD_REQUEST, {
         code: "PROMPT_REQUIRED",
         message: "prompt is required"
+      });
+    }
+    if (this.activeRunIds.size > 0) {
+      throw new ApiHttpException(HttpStatus.CONFLICT, {
+        code: "ACTIVE_RUN_EXISTS",
+        message: "Another run is already active."
       });
     }
 

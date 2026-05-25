@@ -7,7 +7,7 @@ import type { PreparedWorktree } from "./worktree.service";
 
 export interface RunnerContext {
   run: AgentRun;
-  agent: AgentDto;
+  agent?: AgentDto;
   prompt: string;
   worktree: PreparedWorktree;
   emit: (event: Omit<AgentEvent, "eventId" | "seq" | "ts">) => void;
@@ -33,7 +33,13 @@ const AGENT_COMMAND_ENV_ALLOWLIST = [
   "ComSpec",
   "PSModulePath",
   "CLAUDE_CONFIG_DIR",
-  "CLAUDE_CODE_GIT_BASH_PATH"
+  "CLAUDE_CODE_GIT_BASH_PATH",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY"
 ] as const;
 
 export function buildAgentCommandEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -47,8 +53,8 @@ export function buildAgentCommandEnv(source: NodeJS.ProcessEnv = process.env): N
   return env;
 }
 
-export function buildAgentPrompt(agent: AgentDto, task: string): string {
-  if (agent.systemPrompt) {
+export function buildAgentPrompt(agent: Partial<AgentDto> | undefined, task: string): string {
+  if (agent?.systemPrompt) {
     return [
       agent.systemPrompt,
       "",
@@ -62,7 +68,7 @@ export function buildAgentPrompt(agent: AgentDto, task: string): string {
     "You are an AgentHub coding agent. Only modify files within the current working directory (isolated git worktree).",
     "Do NOT modify files outside this directory.",
     "",
-    "User request:",
+    "用户原始需求：",
     task,
     "",
     "Complete the task and ensure all output files are ready to commit."
@@ -118,6 +124,37 @@ export function parseClaudeStreamLine(line: string): ParsedClaudeEvent | undefin
       agentEventType: "text_delta",
       payload: { text: trimmed },
       text: trimmed
+    };
+  }
+
+  const legacy = parsed as ClaudeStreamEvent & {
+    text?: string;
+    delta?: { text?: string; content?: string };
+    content?: ClaudeContentBlock[];
+  };
+  if (typeof legacy.text === "string") {
+    return {
+      agentEventType: "text_delta",
+      payload: { text: legacy.text },
+      text: legacy.text
+    };
+  }
+  const legacyDeltaText = legacy.delta?.text ?? legacy.delta?.content;
+  if (typeof legacyDeltaText === "string") {
+    return {
+      agentEventType: "text_delta",
+      payload: { text: legacyDeltaText },
+      text: legacyDeltaText
+    };
+  }
+  const legacyTextBlock = Array.isArray(legacy.content)
+    ? legacy.content.find((block) => block.type === "text" && typeof block.text === "string")
+    : undefined;
+  if (legacyTextBlock?.text) {
+    return {
+      agentEventType: "text_delta",
+      payload: { text: legacyTextBlock.text },
+      text: legacyTextBlock.text
     };
   }
 
@@ -256,15 +293,16 @@ export class AgentRunner {
     let output: string;
 
     // Agent-aware mock output
-    if (context.agent.role === "orchestrator") {
+    const role = context.agent?.role;
+    if (role === "orchestrator") {
       output = this.mockOrchestrator(context);
-    } else if (context.agent.role === "backend-developer") {
+    } else if (role === "backend-developer") {
       output = await this.mockBackendWorker(context);
-    } else if (context.agent.role === "frontend-developer") {
+    } else if (role === "frontend-developer") {
       output = await this.mockFrontendWorker(context);
-    } else if (context.agent.role === "qa-engineer") {
+    } else if (role === "qa-engineer") {
       output = this.mockTestWorker(context);
-    } else if (context.agent.role === "code-reviewer") {
+    } else if (role === "code-reviewer") {
       output = this.mockReviewWorker(context);
     } else {
       // Generic mock: generate todo files (keep async for worktree sync tests)

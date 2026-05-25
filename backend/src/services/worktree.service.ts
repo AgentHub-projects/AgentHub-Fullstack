@@ -1,26 +1,33 @@
 import { Injectable } from "@nestjs/common";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import type { TestSyncResultDto } from "@agenthub/shared";
+import { DEFAULT_WORKSPACE_PATH } from "@agenthub/shared";
+import type { CodeDiffPreview, TestSyncResultDto } from "@agenthub/shared";
 
 const execFileAsync = promisify(execFile);
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 
-const EBUSY_RETRY_MS = [100, 250, 500];
-const EBUSY_MAX_ATTEMPTS = EBUSY_RETRY_MS.length + 1;
+const REMOVE_RETRY_MS = [100, 250, 500];
+const REMOVE_MAX_ATTEMPTS = REMOVE_RETRY_MS.length + 1;
+const LOCKED_REMOVE_ERROR_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
+
+function isLockedRemoveError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return typeof code === "string" && LOCKED_REMOVE_ERROR_CODES.has(code);
+}
 
 async function rmRetry(target: string, options: { recursive?: boolean; force?: boolean } = {}): Promise<void> {
-  for (let attempt = 0; attempt < EBUSY_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < REMOVE_MAX_ATTEMPTS; attempt++) {
     try {
       await rm(target, { ...options });
       return;
     } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code === "EBUSY" && attempt < EBUSY_MAX_ATTEMPTS - 1) {
-        await new Promise((resolve) => setTimeout(resolve, EBUSY_RETRY_MS[attempt]));
+      if (isLockedRemoveError(err) && attempt < REMOVE_MAX_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, REMOVE_RETRY_MS[attempt]));
         continue;
       }
       throw err;
@@ -36,10 +43,35 @@ export interface PreparedWorktree {
   logPath: string;
 }
 
+const TARGET_EXCLUDES = [
+  ":(exclude).agenthub",
+  ":(exclude)runs",
+  ":(exclude)runs/**",
+  ":(exclude)**/node_modules",
+  ":(exclude)**/node_modules/**",
+  ":(exclude)**/dist",
+  ":(exclude)**/dist/**",
+  ":(exclude)**/build",
+  ":(exclude)**/build/**",
+  ":(exclude)**/.next",
+  ":(exclude)**/.next/**",
+  ":(exclude)**/coverage",
+  ":(exclude)**/coverage/**",
+  ":(exclude)**/*.tsbuildinfo",
+] as const;
+
+const GENERATED_DIR_NAMES = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  "coverage",
+]);
+
 @Injectable()
 export class WorktreeService {
   async prepare(runId: string, requestedRepoPath?: string): Promise<PreparedWorktree> {
-    const repoPath = requestedRepoPath ?? process.env.AGENTHUB_TEST_REPO_PATH ?? "D:\\agent\\AgentHub-Test";
+    const repoPath = requestedRepoPath ?? process.env.AGENTHUB_TEST_REPO_PATH ?? DEFAULT_WORKSPACE_PATH;
     await this.git(repoPath, ["rev-parse", "--is-inside-work-tree"]);
     await this.cleanupLegacyRepoWorktrees(repoPath);
 
@@ -91,8 +123,42 @@ export class WorktreeService {
     await writeFile(prepared.logPath, `${existing}${text}`, "utf8");
   }
 
-  async complete(prepared: PreparedWorktree, summary: string): Promise<TestSyncResultDto> {
+  async getDiffPreview(prepared: PreparedWorktree, maxPatchChars = 8000): Promise<CodeDiffPreview> {
+    await this.pruneGeneratedArtifactsBestEffort(prepared.worktreePath);
     try {
+      await this.git(prepared.worktreePath, ["add", "-N", "--", ".", ...TARGET_EXCLUDES]);
+    } catch {
+      // Intent-to-add is best-effort so untracked files can appear in diff previews.
+    }
+
+    const [statusResult, statResult, patchResult] = await Promise.all([
+      this.git(prepared.worktreePath, ["status", "--short", "--", ".", ...TARGET_EXCLUDES]),
+      this.git(prepared.worktreePath, ["diff", "--stat", "--", ".", ...TARGET_EXCLUDES]),
+      this.git(prepared.worktreePath, ["diff", "--", ".", ...TARGET_EXCLUDES]),
+    ]);
+
+    const changedFiles = statusResult.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .map((line) => line.slice(3).replace(/^"|"$/g, ""))
+      .filter((file) => file && !file.startsWith(".agenthub/") && !file.startsWith("runs/"));
+    const patch = patchResult.stdout;
+
+    return {
+      worktreePath: prepared.worktreePath,
+      branchName: prepared.branchName,
+      changedFiles,
+      stat: statResult.stdout.trim(),
+      patch: patch.length > maxPatchChars ? patch.slice(0, maxPatchChars) : patch,
+      truncated: patch.length > maxPatchChars,
+    };
+  }
+
+  async complete(prepared: PreparedWorktree, summary: string): Promise<TestSyncResultDto> {
+    let result: TestSyncResultDto;
+    try {
+      await this.pruneGeneratedArtifactsBestEffort(prepared.worktreePath);
       await mkdir(dirname(prepared.summaryPath), { recursive: true });
       await writeFile(prepared.summaryPath, summary, "utf8");
 
@@ -111,23 +177,20 @@ export class WorktreeService {
 
       await this.git(prepared.repoPath, ["checkout", "main"]);
       await this.git(prepared.repoPath, ["merge", "--no-ff", prepared.branchName, "-m", `merge ${prepared.branchName}`]);
-      await this.cleanupLegacyRepoWorktrees(prepared.repoPath);
-      await this.cleanupRunWorktree(prepared);
+      await this.cleanupLegacyRepoWorktreesBestEffort(prepared.repoPath);
 
-      return {
+      result = {
         status: "synced",
         targetBranch: "main",
         commitSha,
         summaryPath: prepared.summaryPath
       };
     } catch (error) {
-      try {
-        await this.cleanupRunWorktree(prepared);
-      } catch {
-        // Keep the original sync error so callers report TEST_SYNC_FAILED for the real failure.
-      }
-      return this.fail(error);
+      result = await this.fail(error);
     }
+
+    await this.cleanupRunWorktreeBestEffort(prepared);
+    return result;
   }
 
   async fail(error: unknown): Promise<TestSyncResultDto> {
@@ -142,11 +205,52 @@ export class WorktreeService {
   }
 
   private async git(cwd: string, args: string[]) {
-    return execFileAsync("git", args, { cwd });
+    return execFileAsync("git", args, { cwd, maxBuffer: GIT_MAX_BUFFER });
+  }
+
+  private async pruneGeneratedArtifacts(rootPath: string): Promise<void> {
+    const root = resolve(rootPath);
+    const visit = async (currentPath: string): Promise<void> => {
+      let entries: Array<{ name: string; isDirectory(): boolean }>;
+      try {
+        entries = await readdir(currentPath, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const fullPath = resolve(currentPath, entry.name);
+        const rel = relative(root, fullPath);
+        if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+          continue;
+        }
+        if (entry.name === ".git") {
+          continue;
+        }
+        if (GENERATED_DIR_NAMES.has(entry.name)) {
+          await rmRetry(fullPath, { recursive: true, force: true });
+          continue;
+        }
+        await visit(fullPath);
+      }
+    };
+
+    await visit(root);
+  }
+
+  private async pruneGeneratedArtifactsBestEffort(rootPath: string): Promise<void> {
+    try {
+      await this.pruneGeneratedArtifacts(rootPath);
+    } catch (error) {
+      if (!isLockedRemoveError(error)) {
+        throw error;
+      }
+    }
   }
 
   private async stageTargetChanges(worktreePath: string): Promise<void> {
-    await this.git(worktreePath, ["add", "-A", "--", ".", ":(exclude).agenthub"]);
+    await this.git(worktreePath, ["add", "-A", "--", ".", ...TARGET_EXCLUDES]);
 
     const deletedAgentHubFiles = (await this.git(worktreePath, ["ls-files", "--deleted", "--", ".agenthub"])).stdout
       .split(/\r?\n/)
@@ -166,6 +270,16 @@ export class WorktreeService {
     }
 
     await rmRetry(target, { recursive: true, force: true });
+  }
+
+  private async cleanupLegacyRepoWorktreesBestEffort(repoPath: string): Promise<void> {
+    try {
+      await this.cleanupLegacyRepoWorktrees(repoPath);
+    } catch (error) {
+      if (!isLockedRemoveError(error)) {
+        throw error;
+      }
+    }
   }
 
   private async removeStaleWorktree(repoPath: string, worktreesRoot: string, worktreePath: string): Promise<void> {
@@ -204,6 +318,16 @@ export class WorktreeService {
           throw err;
         }
       }
+    }
+  }
+
+  private async cleanupRunWorktreeBestEffort(prepared: PreparedWorktree): Promise<void> {
+    try {
+      await this.cleanupRunWorktree(prepared);
+    } catch {
+      // A worker may leave dev servers or shell handles under the temporary
+      // worktree. The target repository has already been synced or failed with
+      // the original error, so cleanup must not mask that outcome.
     }
   }
 }

@@ -1,6 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put } from "@nestjs/common";
 import { Inject } from "@nestjs/common";
-import type { ConversationDto, CreateConversationRequest, CreateMessageRequest, MessageDto } from "@agenthub/shared";
+import type {
+  ConversationDto,
+  CreateConversationRequest,
+  CreateMessageRequest,
+  MessageDto,
+  PinMessageRequest,
+  UpdateConversationRequest,
+} from "@agenthub/shared";
 import { ConversationService } from "../services/conversation.service";
 
 @Controller()
@@ -22,6 +29,14 @@ export class ConversationController {
     return this.conversations.get(id);
   }
 
+  @Put("conversations/:id")
+  updateConversation(
+    @Param("id") id: string,
+    @Body() body: UpdateConversationRequest,
+  ): ConversationDto {
+    return this.conversations.update(id, body);
+  }
+
   @Delete("conversations/:id")
   deleteConversation(@Param("id") id: string): { ok: boolean } {
     return this.conversations.delete(id);
@@ -35,5 +50,14 @@ export class ConversationController {
   @Post("conversations/:id/messages")
   createMessage(@Param("id") id: string, @Body() body: CreateMessageRequest): MessageDto {
     return this.conversations.createMessage(id, body);
+  }
+
+  @Post("conversations/:id/messages/:messageId/pin")
+  pinMessage(
+    @Param("id") id: string,
+    @Param("messageId") messageId: string,
+    @Body() body: PinMessageRequest,
+  ): MessageDto {
+    return this.conversations.pinMessage(id, messageId, body);
   }
 }

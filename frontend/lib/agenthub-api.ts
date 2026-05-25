@@ -8,11 +8,13 @@ import type {
   CreateMessageRequest,
   CreateTeamRequest,
   MessageDto,
+  PinMessageRequest,
   RunSessionRequest,
   SessionDto,
   TeamDto,
   TeamRunDto,
   StartTeamRunRequest,
+  UpdateConversationRequest,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
 
@@ -167,6 +169,16 @@ export async function getConversation(id: string): Promise<ApiResult<Conversatio
   return requestJson<ConversationDto>(`/api/conversations/${encodeURIComponent(id)}`);
 }
 
+export async function updateConversation(
+  id: string,
+  body: UpdateConversationRequest,
+): Promise<ApiResult<ConversationDto>> {
+  return requestJson<ConversationDto>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function deleteConversation(id: string): Promise<ApiResult<{ ok: boolean }>> {
   return requestJson<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -187,6 +199,20 @@ export async function createMessage(
 ): Promise<ApiResult<MessageDto>> {
   return requestJson<MessageDto>(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function pinMessage(
+  conversationId: string,
+  messageId: string,
+  body: PinMessageRequest,
+): Promise<ApiResult<MessageDto>> {
+  return requestJson<MessageDto>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/pin`,
     {
       method: "POST",
       body: JSON.stringify(body),
