@@ -7,6 +7,7 @@
     "dev": "pnpm -r --if-present dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
+    "acceptance": "pnpm typecheck && pnpm --filter @agenthub/backend build && pnpm --filter @agenthub/frontend build",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present lint"
   },
