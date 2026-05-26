@@ -122,7 +122,33 @@ flowchart LR
 - 接收 `run.start`，读取任务、上下文和约束。
 - 在云端沙箱真实执行代码修改、命令、分析等动作。
 - 将过程和结果以协议事件流发送给 AgentHub。
-- 文件内容可以留在沙箱内，第一版只需要发送用于展示和持久化的 diff/patch/artifact。
+- 文件内容可以留在沙箱内，第一版需要发送用于展示和持久化的 before/after 文件快照；patch 可选，用于提升 diff 展示效果。
+
+### 3.4 后端与下游 Agent 对接分层
+
+后端与下游 Agent 的对接不要直接写成一个巨大的 WebSocket 处理器。建议拆成以下层次：
+
+```mermaid
+flowchart TB
+  R["RunService"] --> C["ContextSnapshotBuilder"]
+  R --> M["DownstreamSessionManager"]
+  M --> B["DownstreamAgentBridge"]
+  B --> A["ProtocolAdapter"]
+  A --> T["TransportClient"]
+  T <-->|"Socket.IO / WSS"| D["Downstream Agent"]
+  A --> N["EventNormalizer"]
+  N --> I["EventIngestService"]
+  I --> DB[("PostgreSQL")]
+  I --> W["Frontend RealtimeGateway"]
+```
+
+- `TransportClient`：只负责连接、重连、收发原始帧。第一版至少支持 Socket.IO JSON-RPC profile，后续可加原生 WSS profile。
+- `ProtocolAdapter`：把具体下游协议转成 AgentHub 内部统一命令和事件。
+- `DownstreamSessionManager`：维护 AgentHub session 与下游 session 的绑定，决定调用 `session/new` 还是 `session/load`。
+- `EventNormalizer`：把下游 frame 归一化为 `agent_events` 可以落库的事件。
+- `EventIngestService`：唯一负责落库、幂等、派生 artifact/file change/message、广播前端。
+
+落库操作全部放在 AgentHub 后端。下游 Agent 只负责执行和上报事件，不允许直接写 AgentHub 数据库。
 
 ## 4. 后端模块拆分
 
@@ -150,9 +176,17 @@ flowchart LR
   - run 状态机管理：queued -> connecting -> running -> completed/failed/cancelled。
   - 绑定 user message、assistant message、context snapshot、downstream run id。
 - `DownstreamAgentBridge`
-  - 主动连接下游 Agent WebSocket。
-  - 发送 handshake、run.start、ack、cancel。
-  - 接收 stream frame 并交给 `EventIngestService`。
+  - 主动连接下游 Agent。
+  - 不直接写数据库，只负责连接生命周期、请求发送、响应等待和断线通知。
+  - 对外暴露 `initializeAgent`、`ensureDownstreamSession`、`startPrompt`、`cancelPrompt`。
+- `ProtocolAdapter`
+  - 屏蔽下游协议差异。
+  - 第一版重点实现 `north-socketio-jsonrpc` profile：Socket.IO path `/socket.io`、namespace `/acp`、event `acp:message`、JSON-RPC 2.0。
+  - 后续可并行支持 `agenthub-wss-json` profile。
+- `DownstreamSessionManager`
+  - 维护 `session_id + agent_id + agent_instance_id` 到下游 `sessionId` 的映射。
+  - 新 session 首次发送任务时调用 `session/new`。
+  - 已有绑定时优先调用 `session/load`，再调用 `session/prompt`。
 - `EventIngestService`
   - 负责事件幂等、序号检查、落库、派生写入 artifact/file change/message delta。
   - 成功落库后广播前端 WS。
@@ -180,6 +214,45 @@ flowchart LR
 - `completed`：正常结束。
 - `failed`：下游错误、协议错误或连接异常。
 - `cancelled`：用户取消，第一版可预留。
+
+### 4.4 Agent 对接核心对象
+
+后端内部建议统一成以下对象，避免业务层直接依赖 Socket.IO 或 WSS 细节：
+
+```ts
+type DownstreamProfile = "north-socketio-jsonrpc" | "agenthub-wss-json";
+
+interface DownstreamAgentConfig {
+  agentId: string;
+  instanceId?: string;
+  endpointUrl: string;
+  profile: DownstreamProfile;
+  cwd: string;
+  auth?: {
+    type: "none" | "bearer";
+    tokenRef?: string;
+  };
+  meta?: {
+    agentId?: string;
+    agentGroupId?: string;
+    sandboxCwd?: string;
+    leaderTemplateSelector?: string;
+    sandboxTemplateSelector?: string;
+  };
+}
+
+interface NormalizedAgentEvent {
+  runId: string;
+  sessionId: string;
+  seq: number;
+  type: string;
+  visibility: "public" | "debug" | "internal";
+  payload: Record<string, unknown>;
+  occurredAt?: string;
+}
+```
+
+业务层只和 `NormalizedAgentEvent` 交互。具体下游发的是 JSON-RPC、Socket.IO event，还是原生 WSS frame，都由 adapter 处理。
 
 ## 5. 前端工作台设计
 
@@ -424,13 +497,160 @@ Artifact 更新：
 
 ### 8.1 设计原则
 
-- AgentHub 主动连接下游 Agent 的 WSS endpoint。
-- 采用 ACP 的会话通信思想：session、参与方、消息、流式输出、WSS。
-- 第一版使用 JSON envelope，后续可以在同一 payload 外层增加 ACP MessageHeader。
+- AgentHub 主动连接下游 Agent endpoint，endpoint 可以是 Socket.IO namespace，也可以是原生 WSS。
+- 采用 ACP 的会话通信思想：session、参与方、消息、流式输出。
+- 第一版优先兼容 `north-acp-client(1).md` 里的 Socket.IO JSON-RPC 协议，同时保留 AgentHub 原生 WSS JSON envelope 作为更清晰的长期协议。
 - 每个 run 内由下游 Agent 维护递增 `seq`，AgentHub 以 `runId + seq` 幂等落库。
 - 下游 Agent 不直接操作 AgentHub 数据库，只通过协议上报事件。
 
-### 8.2 连接地址
+### 8.2 协议 profile
+
+第一版后端实现两个协议层概念：
+
+| profile | 用途 | 传输 | 状态 |
+| --- | --- | --- | --- |
+| `north-socketio-jsonrpc` | 兼容当前下游 North ACP Client 文档 | Socket.IO `/acp` namespace + `acp:message` event + JSON-RPC 2.0 | 第一版优先实现 |
+| `agenthub-wss-json` | AgentHub 自定义长期协议草案 | 原生 WSS + JSON envelope | 可作为 mock 和后续演进 |
+
+当前下游文档定义了这些 JSON-RPC 方法：
+
+- `initialize`
+- `session/new`
+- `session/load`
+- `session/list`
+- `session/prompt`
+- `session/cancel`
+
+该文档没有完整定义流式输出、文件快照、artifact 的通知事件。因此 AgentHub 需要在 `north-socketio-jsonrpc` adapter 中补充一个统一事件入口：下游通过 JSON-RPC request `session/event` 上报流式事件，AgentHub 响应 JSON-RPC result 作为 ack。低价值日志可以用 notification，但关键事件必须带 `id`。
+
+### 8.3 North Socket.IO JSON-RPC profile
+
+连接：
+
+```text
+Socket.IO path: /socket.io
+Socket.IO namespace: /acp
+event: acp:message
+```
+
+初始化：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": 1
+  }
+}
+```
+
+新建下游 session：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "session/new",
+  "params": {
+    "cwd": "/workspace",
+    "mcpServers": [],
+    "_meta": {
+      "agentId": "<agent-id>",
+      "sandboxCwd": "/workspace",
+      "leaderTemplateSelector": "agent",
+      "sandboxTemplateSelector": "sandbox"
+    }
+  }
+}
+```
+
+已有绑定时加载下游 session：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/load",
+  "params": {
+    "sessionId": "<downstream-session-id>",
+    "cwd": "/workspace",
+    "mcpServers": []
+  }
+}
+```
+
+发送 prompt：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "session/prompt",
+  "params": {
+    "sessionId": "<downstream-session-id>",
+    "messageId": "<agenthub-message-id>",
+    "prompt": [
+      {
+        "type": "text",
+        "text": "用户当前任务"
+      }
+    ],
+    "_meta": {
+      "agentId": "<agent-id>",
+      "agenthubRunId": "<agenthub-run-id>",
+      "agenthubSessionId": "<agenthub-session-id>",
+      "contextSnapshotId": "<context-snapshot-id>"
+    }
+  }
+}
+```
+
+取消：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/cancel",
+  "params": {
+    "sessionId": "<downstream-session-id>"
+  }
+}
+```
+
+下游流式事件统一入口：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1001,
+  "method": "session/event",
+  "params": {
+    "sessionId": "<downstream-session-id>",
+    "agenthubSessionId": "<agenthub-session-id>",
+    "agenthubRunId": "<agenthub-run-id>",
+    "seq": 10,
+    "type": "file.change",
+    "visibility": "public",
+    "payload": {}
+  }
+}
+```
+
+AgentHub 收到后完成落库，再返回：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1001,
+  "result": {
+    "ackSeq": 10
+  }
+}
+```
+
+### 8.4 AgentHub WSS JSON profile
 
 ```text
 wss://{agent-host}/acp/v1/ws
@@ -448,7 +668,7 @@ AgentHub 配置每个 Agent 实例：
 }
 ```
 
-### 8.3 通用 envelope
+### 8.5 通用 envelope
 
 ```json
 {
@@ -475,7 +695,7 @@ AgentHub 配置每个 Agent 实例：
 - `seq`：下游发往 AgentHub 的 run 内序号。AgentHub 发给下游的控制消息可以不带 seq。
 - `payload`：具体消息体。
 
-### 8.4 握手
+### 8.6 握手
 
 AgentHub -> Agent：
 
@@ -517,7 +737,7 @@ Agent -> AgentHub：
 }
 ```
 
-### 8.5 启动 run
+### 8.7 启动 run
 
 AgentHub -> Agent：
 
@@ -584,7 +804,7 @@ Agent -> AgentHub：
 }
 ```
 
-### 8.6 流式文本
+### 8.8 流式文本
 
 ```json
 {
@@ -623,7 +843,7 @@ Agent -> AgentHub：
 
 前端默认只展示 `visibility = public` 或未设置 visibility 的内容。`debug/internal` 放入运行日志。
 
-### 8.7 工具事件
+### 8.9 工具事件
 
 ```json
 {
@@ -655,11 +875,11 @@ Agent -> AgentHub：
 }
 ```
 
-### 8.8 文件 diff
+### 8.10 文件变更快照
 
 ```json
 {
-  "type": "file.diff",
+  "type": "file.change",
   "sessionId": "session-uuid",
   "runId": "run-uuid",
   "seq": 10,
@@ -668,7 +888,19 @@ Agent -> AgentHub：
     "oldPath": null,
     "changeType": "modified",
     "language": "tsx",
-    "patch": "@@ -1,3 +1,7 @@\n import React from 'react'\n+import { Button } from './ui/button'\n",
+    "before": {
+      "content": "import React from 'react'\n\nexport default function Login() {\n  return <div>Login</div>\n}\n",
+      "encoding": "utf8",
+      "sha256": "before-sha256",
+      "truncated": false
+    },
+    "after": {
+      "content": "import React from 'react'\nimport { Button } from './ui/button'\n\nexport default function Login() {\n  return <Button>Login</Button>\n}\n",
+      "encoding": "utf8",
+      "sha256": "after-sha256",
+      "truncated": false
+    },
+    "patch": "@@ -1,5 +1,6 @@\n import React from 'react'\n+import { Button } from './ui/button'\n",
     "stats": {
       "additions": 4,
       "deletions": 0
@@ -677,9 +909,9 @@ Agent -> AgentHub：
 }
 ```
 
-`changeType` 取值：`added`、`modified`、`deleted`、`renamed`。
+`changeType` 取值：`added`、`modified`、`deleted`、`renamed`。`before` 和 `after` 是第一版主要持久化内容；`patch` 可选。大文件允许设置 `truncated=true`，但必须提供 `sha256`，方便后续和沙箱直连能力对齐。
 
-### 8.9 Artifact
+### 8.11 Artifact
 
 小文本 artifact：
 
@@ -752,7 +984,7 @@ Agent -> AgentHub：
 }
 ```
 
-### 8.10 完成、失败和 ACK
+### 8.12 完成、失败和 ACK
 
 完成：
 
@@ -806,7 +1038,7 @@ AgentHub ACK：
 }
 ```
 
-### 8.11 断线策略
+### 8.13 断线策略
 
 第一版建议：
 
@@ -950,6 +1182,7 @@ CREATE TABLE IF NOT EXISTS agents (
   name text NOT NULL,
   description text NOT NULL DEFAULT '',
   endpoint_url text NOT NULL,
+  protocol_profile text NOT NULL DEFAULT 'north-socketio-jsonrpc',
   auth_type text NOT NULL DEFAULT 'none',
   auth_secret_ref text,
   capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -1073,6 +1306,21 @@ CREATE TABLE IF NOT EXISTS downstream_connections (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS downstream_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  agent_instance_id uuid REFERENCES agent_instances(id) ON DELETE SET NULL,
+  downstream_session_id text NOT NULL,
+  cwd text NOT NULL DEFAULT '/workspace',
+  protocol_profile text NOT NULL DEFAULT 'north-socketio-jsonrpc',
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  loaded_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, agent_id, agent_instance_id)
+);
+
 CREATE TABLE IF NOT EXISTS agent_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -1150,6 +1398,12 @@ CREATE TABLE IF NOT EXISTS file_changes (
   old_path text,
   change_type file_change_type NOT NULL,
   language text,
+  before_content text,
+  before_sha256 text,
+  before_truncated boolean NOT NULL DEFAULT false,
+  after_content text,
+  after_sha256 text,
+  after_truncated boolean NOT NULL DEFAULT false,
   patch text,
   stats jsonb NOT NULL DEFAULT '{}'::jsonb,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -1207,6 +1461,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, 
 CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(session_id, is_pinned) WHERE is_pinned = true;
 CREATE INDEX IF NOT EXISTS idx_agent_runs_session_created ON agent_runs(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+CREATE INDEX IF NOT EXISTS idx_downstream_sessions_session_agent ON downstream_sessions(session_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_events_run_seq ON agent_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_agent_events_session_persisted ON agent_events(session_id, persisted_at);
 CREATE INDEX IF NOT EXISTS idx_artifacts_session_updated ON artifacts(session_id, updated_at DESC);
@@ -1240,22 +1495,23 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 1. `RunService` 把 run 状态改成 `context_building`。
 2. `ContextService` 生成 context snapshot。
 3. `RunService` 把 run 状态改成 `connecting`。
-4. `DownstreamAgentBridge` 连接 Agent WSS，完成 hello。
-5. 发送 `run.start`。
-6. 收到 `run.started` 后，run 状态改成 `running`。
+4. `DownstreamSessionManager` 查询 `downstream_sessions`，没有绑定则通过 adapter 调用 `session/new`，已有绑定则调用 `session/load`。
+5. `DownstreamAgentBridge` 建立到 Agent 的 Socket.IO 或 WSS 连接，并调用 `initialize` 或 hello。
+6. 对 `north-socketio-jsonrpc` profile，调用 `session/prompt`；对 `agenthub-wss-json` profile，发送 `run.start`。
+7. 收到首个 `run.started` 或 `session/prompt` 成功响应后，run 状态改成 `running`。
 
 ### 11.3 接收下游事件
 
 1. 下游发送 frame。
-2. `DownstreamAgentBridge` 做最小协议校验。
-3. `EventIngestService` 在事务中写入 `agent_events`。
+2. `ProtocolAdapter` 做最小协议校验，并归一化为 `NormalizedAgentEvent`。
+3. `EventIngestService` 在事务中写入 `agent_events`，以 `run_id + seq` 幂等去重。
 4. 根据 event type 派生写入：
    - `message.delta` -> 更新 assistant message buffer。
-   - `file.diff` -> 写 `file_changes`。
+   - `file.change` -> 写 `file_changes`，以 before/after 快照为主，patch 可选。
    - `artifact.*` -> 写 `artifacts`、`artifact_chunks`、`artifact_blobs`。
    - `run.completed` -> 更新 run、assistant final message、usage。
 5. 事务提交后向前端广播。
-6. 向下游发送 ack。
+6. 对 JSON-RPC request 返回 result 作为 ack；对 WSS profile 发送 `ack` frame。
 
 ### 11.4 Run 完成后
 
@@ -1279,12 +1535,13 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 - 前端 session subscribe、事件合并、断线重连。
 - 搭出三栏 Workbench：session rail、timeline、artifact inspector。
 
-### Phase 3：下游 Agent WSS
+### Phase 3：下游 Agent 对接
 
 - 实现 `DownstreamAgentBridge`。
-- 实现 hello、run.start、ack、run.completed/failed。
+- 实现 `north-socketio-jsonrpc` adapter：`initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel`、`session/event` ack。
+- 实现 `DownstreamSessionManager` 和 `downstream_sessions` 绑定。
 - 写一个 mock downstream agent 用于联调。
-- 把 message delta、tool event、file diff、artifact 端到端打通。
+- 把 message delta、tool event、file change snapshot、artifact 端到端打通。
 
 ### Phase 4：artifact 和 diff 渲染
 
