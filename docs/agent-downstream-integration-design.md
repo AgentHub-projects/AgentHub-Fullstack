@@ -12,7 +12,9 @@
 - AgentHub 后端工程师知道 Bridge、adapter、落库、ack、重连、上下文注入怎么实现。
 - 下游 Agent 团队知道需要提供哪些连接入口、JSON-RPC 方法、流式事件、文件快照和 artifact 上报格式。
 
-第一版采用单用户、单后端、一个主 Orchestrator 入口。用户可以在消息中 `@` 多个 Agent，但 AgentHub 不直接调度这些 worker Agent；后端只把 mentions 传给主 Orchestrator，由 Orchestrator 自动协调分工。所有落库操作都在 AgentHub 后端完成，下游 Agent 不直接访问 AgentHub 数据库。
+第一版采用单用户、单后端、一个主 Orchestrator 入口。一个 AgentHub 群聊 session 复用一条到主 Orchestrator 的长连接。用户可以在消息中 `@` 多个 Agent，但 AgentHub 不直接调度这些 worker Agent；后端只把 mentions 传给主 Orchestrator，由 Orchestrator 自动协调分工。所有落库操作都在 AgentHub 后端完成，下游 Agent 不直接访问 AgentHub 数据库。
+
+AgentHub 内部的 Agent 数据模型是 `AgentTemplate -> Agent`：模板保存提示词和默认能力，Agent 是实际实例。协议里的 `agentId`、`mentionedAgentIds`、`speaker` 都指向 Agent 实例 id。
 
 ## 2. 角色与责任
 
@@ -20,7 +22,7 @@
 
 AgentHub 后端负责：
 
-- 主动连接下游主 Orchestrator endpoint。
+- 主动连接下游主 Orchestrator endpoint，并按 AgentHub session 复用长连接。
 - 初始化协议连接。
 - 为 AgentHub session 创建或加载下游 session。
 - 在发送 prompt 前构造 context snapshot。
@@ -42,7 +44,7 @@ AgentHub 后端负责：
 - 自动协调被 `@` 的多个 Agent 分工，组织它们像群聊成员一样依次回复。
 - 在云端沙箱中真实执行任务。
 - 把过程输出、工具调用、文件变更快照、artifact、完成或失败事件上报给 AgentHub。
-- 多 Agent 回复时，在 `message.delta` 等事件中携带 `speaker`。
+- 多 Agent 回复时，在 `message.delta` 等事件中携带 `speaker`，值为 agentId。
 - 保证同一个 run 内事件 `seq` 单调递增。
 
 ### 2.3 云端沙箱
@@ -107,9 +109,9 @@ JSON-RPC: 2.0
 
 职责：
 
-- 根据 `agents.protocol_profile` 选择 adapter。
-- 维护 `orchestrator_agent_id + agent_instance_id` 到连接对象的映射。
-- 避免同一个 Orchestrator 实例重复建连。
+- 根据 `agents.protocol_profile` 选择 adapter。`agents` 是实例表，实例的系统提示词来自其引用的 `agent_templates`。
+- 维护 `agenthub_session_id + orchestrator_agent_id` 到连接对象的映射。
+- 避免同一个 AgentHub session 对同一个 Orchestrator 重复建连。
 - 处理连接状态：connecting、connected、closed、failed。
 - 把连接状态写入 `downstream_connections`。
 
@@ -117,8 +119,8 @@ JSON-RPC: 2.0
 
 ```ts
 interface AgentConnectionManager {
-  getConnection(config: DownstreamAgentConfig): Promise<AgentConnection>;
-  closeConnection(agentInstanceId: string): Promise<void>;
+  getConnection(sessionId: string, config: DownstreamAgentConfig): Promise<AgentConnection>;
+  closeConnection(sessionId: string, orchestratorAgentId: string): Promise<void>;
 }
 ```
 
@@ -156,7 +158,7 @@ interface ProtocolAdapter {
 绑定粒度：
 
 ```text
-agenthub_session_id + orchestrator_agent_id + agent_instance_id -> downstream_session_id
+agenthub_session_id + orchestrator_agent_id -> downstream_session_id
 ```
 
 这样一个 AgentHub session 可以和不同 Orchestrator 实例分别建立下游 session；被 `@` 的 worker Agent 不单独建立下游连接。
@@ -315,7 +317,7 @@ Agent -> AgentHub：
 AgentHub 处理规则：
 
 - 初始化成功后把连接状态设为 `connected`。
-- 保存 capabilities 到 `agent_instances.capabilities`。
+- 保存连接探测到的 capabilities 到 `agents.capabilities_override` 或 `agents.runtime_config`，模板默认能力仍在 `agent_templates.default_capabilities`。
 - 如果初始化失败，当前 run 标记为 `failed`，错误码 `DOWNSTREAM_INITIALIZE_FAILED`。
 
 ## 8. 下游 Session 管理
@@ -376,7 +378,7 @@ Agent 返回：
 AgentHub 落库：
 
 - 写入 `downstream_sessions.downstream_session_id`。
-- 绑定当前 `session_id`、`orchestrator_agent_id`、`agent_instance_id`。
+- 绑定当前 `session_id`、`orchestrator_agent_id`。
 - 保存 `cwd` 和 `_meta`。
 
 ### 8.2 加载 session
@@ -447,7 +449,7 @@ AgentHub 处理规则：
 当前 North 文档的 `prompt` block 只明确示例了 `type: "text"`。为减少对下游解析器的侵入，第一版建议：
 
 - `prompt[0]` 放用户当前任务。
-- `_meta.mentionedAgentIds` 和 `_meta.mentionedAgentNames` 放用户显式 `@` 的 Agent 列表。
+- `_meta.mentionedAgentIds` 和 `_meta.mentionedAgentNames` 放用户显式 `@` 的 Agent 实例列表。`mentionedAgentIds` 是 `agents.id`，不是模板 id。
 - `_meta.contextSnapshotId` 标识 AgentHub 后端已生成的上下文快照。
 - 如果下游当前无法通过 API 拉取上下文，AgentHub 可在 `prompt` 前追加一个 text block，内容为压缩后的上下文。
 
@@ -539,15 +541,13 @@ AgentHub ack：
 | `occurredAt` | 否 | 下游发生时间 |
 | `payload` | 是 | 事件载荷 |
 
-`payload.speaker` 用于多 Agent 群聊展示。只要事件代表某个 Agent 的产出，就建议携带：
+`payload.speaker` 用于多 Agent 群聊展示。只要事件代表某个 Agent 的产出，就必须携带该 Agent 实例 id：
 
 ```json
-{
-  "agentId": "<frontend-agent-id>",
-  "name": "Frontend",
-  "role": "member"
-}
+"<frontend-agent-id>"
 ```
+
+下游只返回 agentId。AgentHub 后端根据 `agents.template_id -> agent_templates` 补全展示名、角色类型和头像等 UI 信息。
 
 ### 10.2 事件类型
 
@@ -587,11 +587,7 @@ AgentHub 派生行为：
 ```json
 {
   "role": "assistant",
-  "speaker": {
-    "agentId": "<frontend-agent-id>",
-    "name": "Frontend",
-    "role": "member"
-  },
+  "speaker": "<frontend-agent-id>",
   "channel": "final",
   "text": "我先检查项目结构。",
   "append": true
@@ -603,12 +599,12 @@ AgentHub 派生行为：
 - `channel = final`：进入用户可见消息流。
 - `channel = analysis` 或 `visibility = debug`：进入运行日志，不默认展示在主消息中。
 - `append = true`：追加到当前 assistant message。
-- `speaker`：标识这段回复来自 Orchestrator 还是某个被协调的 Agent。缺省时按主 Orchestrator 处理。
+- `speaker`：标识这段回复来自哪个 Agent 实例，值为 agentId。缺省时按主 Orchestrator 处理。
 
 AgentHub 派生行为：
 
 - 写入 `agent_events`。
-- 按 `speaker.agentId/name` 追加或更新对应 Agent 的 assistant message。
+- 按 `speaker` agentId 追加或更新对应 Agent 的 assistant message，展示名由后端从 `agents` 和 `agent_templates` 补全。
 - 广播前端 `run.event`。
 
 ### 11.3 tool.call
@@ -974,11 +970,7 @@ Mock Agent 发送 `message.delta`：
     "type": "message.delta",
     "payload": {
       "role": "assistant",
-      "speaker": {
-        "agentId": "mock-frontend",
-        "name": "Frontend",
-        "role": "member"
-      },
+      "speaker": "mock-frontend",
       "channel": "final",
       "text": "我会更新登录页按钮文案。",
       "append": true

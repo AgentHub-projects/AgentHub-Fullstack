@@ -14,7 +14,7 @@ AgentHub 是一个 Web 化的多 Agent 协作平台。第一版目标是完成�
 - 后端平台层：管理 session、message、agent run、event、artifact、file change、context 等状态，并将下游 Agent 的流式输出持久化后转发给前端。
 - 两类 WebSocket：
   - 前端 WebSocket：后端向浏览器实时推送 session/run/event/artifact/context 状态。
-  - 下游 Agent WebSocket：AgentHub 主动连接云端沙箱里的 Agent/Orchestrator，发送任务与历史上下文，接收流式输出、文件变更和 artifact。
+  - 下游 Orchestrator WebSocket：AgentHub 主动连接云端沙箱里的主 Orchestrator，发送任务、mentions 与历史上下文，接收多 Agent 流式输出、文件变更和 artifact。
 - 上下文维护：同一个 session 内，后端用轻量 LLM 和 pgvector 实时维护轻量上下文。优先级为 pin > 最近 N 轮上下文 > pgvector 召回 > 结构化摘要。
 - PostgreSQL 持久化：数据库作为唯一事实源，支持刷新页面后完整回放会话和任务过程。
 
@@ -52,7 +52,7 @@ AgentHub 不需要本地 Agent Daemon，因为执行发生在云端沙箱。对�
 | --- | --- |
 | Next.js 前端 | Web Workbench 前端 |
 | Go 后端 | AgentHub 后端平台层 |
-| Agent Daemon | Downstream Agent Bridge，由后端主动 WSS 连接下游 Agent |
+| Agent Daemon | Downstream Agent Bridge，由后端主动 WSS/Socket.IO 连接下游主 Orchestrator |
 | 本地 CLI 和工作目录 | 云端沙箱 Agent/Orchestrator 和真实文件系统 |
 | daemon HTTP claim/report | 下游 WSS `run.start` / stream events / ack |
 | task message timeline | run event timeline |
@@ -68,7 +68,7 @@ AgentHub 不需要本地 Agent Daemon，因为执行发生在云端沙箱。对�
 
 ### 2.4 不照搬的点
 
-- 不做 daemon 主动注册和轮询领取任务。你的要求是 AgentHub 主动连接下游 Agent 地址。
+- 不做 daemon 主动注册和轮询领取任务。AgentHub 主动连接下游主 Orchestrator 地址。
 - 不做 workspace、多用户、团队、issue 看板、agent teammate 等产品形态。
 - 第一版不引入 Redis。单后端内直接用数据库事务加内存连接表即可。
 
@@ -100,7 +100,7 @@ flowchart LR
 - 接收用户消息，创建 session message 和 agent run。
 - 在 run 启动前构造 context snapshot，并发送给下游 Agent。
 - 主动连接主 Orchestrator 实例。
-- 接收下游流式消息，按 `run_id + seq` 幂等落库。
+- 接收下游流式消息；连接按 AgentHub session 复用，事件仍按 `run_id + seq` 幂等落库。
 - 归一化 artifact、file diff、tool event、assistant delta。
 - 实时广播给前端。
 - 在消息、artifact、file change 变化后维护结构化摘要、context item 和向量索引。
@@ -136,14 +136,14 @@ flowchart TB
   M --> B["DownstreamAgentBridge"]
   B --> A["ProtocolAdapter"]
   A --> T["TransportClient"]
-  T <-->|"Socket.IO / WSS"| D["Downstream Agent"]
+  T <-->|"Socket.IO / WSS"| D["Primary Orchestrator"]
   A --> N["EventNormalizer"]
   N --> I["EventIngestService"]
   I --> DB[("PostgreSQL")]
   I --> W["Frontend RealtimeGateway"]
 ```
 
-- `TransportClient`：只负责连接、重连、收发原始帧。第一版至少支持 Socket.IO JSON-RPC profile，后续可加原生 WSS profile。
+- `TransportClient`：只负责 session 级长连接、重连、收发原始帧。第一版至少支持 Socket.IO JSON-RPC profile，后续可加原生 WSS profile。
 - `ProtocolAdapter`：把具体下游协议转成 AgentHub 内部统一命令和事件。
 - `DownstreamSessionManager`：维护 AgentHub session 与下游 session 的绑定，决定调用 `session/new` 还是 `session/load`。
 - `EventNormalizer`：把下游 frame 归一化为 `agent_events` 可以落库的事件。
@@ -163,8 +163,10 @@ flowchart TB
   - 取消 run 可以预留接口，第一版可返回未实现。
 - `ArtifactController`
   - 查询 artifact 列表、详情、二进制内容、渲染结果。
+- `AgentTemplateController`
+  - 管理 Agent 模板、系统提示词、默认能力、默认模型配置。
 - `AgentController`
-  - 配置 agent 实例 endpoint、名称、能力、启停状态。
+  - 管理 Agent 实例 endpoint、模板引用、运行配置、启停状态。
 - `ContextController`
   - 查询当前 session context、context snapshot、pin 列表。
 
@@ -177,7 +179,8 @@ flowchart TB
   - run 状态机管理：queued -> connecting -> running -> completed/failed/cancelled。
   - 绑定 user message、assistant message、context snapshot、主 Orchestrator、mentioned agents、downstream run id。
 - `DownstreamAgentBridge`
-  - 主动连接下游 Agent。
+  - 主动连接下游主 Orchestrator。
+  - 每个 AgentHub session 复用一条到主 Orchestrator 的长连接，不按 worker Agent 拆连接。
   - 不直接写数据库，只负责连接生命周期、请求发送、响应等待和断线通知。
   - 对外暴露 `initializeAgent`、`ensureDownstreamSession`、`startPrompt`、`cancelPrompt`。
 - `ProtocolAdapter`
@@ -185,7 +188,7 @@ flowchart TB
   - 第一版重点实现 `north-socketio-jsonrpc` profile：Socket.IO path `/socket.io`、namespace `/acp`、event `acp:message`、JSON-RPC 2.0。
   - 后续可并行支持 `agenthub-wss-json` profile。
 - `DownstreamSessionManager`
-  - 维护 `session_id + orchestrator_agent_id + agent_instance_id` 到下游 `sessionId` 的映射。
+  - 维护 `session_id + orchestrator_agent_id` 到下游 `sessionId` 的映射。
   - 新 session 首次发送任务时调用 `session/new`。
   - 已有绑定时优先调用 `session/load`，再调用 `session/prompt`。
 - `EventIngestService`
@@ -225,7 +228,7 @@ type DownstreamProfile = "north-socketio-jsonrpc" | "agenthub-wss-json";
 
 interface DownstreamAgentConfig {
   orchestratorAgentId: string;
-  instanceId?: string;
+  templateId: string;
   endpointUrl: string;
   profile: DownstreamProfile;
   cwd: string;
@@ -249,17 +252,32 @@ interface NormalizedAgentEvent {
   seq: number;
   type: string;
   visibility: "public" | "debug" | "internal";
-  speaker?: {
-    agentId?: string;
-    name?: string;
-    role?: "orchestrator" | "member";
-  };
+  speaker?: string; // 下游只返回 agentId，后端根据 agents 表补全展示名
   payload: Record<string, unknown>;
   occurredAt?: string;
 }
 ```
 
 业务层只和 `NormalizedAgentEvent` 交互。具体下游发的是 JSON-RPC、Socket.IO event，还是原生 WSS frame，都由 adapter 处理。
+
+### 4.5 AgentTemplate 与 Agent
+
+Agent 管理采用两层模型：
+
+- `AgentTemplate`：模板。保存角色类型、系统提示词、默认能力、默认模型配置和模板元数据。提示词、角色约束、协作规范这类稳定配置放在模板里。
+- `Agent`：实例。每个实例引用一个模板，保存 endpoint、协议 profile、认证引用、运行配置、沙箱状态、在线状态等实例信息。
+
+关系：
+
+```text
+agent_templates.id -> agents.template_id
+```
+
+第一版中：
+
+- 主 Orchestrator 是一个 `Agent` 实例，其模板 `agent_kind = orchestrator`。
+- 被 `@` 的 Frontend、Backend、Reviewer 等成员也是 `Agent` 实例，其模板通常 `agent_kind = worker`。
+- 下游 `speaker` 返回的是 `agents.id`，不是模板 id。后端通过 `agents.template_id` 补全展示名、角色类型和默认提示词信息。
 
 ## 5. 前端工作台设计
 
@@ -350,7 +368,7 @@ Multica 前端可以作为交互参考，重点参考以下模式：
 1. 进入 session 时，REST 拉取 `session detail`、`messages`、`runs`、`artifacts`、`file_changes`。
 2. 建立 WS 后发送 `session.subscribe`，附带本地最后看到的 `seq`。
 3. 收到 `run.event` 后，按 `runId + seq` 去重写入本地缓存。
-4. `message.delta` 只更新当前 active assistant block。
+4. `message.delta` 按 `speaker` agentId 更新对应 Agent 的消息块。
 5. `file.change` 更新文件树和 diff 缓存。
 6. `artifact.*` 更新 inspector 列表和预览状态。
 7. `run.completed/run.failed` 后 invalidate 当前 session 快照，确保与数据库最终状态一致。
@@ -387,7 +405,7 @@ Content-Type: application/json
 说明：
 
 - `orchestratorAgentId` 可选。未传时使用默认主 Orchestrator。
-- `mentionedAgentIds` 来自 composer 的 `@Agent` 解析。后端只记录并传给 Orchestrator，不直接分别连接这些 worker Agent。
+- `mentionedAgentIds` 来自 composer 的 `@Agent` 解析，值为 Agent 实例 id。后端只记录并传给 Orchestrator，不直接分别连接这些 worker Agent。
 
 返回：
 
@@ -421,6 +439,9 @@ GET /api/runs/{runId}/file-changes
 ### 6.4 Agent
 
 ```http
+GET  /api/agent-templates
+POST /api/agent-templates
+PATCH /api/agent-templates/{templateId}
 GET  /api/agents
 POST /api/agents
 PATCH /api/agents/{agentId}
@@ -559,7 +580,7 @@ Artifact 更新：
 }
 ```
 
-## 8. 下游 Agent WebSocket 协议初稿
+## 8. 下游 Orchestrator WebSocket 协议初稿
 
 ### 8.1 设计原则
 
@@ -729,13 +750,15 @@ AgentHub 配置主 Orchestrator 实例：
 ```json
 {
   "agentId": "uuid",
+  "templateId": "template-uuid",
   "name": "main-orchestrator",
-  "agentKind": "orchestrator",
   "endpointUrl": "wss://agent.example.com/acp/v1/ws",
   "authType": "bearer",
   "capabilities": ["orchestrate", "code_edit", "shell", "diff", "artifact"]
 }
 ```
+
+模板中的 `agent_kind = orchestrator`、系统提示词和默认能力决定该实例的基础行为；实例只覆盖 endpoint、认证、运行配置和状态。worker Agent 也同样是 `agents` 表实例，只是通常不作为 AgentHub 直连目标。
 
 ### 8.5 通用 envelope
 
@@ -897,11 +920,7 @@ Agent -> AgentHub：
   "timestamp": "2026-05-26T12:00:04.000Z",
   "payload": {
     "role": "assistant",
-    "speaker": {
-      "agentId": "frontend-agent-uuid",
-      "name": "Frontend",
-      "role": "member"
-    },
+    "speaker": "frontend-agent-uuid",
     "channel": "final",
     "text": "我先检查项目结构。"
   }
@@ -1126,7 +1145,8 @@ AgentHub ACK：
 
 第一版建议：
 
-- 连接中断时，后端将 run 标记为 `failed`，错误码为 `DOWNSTREAM_DISCONNECTED`。
+- 下游连接是 session 级长连接。连接中断时，如果当前存在 running run，后端将该 run 标记为 `failed`，错误码为 `DOWNSTREAM_DISCONNECTED`；如果没有 running run，只更新 `downstream_connections.status`。
+- 同一个 AgentHub session 的后续 run 优先复用已有连接；连接断开后再重建，并通过 `session/load` 载入下游 session。
 - 如果下游支持恢复，可以扩展 `run.resume`：
   - AgentHub 发送 `run.resume`，携带 `lastAckSeq`。
   - 下游从 `lastAckSeq + 1` 重放事件。
@@ -1261,34 +1281,39 @@ DO $$ BEGIN
   CREATE TYPE context_item_kind AS ENUM ('message', 'artifact', 'file_change', 'run_summary', 'manual_pin');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE TABLE IF NOT EXISTS agents (
+CREATE TABLE IF NOT EXISTS agent_templates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   description text NOT NULL DEFAULT '',
-  endpoint_url text NOT NULL,
-  protocol_profile text NOT NULL DEFAULT 'north-socketio-jsonrpc',
   agent_kind text NOT NULL DEFAULT 'worker',
-  is_default_orchestrator boolean NOT NULL DEFAULT false,
-  auth_type text NOT NULL DEFAULT 'none',
-  auth_secret_ref text,
-  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  system_prompt text NOT NULL DEFAULT '',
+  prompt_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  default_capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  default_model_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   status agent_status NOT NULL DEFAULT 'enabled',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS agent_instances (
+CREATE TABLE IF NOT EXISTS agents (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  instance_key text NOT NULL,
-  endpoint_url text NOT NULL,
-  status agent_status NOT NULL DEFAULT 'offline',
-  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  template_id uuid NOT NULL REFERENCES agent_templates(id) ON DELETE RESTRICT,
+  name text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  endpoint_url text,
+  protocol_profile text NOT NULL DEFAULT 'north-socketio-jsonrpc',
+  is_default_orchestrator boolean NOT NULL DEFAULT false,
+  auth_type text NOT NULL DEFAULT 'none',
+  auth_secret_ref text,
+  capabilities_override jsonb NOT NULL DEFAULT '{}'::jsonb,
+  runtime_config jsonb NOT NULL DEFAULT '{}'::jsonb,
   sandbox jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status agent_status NOT NULL DEFAULT 'offline',
   last_seen_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (agent_id, instance_key)
+  UNIQUE (name)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -1343,7 +1368,6 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   orchestrator_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-  agent_instance_id uuid REFERENCES agent_instances(id) ON DELETE SET NULL,
   user_message_id uuid REFERENCES messages(id) ON DELETE SET NULL,
   assistant_message_id uuid REFERENCES messages(id) ON DELETE SET NULL,
   context_snapshot_id uuid REFERENCES context_snapshots(id) ON DELETE SET NULL,
@@ -1394,9 +1418,9 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS downstream_connections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  agent_instance_id uuid REFERENCES agent_instances(id) ON DELETE SET NULL,
-  run_id uuid REFERENCES agent_runs(id) ON DELETE SET NULL,
+  downstream_session_id text,
   endpoint_url text NOT NULL,
   status connection_status NOT NULL DEFAULT 'connecting',
   connected_at timestamptz,
@@ -1404,14 +1428,14 @@ CREATE TABLE IF NOT EXISTS downstream_connections (
   close_code integer,
   close_reason text,
   last_ack_seq bigint NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, agent_id)
 );
 
 CREATE TABLE IF NOT EXISTS downstream_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  agent_instance_id uuid REFERENCES agent_instances(id) ON DELETE SET NULL,
   downstream_session_id text NOT NULL,
   cwd text NOT NULL DEFAULT '/workspace',
   protocol_profile text NOT NULL DEFAULT 'north-socketio-jsonrpc',
@@ -1419,7 +1443,7 @@ CREATE TABLE IF NOT EXISTS downstream_sessions (
   loaded_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (session_id, agent_id, agent_instance_id)
+  UNIQUE (session_id, agent_id)
 );
 
 CREATE TABLE IF NOT EXISTS agent_events (
@@ -1554,6 +1578,9 @@ CREATE TABLE IF NOT EXISTS context_update_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_templates_kind ON agent_templates(agent_kind);
+CREATE INDEX IF NOT EXISTS idx_agents_template ON agents(template_id);
+CREATE INDEX IF NOT EXISTS idx_agents_default_orchestrator ON agents(is_default_orchestrator) WHERE is_default_orchestrator = true;
 CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(session_id, is_pinned) WHERE is_pinned = true;
 CREATE INDEX IF NOT EXISTS idx_agent_runs_session_created ON agent_runs(session_id, created_at DESC);
@@ -1575,9 +1602,11 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 
 - 二进制 artifact 第一版直接上传阿里云 OSS。`artifacts.storage_kind = 'oss_object'`，`storage_uri` 使用 `oss://juzi05/{objectKey}`，数据库不保存最终 bytea 内容。
 - `artifact_chunks` 只作为下游分片上报时的临时暂存。`artifact.complete` 校验 sha256 后，后端合并并上传 OSS，成功后可以删除对应 chunks。
-- `agents.agent_kind` 建议取值为 `orchestrator` 或 `worker`。第一版只有 `orchestrator` 类型会作为下游连接入口；`worker` 主要用于 `@Agent` mention、展示和 speaker 归属。
+- `agent_templates` 是模板表，存放角色类型、系统提示词、默认能力和默认模型配置。
+- `agents` 是实例表，每个实例对应一个 `agent_templates` 记录。第一版只有模板类型为 `orchestrator` 的实例会作为下游连接入口；worker 实例主要用于 `@Agent` mention、展示和 speaker 归属。
 - `context_embeddings.embedding` 默认 `vector(1536)`，建议第一版 embedding 模型固定为 1536 维。如果实际模型维度不同，需要调整 DDL。
 - `agent_events` 是回放和实时推送的核心表，必须保证 `run_id + seq` 唯一。
+- `downstream_connections` 记录 session 级长连接状态，唯一键是 `session_id + agent_id`。同一个 AgentHub session 的多个 run 复用这条连接；`agent_events` 仍用 `run_id + seq` 做事件幂等。
 
 ## 11. 关键实现流程
 
@@ -1596,8 +1625,8 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 1. `RunService` 把 run 状态改成 `context_building`。
 2. `ContextService` 生成 context snapshot。
 3. `RunService` 把 run 状态改成 `connecting`。
-4. `DownstreamSessionManager` 按 `session_id + orchestrator_agent_id + agent_instance_id` 查询 `downstream_sessions`，没有绑定则通过 adapter 调用 `session/new`，已有绑定则调用 `session/load`。
-5. `DownstreamAgentBridge` 建立到主 Orchestrator 的 Socket.IO 或 WSS 连接，并调用 `initialize` 或 hello。
+4. `DownstreamSessionManager` 按 `session_id + orchestrator_agent_id` 查询 `downstream_sessions`，没有绑定则通过 adapter 调用 `session/new`，已有绑定则调用 `session/load`。
+5. `DownstreamAgentBridge` 复用该 AgentHub session 到主 Orchestrator 的长连接；如果连接不存在或已断开，则建立 Socket.IO 或 WSS 连接，并调用 `initialize` 或 hello。
 6. 对 `north-socketio-jsonrpc` profile，调用 `session/prompt`；对 `agenthub-wss-json` profile，发送 `run.start`。
 7. prompt/run.start payload 携带 `mentionedAgentIds` 和 `mentionedAgentNames`，由 Orchestrator 决定实际分工和回复顺序。
 8. 收到首个 `run.started` 或 `session/prompt` 成功响应后，run 状态改成 `running`。
@@ -1608,7 +1637,7 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 2. `ProtocolAdapter` 做最小协议校验，并归一化为 `NormalizedAgentEvent`。
 3. `EventIngestService` 在事务中写入 `agent_events`，以 `run_id + seq` 幂等去重。
 4. 根据 event type 派生写入：
-   - `message.delta` -> 根据 `speaker` 更新对应 Agent 的 assistant message buffer。
+   - `message.delta` -> 根据 `speaker` 返回的 agentId 更新对应 Agent 的 assistant message buffer，展示名由后端从 `agents` 表补全。
    - `file.change` -> 写 `file_changes`，以 before/after 快照为主，patch 可选。
    - `artifact.*` -> 写 `artifacts`、`artifact_chunks`，完成后上传 OSS 并更新 `storage_uri`。
    - `run.completed` -> 更新 run、assistant final message、usage。
@@ -1643,7 +1672,7 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 - 实现 `DownstreamAgentBridge`。
 - 实现 `north-socketio-jsonrpc` adapter：`initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel`、`session/event` ack。
 - 实现 `DownstreamSessionManager` 和 `downstream_sessions` 绑定。
-- 写一个 mock downstream agent 用于联调。
+- 写一个 mock downstream Orchestrator 用于联调。
 - 把 message delta、tool event、file change snapshot、artifact 端到端打通。
 
 ### Phase 4：artifact 和 diff 渲染
@@ -1729,7 +1758,7 @@ AccessKey 和 Secret 必须通过环境变量或部署平台密钥配置注入�
 - AgentHub 只连接主 Orchestrator。
 - `@Agent` 列表作为 `mentionedAgentIds/mentionedAgentNames` 传给 Orchestrator。
 - Orchestrator 负责自动协调分工、调用或组织下游 worker Agent。
-- 多个 Agent 像群聊成员一样依次回复时，下游事件必须携带 `speaker`，AgentHub 只负责落库和展示。
+- 多个 Agent 像群聊成员一样依次回复时，下游事件必须携带 `speaker`，值为 agentId；AgentHub 只负责落库、补全展示名和展示。
 - 未显式 `@` 时，仍由默认 Orchestrator 自行决定是否需要其他 Agent 参与。
 
 ## 15. 第一版验收标准
@@ -1738,7 +1767,7 @@ AccessKey 和 Secret 必须通过环境变量或部署平台密钥配置注入�
 - 用户消息支持 `@` 多个 Agent，mentions 会被落库并传给 Orchestrator。
 - 后端能主动连接下游 Orchestrator WSS/Socket.IO，并发送包含历史上下文和 mentions 的 `run.start` 或 `session/prompt`。
 - 下游 Agent 的 stream event 全部持久化到 `agent_events`。
-- 下游多 Agent 回复携带 `speaker` 后，前端能像群聊一样展示不同 Agent 的产出。
+- 下游多 Agent 回复携带 `speaker` agentId 后，前端能像群聊一样展示不同 Agent 的产出。
 - 前端刷新后能恢复消息流、run timeline、diff 和 artifact。
 - Markdown/PDF/DOCX 至少能只读展示。
 - pgvector 召回参与 run.start context snapshot。
