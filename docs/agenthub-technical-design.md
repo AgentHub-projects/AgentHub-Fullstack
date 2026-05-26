@@ -64,6 +64,7 @@ AgentHub 不需要本地 Agent Daemon，因为执行发生在云端沙箱。对�
 - 任务过程要拆成稳定事件类型，例如 queued、running、message、artifact、completed、failed。
 - 浏览器通过 WS 收实时事件，但创建会话、发送消息、读取历史仍走 REST。
 - 下游执行器输出不要直接绑定 UI，要先归一化为平台事件，再由前端渲染。
+- 前端 UI 可以参考 Multica 的 `ChatWindow`、`ChatMessageList`、`TaskStatusPill`、`useRealtimeSync`：发送消息先 optimistic update，运行中显示 live timeline，完成后由持久化 assistant message 接管。
 
 ### 2.4 不照搬的点
 
@@ -258,12 +259,14 @@ interface NormalizedAgentEvent {
 
 ### 5.1 信息架构
 
-对标 Codex 桌面端，但做成 Web Workbench：
+对标 Codex 桌面端，同时参考 Multica 前端的聊天流和任务时间线组织方式，做成 Web Workbench：
 
 - 左侧：session 列表、Agent 实例状态、搜索入口。
 - 中央：当前 session 的消息流和 run timeline。
 - 右侧：Artifact Inspector，显示当前选中的 diff、文件、Markdown、PDF、DOCX、日志。
 - 底部：composer，发送任务、选择目标 Agent。
+
+第一版不要照搬 Multica 的 workspace、issue、team、inbox 信息架构。AgentHub 的主体验应围绕“一个 session 内的用户任务、Agent 执行流、文件变更、artifact 结果”展开。
 
 ### 5.2 页面状态
 
@@ -274,7 +277,7 @@ interface NormalizedAgentEvent {
 - 流式输出：
   - `message.delta` 合并到当前 assistant block。
   - `tool.call/tool.result` 进入可折叠运行日志。
-  - `file.diff` 更新 diff 文件树。
+  - `file.change` 更新 diff 文件树。
   - `artifact.upsert/chunk/complete` 更新右侧 inspector。
 - 刷新恢复：
   - 页面只依赖 REST 快照和 DB event 回放，不依赖内存。
@@ -296,6 +299,56 @@ interface NormalizedAgentEvent {
 - DOCX：后端用转换器生成安全 HTML，存入 `artifact_renders`；前端展示转换结果，同时提供原始文件只读下载接口。
 - 图片：第一版可展示 PNG/JPEG/WebP。
 - 大文本日志：虚拟滚动，避免卡顿。
+
+### 5.5 Multica 前端参考点
+
+Multica 前端可以作为交互参考，重点参考以下模式：
+
+- `ChatWindow`：把 session、message、pending task、agent 状态集中到一个工作区入口，发送消息时先做 optimistic update，避免用户发送后界面空白。
+- `ChatMessageList`：主消息流只展示用户真正关心的内容；Agent 过程以 live timeline 嵌入 assistant 区域，完成后由持久化消息接管展示，避免同一内容重复出现。
+- `TaskStatusPill`：运行中用紧凑状态条表达 queued/running/failed/completed，不把状态信息做成大卡片。
+- `useRealtimeSync`：WebSocket 事件先写入前端查询缓存，关键状态再 invalidate 让数据库快照兜底。长 run 的 `task:message` 类事件应直接追加缓存，避免每个 delta 都触发 refetch。
+- Markdown 渲染、附件列表、复制按钮、失败消息折叠等细节可以参考，但视觉风格需要重新设计，避免直接复刻 Multica 的产品壳。
+
+对应到 AgentHub：
+
+| Multica 前端概念 | AgentHub UI 概念 |
+| --- | --- |
+| `ChatWindow` | Session Workbench |
+| `pendingTask` | active agent run |
+| `task:message` live timeline | `run.event` live timeline |
+| `TaskStatusPill` | Run status strip |
+| `AttachmentList` | Artifact strip / Inspector entry |
+| `useRealtimeSync` | `useSessionRealtime` + query cache event reducer |
+
+### 5.6 AgentHub 前端组件拆分
+
+建议第一版拆成以下组件：
+
+- `SessionRail`：左侧 session 列表、运行中状态点、更新时间。
+- `AgentPicker`：选择目标 Agent 实例，显示在线、离线、错误状态。
+- `SessionWorkbench`：当前 session 容器，负责 REST 初始加载和 WS 订阅。
+- `MessageTimeline`：用户消息、assistant 消息、active run timeline。
+- `RunStatusStrip`：紧凑展示 queued、context_building、connecting、running、completed、failed。
+- `RunTimeline`：展示 `message.delta`、`tool.call`、`tool.result`、`file.change`、`artifact.*`。
+- `ArtifactInspector`：右侧详情区，按 tab 展示 Diff、Preview、Logs、Context。
+- `DiffViewer`：基于 before/after 快照生成 unified diff；如果下游提供 patch，则优先使用 patch。
+- `DocumentPreview`：Markdown/PDF/DOCX/image 只读预览。
+- `Composer`：输入任务、选择 Agent、发送、停止。
+
+### 5.7 前端状态策略
+
+前端使用“REST 快照 + WS 增量 + 查询缓存 reducer”：
+
+1. 进入 session 时，REST 拉取 `session detail`、`messages`、`runs`、`artifacts`、`file_changes`。
+2. 建立 WS 后发送 `session.subscribe`，附带本地最后看到的 `seq`。
+3. 收到 `run.event` 后，按 `runId + seq` 去重写入本地缓存。
+4. `message.delta` 只更新当前 active assistant block。
+5. `file.change` 更新文件树和 diff 缓存。
+6. `artifact.*` 更新 inspector 列表和预览状态。
+7. `run.completed/run.failed` 后 invalidate 当前 session 快照，确保与数据库最终状态一致。
+
+这个策略参考 Multica 的实时同步做法，但要保留 AgentHub 的事件事实源：刷新页面后，UI 必须能完全从 PostgreSQL 重建。
 
 ## 6. REST API 初稿
 
@@ -709,7 +762,7 @@ AgentHub -> Agent：
   "payload": {
     "agentHubId": "agenthub-single-user",
     "supportedVersions": ["0.1"],
-    "accepts": ["message.delta", "file.diff", "artifact.upsert", "artifact.chunk", "artifact.complete"],
+    "accepts": ["message.delta", "file.change", "artifact.upsert", "artifact.chunk", "artifact.complete"],
     "ackMode": "per_event"
   }
 }
@@ -1097,7 +1150,7 @@ AgentHub ACK：
   - 立即创建 `context_items(kind=message)`。
   - 异步生成 embedding。
   - 触发 summary debounce 更新。
-- 下游 artifact/file diff 落库：
+- 下游 artifact/file change 落库：
   - 生成简短描述，创建 context item。
   - 对 patch 不直接全量 embedding，大 patch 先压缩为摘要。
 - run 完成：
@@ -1534,6 +1587,7 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 - 实现 `/ws/frontend`。
 - 前端 session subscribe、事件合并、断线重连。
 - 搭出三栏 Workbench：session rail、timeline、artifact inspector。
+- 参考 Multica 实现 optimistic send、active run 状态条、live run timeline、完成后 DB 快照兜底的查询缓存同步策略。
 
 ### Phase 3：下游 Agent 对接
 
