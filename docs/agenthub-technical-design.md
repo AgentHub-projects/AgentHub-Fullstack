@@ -192,8 +192,8 @@ flowchart TB
   - 负责事件幂等、序号检查、落库、派生写入 artifact/file change/message delta。
   - 成功落库后广播前端 WS。
 - `ArtifactService`
-  - 处理 artifact 元数据、chunk、blob、render。
-  - Markdown 直接存 text；PDF/DOCX 存 blob；DOCX 后端转 HTML；PDF 前端渲染。
+  - 处理 artifact 元数据、chunk、OSS object、render。
+  - Markdown 直接存 text；PDF/DOCX/image/archive 上传到阿里云 OSS；DOCX 后端转 HTML；PDF 前端渲染。
 - `ContextService`
   - 写入 context item、生成 embedding、pgvector 召回。
   - 维护 session summary。
@@ -295,7 +295,7 @@ interface NormalizedAgentEvent {
 ### 5.4 文档与 artifact 渲染
 
 - Markdown：前端使用安全 Markdown 渲染，支持 GFM、代码块、表格。
-- PDF：后端存储 blob，前端通过 PDF viewer 读取 `/api/artifacts/:id/content`。
+- PDF：后端存储在阿里云 OSS，前端通过 `/api/artifacts/:id/content` 由后端鉴权后代理或签名跳转读取。
 - DOCX：后端用转换器生成安全 HTML，存入 `artifact_renders`；前端展示转换结果，同时提供原始文件只读下载接口。
 - 图片：第一版可展示 PNG/JPEG/WebP。
 - 大文本日志：虚拟滚动，避免卡顿。
@@ -1219,7 +1219,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE storage_kind AS ENUM ('inline_text', 'db_blob', 'local_path', 'remote_url');
+  CREATE TYPE storage_kind AS ENUM ('inline_text', 'oss_object', 'remote_url');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -1410,12 +1410,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
   UNIQUE (run_id, artifact_key)
 );
 
-CREATE TABLE IF NOT EXISTS artifact_blobs (
-  artifact_id uuid PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
-  content bytea NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS artifact_chunks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
@@ -1528,7 +1522,8 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 
 说明：
 
-- `artifact_blobs` 适合第一版直接持久化 DOCX/PDF 等二进制文件。后续文件变大后，可以把 `storage_kind` 切到 `local_path` 或对象存储。
+- 二进制 artifact 第一版直接上传阿里云 OSS。`artifacts.storage_kind = 'oss_object'`，`storage_uri` 使用 `oss://juzi05/{objectKey}`，数据库不保存最终 bytea 内容。
+- `artifact_chunks` 只作为下游分片上报时的临时暂存。`artifact.complete` 校验 sha256 后，后端合并并上传 OSS，成功后可以删除对应 chunks。
 - `context_embeddings.embedding` 默认 `vector(1536)`，建议第一版 embedding 模型固定为 1536 维。如果实际模型维度不同，需要调整 DDL。
 - `agent_events` 是回放和实时推送的核心表，必须保证 `run_id + seq` 唯一。
 
@@ -1561,7 +1556,7 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 4. 根据 event type 派生写入：
    - `message.delta` -> 更新 assistant message buffer。
    - `file.change` -> 写 `file_changes`，以 before/after 快照为主，patch 可选。
-   - `artifact.*` -> 写 `artifacts`、`artifact_chunks`、`artifact_blobs`。
+   - `artifact.*` -> 写 `artifacts`、`artifact_chunks`，完成后上传 OSS 并更新 `storage_uri`。
    - `run.completed` -> 更新 run、assistant final message、usage。
 5. 事务提交后向前端广播。
 6. 对 JSON-RPC request 返回 result 作为 ack；对 WSS profile 发送 `ack` frame。
@@ -1601,9 +1596,9 @@ CREATE INDEX IF NOT EXISTS idx_context_embeddings_vector
 
 - Diff 文件树与 unified diff。
 - Markdown 渲染。
-- PDF 内容接口和前端 viewer。
+- PDF 内容接口和前端 viewer，二进制内容从 OSS 读取。
 - DOCX 后端转换 HTML。
-- artifact chunk 合并与 sha256 校验。
+- artifact chunk 合并、sha256 校验、阿里云 OSS 上传和 `storage_uri` 回写。
 
 ### Phase 5：上下文系统
 
@@ -1635,7 +1630,15 @@ CONTEXT_TOKEN_BUDGET=32000
 FRONTEND_WS_PATH=/ws/frontend
 DOWNSTREAM_CONNECT_TIMEOUT_MS=10000
 DOWNSTREAM_FRAME_MAX_BYTES=10485760
-ARTIFACT_MAX_DB_BLOB_BYTES=52428800
+
+ALIYUN_OSS_REGION=oss-cn-hangzhou
+ALIYUN_OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
+ALIYUN_OSS_BUCKET=juzi05
+ALIYUN_OSS_PUBLIC_DOMAIN=https://juzi05.oss-cn-hangzhou.aliyuncs.com
+ALIYUN_OSS_ACCESS_KEY_ID=...
+ALIYUN_OSS_ACCESS_KEY_SECRET=...
+ARTIFACT_OSS_PREFIX=agenthub/artifacts
+ARTIFACT_MAX_UPLOAD_BYTES=52428800
 ```
 
 ## 14. 风险与决策
@@ -1646,7 +1649,18 @@ ACP 正式文档强调 HTTPS/WSS/SSE、JSON 消息、WSS 下可包含二进制 M
 
 ### 14.2 二进制 artifact
 
-第一版把 PDF/DOCX 存入 PostgreSQL bytea 可以降低系统复杂度。缺点是数据库体积增长较快。课题和单用户场景可接受，后续再迁移到本地文件或对象存储。
+第一版直接使用阿里云 OSS 存储 PDF/DOCX/image/archive 等二进制 artifact。PostgreSQL 只保存 artifact 元数据、sha256、size、`storage_kind` 和 `storage_uri`。建议 object key 结构：
+
+```text
+agenthub/artifacts/{sessionId}/{runId}/{artifactId}/{filename}
+```
+
+后端读取 artifact 内容时有两种方式：
+
+- 默认：后端代理读取 OSS，再返回给前端，权限边界最简单。
+- 可选：后端生成短期签名 URL，前端直接读取 OSS，适合大文件预览。
+
+AccessKey 和 Secret 必须通过环境变量或部署平台密钥配置注入，不写入代码、DDL 或提交历史。
 
 ### 14.3 上下文实时维护
 

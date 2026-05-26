@@ -714,7 +714,7 @@ AgentHub 派生行为：
 
 - 合并 chunks。
 - 校验 sha256。
-- 写入 `artifact_blobs`。
+- 上传到阿里云 OSS，并把 `artifacts.storage_kind` 更新为 `oss_object`、`storage_uri` 更新为 `oss://juzi05/{objectKey}`。
 - DOCX 触发后端 HTML render。
 
 ### 11.9 run.completed
@@ -814,7 +814,7 @@ AgentHub 映射：
 | `file.change` | `agent_events` | `file_changes`、`context_items` |
 | `artifact.upsert` | `agent_events` | `artifacts` |
 | `artifact.chunk` | `agent_events` | `artifact_chunks` |
-| `artifact.complete` | `agent_events` | `artifacts`、`artifact_blobs`、`artifact_renders`、`context_items` |
+| `artifact.complete` | `agent_events` | `artifacts`、OSS object、`artifact_renders`、`context_items` |
 | `run.completed` | `agent_events` | `agent_runs`、`messages`、`context_items`、`session_contexts` |
 | `run.failed` | `agent_events` | `agent_runs` |
 
