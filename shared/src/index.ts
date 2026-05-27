@@ -136,3 +136,52 @@ export interface TestSyncResultDto {
   summaryPath?: string;
   error?: ApiErrorDto;
 }
+
+// --- Downstream Orchestrator (North) protocol DTOs ---
+
+export type DownstreamConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "ready"
+  | "failed";
+
+export interface DownstreamSessionDto {
+  /** AgentHub-side session id (== conversationId) */
+  agentHubSessionId: string;
+  /** Downstream (orchestrator) session id, assigned by initialize/session/new */
+  downstreamSessionId: string;
+  /** Downstream agent identifier (e.g. "claude-code") */
+  downstreamAgentId: string;
+  state: DownstreamConnectionState;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DownstreamMention {
+  agentId: string;
+  displayName?: string;
+}
+
+export interface DownstreamPinnedContextItem {
+  id: string;
+  kind: "text" | "file";
+  title?: string;
+  body: string;
+}
+
+export interface DownstreamPromptPayload {
+  text: string;
+  mentions?: DownstreamMention[];
+  context?: DownstreamPinnedContextItem[];
+}
+
+export interface DownstreamSessionEventDto {
+  /** Globally unique downstream event id; used for ack and idempotency */
+  eventId: string;
+  runId: string;
+  seq: number;
+  ts: number;
+  type: AgentEventType | string;
+  payload: unknown;
+}
