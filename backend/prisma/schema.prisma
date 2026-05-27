@@ -64,3 +64,31 @@ model AgentDefinition {
   description String?
   createdAt   DateTime @default(now())
 }
+
+/// Persistent binding from an AgentHub session to a downstream
+/// orchestrator session, plus the latest connection state.
+model DownstreamSession {
+  agentHubSessionId   String   @id
+  downstreamSessionId String
+  downstreamAgentId   String
+  state               String
+  lastError           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([downstreamAgentId, downstreamSessionId])
+  @@index([downstreamSessionId])
+}
+
+/// Tracks downstream session/event ids that have been acked locally,
+/// so duplicate deliveries do not produce duplicate AgentEvent rows.
+model DownstreamEventAck {
+  eventId             String   @id
+  agentHubSessionId   String
+  downstreamSessionId String
+  runId               String
+  seq                 Int
+  ackedAt             DateTime @default(now())
+
+  @@index([agentHubSessionId])
+}

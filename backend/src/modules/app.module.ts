@@ -6,9 +6,16 @@ import { SessionController } from "../controllers/session.controller";
 import { StubController } from "../controllers/stub.controller";
 import { SessionService } from "../services/session.service";
 import { WorktreeService } from "../services/worktree.service";
+import { DownstreamSessionManager } from "../downstream/session-manager";
 
 @Module({
   controllers: [HealthController, SessionController, StubController],
-  providers: [AgentEventsGateway, AgentRunner, SessionService, WorktreeService]
+  providers: [
+    AgentEventsGateway,
+    AgentRunner,
+    SessionService,
+    WorktreeService,
+    DownstreamSessionManager
+  ]
 })
 export class AppModule {}
