@@ -12,6 +12,8 @@ model Session {
   title     String?
   status    String
   agentId   String?
+  agentIds  String[] @default([])
+  mode      String   @default("direct")
   prompt    String?
   output    String?
   error     String?

@@ -9,6 +9,7 @@ NestJS backend for the AgentHub P0 flow.
 - `pnpm --filter @agenthub/backend typecheck`
 - `pnpm --filter @agenthub/backend test`
 - `pnpm --filter @agenthub/backend prisma:migrate`
+- `pnpm --filter @agenthub/backend prisma:seed`
 
 ## P0 env
 
@@ -17,6 +18,10 @@ NestJS backend for the AgentHub P0 flow.
 - `MOCK_AGENT=true`: writes deterministic TypeScript sample files instead of invoking Claude
 - `AGENTHUB_TEST_REPO_PATH`: defaults to `D:\agent\AgentHub-Test`
 - `DATABASE_URL`: used by Prisma migrations
+
+## Persistence Scope
+
+Prisma currently owns schema and default `AgentDefinition` seed data used by `GET /api/agents`. `SessionService` still keeps session/run state in memory for this PR; wiring sessions and runs to Prisma is deferred to the persistence follow-up.
 
 ## Local Claude Code validation
 

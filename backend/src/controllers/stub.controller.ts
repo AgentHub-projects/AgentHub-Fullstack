@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
+import { PrismaService } from "../services/prisma.service";
 
 const emptyList = { items: [] };
 
 @Controller()
 export class StubController {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
   @Get("conversations")
   listConversations() {
     return emptyList;
@@ -20,16 +23,19 @@ export class StubController {
   }
 
   @Get("agents")
-  listAgents() {
+  async listAgents() {
+    const agents = await this.prisma.agentDefinition.findMany({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+
     return {
-      items: [
-        {
-          id: "claude",
-          name: "Claude",
-          provider: "anthropic",
-          role: "coding-agent"
-        }
-      ]
+      items: agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        provider: agent.provider,
+        role: agent.role,
+        description: agent.description ?? undefined
+      }))
     };
   }
 

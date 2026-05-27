@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from "@nestjs/common";
 import type { ApiErrorDto } from "@agenthub/shared";
+import { ApiHttpException } from "../services/errors";
 
 interface HttpResponse {
   status(code: number): this;
@@ -23,18 +24,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const body = exception.getResponse();
 
-      // ApiHttpException already sets body to ApiErrorDto
-      if (typeof body === "object" && body !== null && "code" in body && "message" in body) {
+      if (exception instanceof ApiHttpException && isApiErrorDto(body)) {
         response.status(status).json(body);
         return;
       }
 
-      // Plain NestJS HttpException (e.g. NotFoundException from guards)
-      const message = typeof body === "string" ? body : (body as { message?: string }).message ?? exception.message;
+      const details = getSafeHttpExceptionDetails(body);
       const error: ApiErrorDto = {
         code: httpStatusToCode(status),
-        message,
-        details: typeof body === "object" ? body : undefined
+        message: getHttpExceptionMessage(body, exception.message),
+        ...(details === undefined ? {} : { details })
       };
       response.status(status).json(error);
       return;
@@ -48,6 +47,44 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(error);
   }
+}
+
+function isApiErrorDto(body: unknown): body is ApiErrorDto {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    "code" in body &&
+    typeof body.code === "string" &&
+    "message" in body &&
+    typeof body.message === "string"
+  );
+}
+
+function getHttpExceptionMessage(body: unknown, fallback: string): string {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (isRecord(body)) {
+    const message = body.message;
+    if (Array.isArray(message)) {
+      return message.join(", ");
+    }
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+  return fallback;
+}
+
+function getSafeHttpExceptionDetails(body: unknown): unknown {
+  if (isRecord(body) && Array.isArray(body.validationErrors)) {
+    return { validationErrors: body.validationErrors };
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function httpStatusToCode(status: number): string {

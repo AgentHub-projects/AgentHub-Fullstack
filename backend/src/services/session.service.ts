@@ -13,6 +13,8 @@ import { ApiHttpException } from "./errors";
 import { createId } from "./ids";
 import { WorktreeService } from "./worktree.service";
 
+type CompletedRunStatus = "succeeded" | "failed" | "cancelled";
+
 @Injectable()
 export class SessionService {
   private current: SessionDto = {
@@ -55,11 +57,8 @@ export class SessionService {
     }
 
     const mode = request.mode ?? "direct";
-    // Resolve agent IDs: explicit agentIds > config.name > default "claude"
-    const agentIds =
-      request.agentIds && request.agentIds.length > 0
-        ? request.agentIds
-        : [request.config?.name ?? "claude"];
+    const resolvedAgentIds = this.resolveAgentIds(request);
+    const agentIds = mode === "direct" ? [resolvedAgentIds[0]] : resolvedAgentIds;
 
     if (mode === "group" && agentIds.length < 2) {
       throw new ApiHttpException(HttpStatus.BAD_REQUEST, {
@@ -68,48 +67,44 @@ export class SessionService {
       });
     }
 
-    // For P0 we execute the first agent; group mode queues all but runs them serially.
-    const agentId = agentIds[0];
-    const runId = createId("run");
     const conversationId = this.current.id;
     const now = new Date().toISOString();
-    const run: AgentRun = {
-      id: runId,
-      agentId,
-      conversationId,
-      status: "running",
-      runtime: {
+    const runs = agentIds.map((agentId, index) =>
+      this.createRun({
         agentId,
-        displayName: request.config?.name ?? agentId,
-        provider: request.config?.provider ?? "local-cli",
-        role: request.config?.role ?? "coding-agent",
-        worktreePath: "",
-        branchName: "",
-        status: "running"
-      },
-      prompt,
-      createdAt: now,
-      startedAt: now
-    };
+        conversationId,
+        now,
+        prompt,
+        request,
+        status: index === 0 ? "running" : "queued"
+      })
+    );
+    const firstRun = runs[0];
 
-    this.runs.set(runId, run);
-    this.activeRunId = runId;
+    for (const run of runs) {
+      this.runs.set(run.id, run);
+    }
+    this.activeRunId = firstRun.id;
     this.current = {
       ...this.current,
       status: "running",
-      agentId,
+      agentId: firstRun.agentId,
       agentIds,
       mode,
       prompt,
-      runIds: [...this.current.runIds, runId],
+      runIds: [...this.current.runIds, ...runs.map((run) => run.id)],
       updatedAt: now
     };
 
-    void this.executeRun(run, request).catch((error: unknown) => {
-      this.failRun(run, error);
-    });
+    if (mode === "group") {
+      void this.executeGroupRuns(runs, request);
+    } else {
+      void this.executeRun(firstRun, request, { finalizeOnSuccess: true }).catch((error: unknown) => {
+        this.failRun(firstRun, error);
+      });
+    }
 
-    return { session: this.current, run };
+    return { session: this.current, run: firstRun };
   }
 
   cancel(runId: string): CancelRunResponse {
@@ -132,6 +127,7 @@ export class SessionService {
     run.status = "cancelled";
     run.finishedAt = finishedAt;
     run.runtime.status = "cancelled";
+    this.cancelQueuedRuns(finishedAt);
     this.activeRunId = undefined;
     this.current = {
       ...this.current,
@@ -159,7 +155,97 @@ export class SessionService {
     return this.cancel(this.activeRunId);
   }
 
-  private async executeRun(run: AgentRun, request: RunSessionRequest): Promise<void> {
+  private resolveAgentIds(request: RunSessionRequest): string[] {
+    const explicitAgentIds = request.agentIds?.map((agentId) => agentId.trim()).filter(Boolean);
+    if (explicitAgentIds && explicitAgentIds.length > 0) {
+      return explicitAgentIds;
+    }
+
+    const configuredAgentId = request.config?.name.trim();
+    return [configuredAgentId || "claude"];
+  }
+
+  private createRun(args: {
+    agentId: string;
+    conversationId: string;
+    now: string;
+    prompt: string;
+    request: RunSessionRequest;
+    status: "running" | "queued";
+  }): AgentRun {
+    const config = args.request.config?.name === args.agentId ? args.request.config : undefined;
+
+    return {
+      id: createId("run"),
+      agentId: args.agentId,
+      conversationId: args.conversationId,
+      status: args.status,
+      runtime: {
+        agentId: args.agentId,
+        displayName: config?.name ?? args.agentId,
+        provider: config?.provider ?? "local-cli",
+        role: config?.role ?? "coding-agent",
+        worktreePath: "",
+        branchName: "",
+        status: args.status === "running" ? "running" : "idle"
+      },
+      prompt: args.prompt,
+      createdAt: args.now,
+      ...(args.status === "running" ? { startedAt: args.now } : {})
+    };
+  }
+
+  private startQueuedRun(run: AgentRun): void {
+    const now = new Date().toISOString();
+    run.status = "running";
+    run.startedAt = now;
+    run.runtime.status = "running";
+    this.activeRunId = run.id;
+    this.current = {
+      ...this.current,
+      status: "running",
+      agentId: run.agentId,
+      updatedAt: now
+    };
+  }
+
+  private cancelQueuedRuns(finishedAt: string): void {
+    for (const runId of this.current.runIds) {
+      const run = this.runs.get(runId);
+      if (run?.status !== "queued") {
+        continue;
+      }
+      run.status = "cancelled";
+      run.finishedAt = finishedAt;
+      run.runtime.status = "cancelled";
+    }
+  }
+
+  private async executeGroupRuns(runs: AgentRun[], request: RunSessionRequest): Promise<void> {
+    for (let index = 0; index < runs.length; index += 1) {
+      const run = runs[index];
+      if (index > 0) {
+        this.startQueuedRun(run);
+      }
+
+      const status = await this.executeRun(run, request, {
+        finalizeOnSuccess: index === runs.length - 1
+      }).catch((error: unknown) => {
+        this.failRun(run, error);
+        return "failed" as const;
+      });
+
+      if (status !== "succeeded") {
+        return;
+      }
+    }
+  }
+
+  private async executeRun(
+    run: AgentRun,
+    request: RunSessionRequest,
+    options: { finalizeOnSuccess: boolean }
+  ): Promise<CompletedRunStatus> {
     this.emit({
       type: "agent_started",
       runId: run.id,
@@ -172,6 +258,10 @@ export class SessionService {
     run.runtime.worktreePath = worktree.worktreePath;
     run.runtime.branchName = worktree.branchName;
 
+    if (this.isRunCancelled(run)) {
+      return "cancelled";
+    }
+
     const result = await this.runner.run({
       run,
       prompt: run.prompt,
@@ -179,7 +269,15 @@ export class SessionService {
       emit: (event) => this.emit(event)
     });
 
+    if (this.isRunCancelled(run)) {
+      return "cancelled";
+    }
+
     const testSync = await this.worktrees.complete(worktree, result.summary);
+    if (this.isRunCancelled(run)) {
+      return "cancelled";
+    }
+
     const finishedAt = new Date().toISOString();
     if (testSync.status === "failed") {
       const message = testSync.error?.message ?? "Test repository sync failed.";
@@ -191,6 +289,7 @@ export class SessionService {
       };
       run.finishedAt = finishedAt;
       run.runtime.status = "failed";
+      this.cancelQueuedRuns(finishedAt);
       this.activeRunId = undefined;
       this.current = {
         ...this.current,
@@ -214,7 +313,7 @@ export class SessionService {
         agentId: run.agentId,
         payload: { status: "failed" }
       });
-      return;
+      return "failed";
     }
 
     run.status = "succeeded";
@@ -224,7 +323,7 @@ export class SessionService {
     this.activeRunId = undefined;
     this.current = {
       ...this.current,
-      status: "succeeded",
+      status: options.finalizeOnSuccess ? "succeeded" : this.current.status,
       output: result.output,
       testSync,
       updatedAt: finishedAt
@@ -243,6 +342,7 @@ export class SessionService {
       agentId: run.agentId,
       payload: { status: "succeeded" }
     });
+    return "succeeded";
   }
 
   private failRun(run: AgentRun, error: unknown): void {
@@ -256,6 +356,7 @@ export class SessionService {
     run.error = { code: "AGENT_RUN_FAILED", message };
     run.finishedAt = finishedAt;
     run.runtime.status = "failed";
+    this.cancelQueuedRuns(finishedAt);
     this.activeRunId = undefined;
     this.current = {
       ...this.current,
@@ -270,6 +371,10 @@ export class SessionService {
       agentId: run.agentId,
       payload: run.error
     });
+  }
+
+  private isRunCancelled(run: AgentRun): boolean {
+    return run.status === "cancelled";
   }
 
   private emit(event: Omit<AgentEvent, "eventId" | "seq" | "ts">): void {
