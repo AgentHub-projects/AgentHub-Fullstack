@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { StubController } from "../src/controllers/stub.controller";
 
+const prismaStub = {
+  agentDefinition: {
+    findMany: () =>
+      Promise.resolve([
+        {
+          id: "claude",
+          name: "Claude",
+          provider: "anthropic",
+          role: "coding-agent",
+          description: "Anthropic Claude – general-purpose coding agent",
+          createdAt: new Date("2026-01-01"),
+        },
+      ]),
+  },
+} as any;
+
 describe("Downstream adapter - StubController", () => {
-  const controller = new StubController();
+  const controller = new StubController(prismaStub);
 
   describe("Conversations", () => {
     it("GET /api/conversations returns empty list", () => {
@@ -23,8 +39,8 @@ describe("Downstream adapter - StubController", () => {
   });
 
   describe("Agents", () => {
-    it("GET /api/agents returns a Claude agent entry", () => {
-      const result = controller.listAgents();
+    it("GET /api/agents returns a Claude agent entry", async () => {
+      const result = await controller.listAgents();
       expect(result.items).toHaveLength(1);
       expect(result.items[0]).toMatchObject({
         id: "claude", name: "Claude", provider: "anthropic", role: "coding-agent",
