@@ -1,6 +1,7 @@
 import type {
   AgentEvent,
   AgentRun,
+  AgentConfigDraft,
   ApiErrorDto,
   RunSessionRequest,
   SessionDto,
@@ -37,7 +38,7 @@ export const initialSession: SessionDto = {
   id: "local-offline-session",
   title: "等待连接后端会话",
   status: "idle",
-  agentId: "claude-code-agent",
+  agentId: "claude",
   runIds: [],
   prompt: "帮我写一个前后端分离的架构的todolist系统。",
   output: undefined,
@@ -83,8 +84,9 @@ async function requestJson<T>(
 
 export async function runSession(
   prompt: string,
+  config?: AgentConfigDraft,
 ): Promise<ApiResult<RunSessionResponse>> {
-  const body: RunSessionRequest = { prompt };
+  const body: RunSessionRequest = { prompt, config };
   return requestJson<RunSessionResponse>("/api/session/run", {
     method: "POST",
     body: JSON.stringify(body),
