@@ -11,7 +11,8 @@
     "lint": "pnpm --filter @agenthub/shared build && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@agenthub/shared": "workspace:*",
@@ -32,6 +33,7 @@
     "vitest": "^3.1.4"
   },
   "prisma": {
-    "schema": "prisma/schema.prisma"
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
   }
 }

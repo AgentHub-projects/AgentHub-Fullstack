@@ -20,6 +20,8 @@ export class SessionService {
     title: "Current Session",
     status: "idle",
     runIds: [],
+    agentIds: [],
+    mode: "direct",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -52,9 +54,24 @@ export class SessionService {
       });
     }
 
+    const mode = request.mode ?? "direct";
+    // Resolve agent IDs: explicit agentIds > config.name > default "claude"
+    const agentIds =
+      request.agentIds && request.agentIds.length > 0
+        ? request.agentIds
+        : [request.config?.name ?? "claude"];
+
+    if (mode === "group" && agentIds.length < 2) {
+      throw new ApiHttpException(HttpStatus.BAD_REQUEST, {
+        code: "GROUP_REQUIRES_MULTIPLE_AGENTS",
+        message: "Group mode requires at least two agent IDs."
+      });
+    }
+
+    // For P0 we execute the first agent; group mode queues all but runs them serially.
+    const agentId = agentIds[0];
     const runId = createId("run");
     const conversationId = this.current.id;
-    const agentId = request.config?.name ?? "claude";
     const now = new Date().toISOString();
     const run: AgentRun = {
       id: runId,
@@ -63,7 +80,7 @@ export class SessionService {
       status: "running",
       runtime: {
         agentId,
-        displayName: request.config?.name ?? "Claude",
+        displayName: request.config?.name ?? agentId,
         provider: request.config?.provider ?? "local-cli",
         role: request.config?.role ?? "coding-agent",
         worktreePath: "",
@@ -81,6 +98,8 @@ export class SessionService {
       ...this.current,
       status: "running",
       agentId,
+      agentIds,
+      mode,
       prompt,
       runIds: [...this.current.runIds, runId],
       updatedAt: now

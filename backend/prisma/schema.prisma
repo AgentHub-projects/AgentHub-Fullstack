@@ -55,3 +55,12 @@ model Artifact {
   path      String
   createdAt DateTime @default(now())
 }
+
+model AgentDefinition {
+  id          String   @id
+  name        String
+  provider    String
+  role        String
+  description String?
+  createdAt   DateTime @default(now())
+}

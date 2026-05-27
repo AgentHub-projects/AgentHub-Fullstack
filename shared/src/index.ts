@@ -82,11 +82,16 @@ export interface AgentEvent {
   ts: number;
 }
 
+export type SessionMode = "direct" | "group";
+
 export interface SessionDto {
   id: string;
   title?: string;
   status: SessionStatus;
+  /** @deprecated use agentIds */
   agentId?: string;
+  agentIds?: string[];
+  mode?: SessionMode;
   runIds: string[];
   prompt?: string;
   output?: string;
@@ -100,7 +105,12 @@ export interface RunSessionRequest {
   prompt: string;
   repositoryPath?: string;
   testRepositoryPath?: string;
+  /** Single-agent shorthand; ignored when agentIds is provided. */
   config?: AgentConfigDraft;
+  /** One or more agent IDs to run. Defaults to ["claude"] when omitted. */
+  agentIds?: string[];
+  /** "direct" (default) = single agent; "group" = fan-out to all agentIds. */
+  mode?: SessionMode;
 }
 
 export interface RunSessionResponse {

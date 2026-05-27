@@ -118,6 +118,48 @@ describe("SessionService", () => {
       }
     });
   });
+  it("accepts agentIds and mode in the run request", async () => {
+    const runner = {
+      run: vi.fn(
+        () =>
+          new Promise(() => {
+            return undefined;
+          })
+      ),
+      cancel: vi.fn()
+    } as unknown as AgentRunner;
+    const worktrees = {
+      prepare: vi.fn(async () => ({
+        repoPath: "repo",
+        branchName: "agent/run-multi/main",
+        worktreePath: "worktree",
+        summaryPath: "summary.md",
+        logPath: "agent.log"
+      })),
+      complete: vi.fn()
+    } as unknown as WorktreeService;
+    const gateway = {
+      emitAgentEvent: vi.fn((_event: AgentEvent) => undefined)
+    } as never;
+    const service = new SessionService(runner, worktrees, gateway);
+
+    const result = await service.run({ prompt: "group task", agentIds: ["claude", "claude-code"], mode: "group" });
+    expect(result.session.agentIds).toEqual(["claude", "claude-code"]);
+    expect(result.session.mode).toBe("group");
+    expect(result.run.agentId).toBe("claude");
+  });
+
+  it("rejects group mode with fewer than two agent IDs", async () => {
+    const runner = { run: vi.fn(), cancel: vi.fn() } as unknown as AgentRunner;
+    const worktrees = { prepare: vi.fn(), complete: vi.fn() } as unknown as WorktreeService;
+    const gateway = { emitAgentEvent: vi.fn((_event: AgentEvent) => undefined) } as never;
+    const service = new SessionService(runner, worktrees, gateway);
+
+    await expect(service.run({ prompt: "solo", agentIds: ["claude"], mode: "group" })).rejects.toMatchObject({
+      response: { code: "GROUP_REQUIRES_MULTIPLE_AGENTS" },
+      status: 400
+    });
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
