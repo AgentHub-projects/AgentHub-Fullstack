@@ -10,12 +10,14 @@ import type {
 import type {
   ArtifactChunkInput,
   ArtifactUpsertInput,
+  AgentRunPersistenceInput,
   ContextItemInput,
   FactSourceRepository,
   FactSourceWriter,
   FileChangeInput,
   MessageCompleteInput,
-  MessageDeltaInput
+  MessageDeltaInput,
+  SessionPersistenceInput
 } from "./fact-source.repository";
 import { PrismaService } from "./prisma.service";
 
@@ -31,6 +33,59 @@ export class PrismaFactSourceRepository implements FactSourceRepository, FactSou
 
   async transaction<T>(work: (writer: FactSourceWriter) => Promise<T>): Promise<T> {
     return this.db.$transaction(async (tx: PrismaLike) => work(new PrismaFactSourceRepository(tx))) as Promise<T>;
+  }
+
+  async upsertSession(input: SessionPersistenceInput): Promise<void> {
+    await this.db.session.upsert({
+      where: { id: input.id },
+      update: definedObject({
+        title: input.title,
+        status: input.status,
+        agentId: input.agentId,
+        prompt: input.prompt,
+        output: input.output,
+        error: input.error
+      }),
+      create: {
+        id: input.id,
+        title: input.title,
+        status: input.status,
+        agentId: input.agentId,
+        prompt: input.prompt,
+        output: input.output,
+        error: input.error,
+        createdAt: input.createdAt ? new Date(input.createdAt) : undefined
+      }
+    });
+  }
+
+  async upsertAgentRun(input: AgentRunPersistenceInput): Promise<void> {
+    await this.db.agentRun.upsert({
+      where: { id: input.id },
+      update: definedObject({
+        conversationId: input.conversationId,
+        agentId: input.agentId,
+        status: input.status,
+        prompt: input.prompt,
+        output: input.output,
+        error: input.error,
+        startedAt: input.startedAt ? new Date(input.startedAt) : undefined,
+        finishedAt: input.finishedAt ? new Date(input.finishedAt) : undefined
+      }),
+      create: {
+        id: input.id,
+        sessionId: input.sessionId,
+        conversationId: input.conversationId,
+        agentId: input.agentId,
+        status: input.status,
+        prompt: input.prompt ?? "",
+        output: input.output,
+        error: input.error,
+        createdAt: input.createdAt ? new Date(input.createdAt) : undefined,
+        startedAt: input.startedAt ? new Date(input.startedAt) : undefined,
+        finishedAt: input.finishedAt ? new Date(input.finishedAt) : undefined
+      }
+    });
   }
 
   async createEventIfAbsent(event: AgentEvent): Promise<boolean> {
@@ -58,6 +113,9 @@ export class PrismaFactSourceRepository implements FactSourceRepository, FactSou
 
   async appendMessageDelta(input: MessageDeltaInput): Promise<MessageDto> {
     const existing = await this.db.message.findUnique({ where: { id: input.id } });
+    if (existing?.status === "completed") {
+      return toMessageDto(existing);
+    }
     const now = new Date();
     const row = existing
       ? await this.db.message.update({

@@ -17,6 +17,9 @@ NestJS backend for the AgentHub P0 flow.
 - `MOCK_AGENT=true`: writes deterministic TypeScript sample files instead of invoking Claude
 - `AGENTHUB_TEST_REPO_PATH`: defaults to `D:\agent\AgentHub-Test`
 - `DATABASE_URL`: used by Prisma migrations
+- `AGENTHUB_OSS_BUCKET` / `AGENTHUB_OSS_REGION` / `AGENTHUB_OSS_ENDPOINT`: reserved for OSS artifact storage. Until an OSS adapter is bundled, artifacts are written to the local filesystem fallback and the response metadata includes the fallback reason.
+- `AGENTHUB_ARTIFACT_DIR`: optional local artifact fallback directory; defaults to the OS temp directory.
+- `AGENTHUB_PGVECTOR_ENABLED=true`: opts into pgvector-backed context search when paired with `DATABASE_URL`. Until a pgvector adapter is bundled, context search returns deterministic local ranking and includes the fallback reason.
 
 ## Local Claude Code validation
 

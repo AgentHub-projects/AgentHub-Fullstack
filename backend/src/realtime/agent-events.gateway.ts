@@ -11,8 +11,8 @@ export class AgentEventsGateway {
 
   constructor(@Optional() @Inject(EventStore) private readonly eventStore?: EventStore) {}
 
-  emitAgentEvent(event: AgentEvent): void {
-    void this.eventStore?.ingest(event);
+  async emitAgentEvent(event: AgentEvent): Promise<void> {
+    await this.eventStore?.ingest(event);
     this.server?.to(`conv:${event.conversationId}`).emit("agent:event", event);
   }
 

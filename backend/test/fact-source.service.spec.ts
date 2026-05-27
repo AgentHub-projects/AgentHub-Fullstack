@@ -67,6 +67,59 @@ describe("fact source services", () => {
     expect(restored.messages[0].content).toBe("a");
   });
 
+  it("does not append an earlier delta after message completion was ingested first", async () => {
+    const repository = new MemoryFactSourceRepository();
+    const store = new EventStore(repository);
+
+    await store.ingest(event(2, "message.completed", { messageId: "msg-1", content: "final body" }));
+    await store.ingest(event(1, "message.delta", { messageId: "msg-1", text: "stale " }));
+    const restored = await new RunStateService(repository).refresh("run-1");
+
+    expect(restored.messages[0]).toMatchObject({
+      id: "msg-1",
+      status: "completed",
+      content: "final body"
+    });
+  });
+
+  it("keeps completed message content sealed when a later delta arrives", async () => {
+    const repository = new MemoryFactSourceRepository();
+    const store = new EventStore(repository);
+
+    await store.ingest(event(1, "message.delta", { messageId: "msg-1", text: "draft" }));
+    await store.ingest(event(2, "message.completed", { messageId: "msg-1", content: "final" }));
+    await store.ingest(event(3, "message.delta", { messageId: "msg-1", text: " corrupt" }));
+    const restored = await new RunStateService(repository).refresh("run-1");
+
+    expect(restored.messages[0]).toMatchObject({
+      id: "msg-1",
+      status: "completed",
+      content: "final"
+    });
+  });
+
+  it("rejects artifact.completed event replay when sha256 does not match assembled chunks", async () => {
+    const repository = new MemoryFactSourceRepository();
+    const store = new EventStore(repository);
+
+    await store.ingest(event(1, "artifact.chunk", { artifactId: "artifact-1", index: 0, content: "hello" }));
+    await expect(
+      store.ingest(event(2, "artifact.completed", { artifactId: "artifact-1", sha256: sha256("not hello") }))
+    ).rejects.toMatchObject({
+      response: {
+        code: "ARTIFACT_SHA256_MISMATCH"
+      },
+      status: 409
+    });
+
+    const restored = await new RunStateService(repository).refresh("run-1");
+    expect(restored.timeline.map((item) => item.seq)).toEqual([1]);
+    expect(restored.artifacts[0]).toMatchObject({
+      id: "artifact-1",
+      status: "pending"
+    });
+  });
+
   it("rejects artifact completion when sha256 does not match assembled chunks", async () => {
     const repository = new MemoryFactSourceRepository();
     const artifacts = new ArtifactService(repository);

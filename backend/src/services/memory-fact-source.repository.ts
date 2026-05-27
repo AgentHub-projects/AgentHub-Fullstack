@@ -9,15 +9,19 @@ import type {
 import type {
   ArtifactChunkInput,
   ArtifactUpsertInput,
+  AgentRunPersistenceInput,
   ContextItemInput,
   FactSourceRepository,
   FactSourceWriter,
   FileChangeInput,
   MessageCompleteInput,
-  MessageDeltaInput
+  MessageDeltaInput,
+  SessionPersistenceInput
 } from "./fact-source.repository";
 
 export class MemoryFactSourceRepository implements FactSourceRepository, FactSourceWriter {
+  private readonly sessions = new Map<string, SessionPersistenceInput>();
+  private readonly agentRuns = new Map<string, AgentRunPersistenceInput>();
   private readonly events = new Map<string, AgentEvent>();
   private readonly eventSeqs = new Set<string>();
   private readonly messages = new Map<string, MessageDto>();
@@ -27,7 +31,55 @@ export class MemoryFactSourceRepository implements FactSourceRepository, FactSou
   private readonly contextItems = new Map<string, ContextItemDto>();
 
   async transaction<T>(work: (writer: FactSourceWriter) => Promise<T>): Promise<T> {
-    return work(this);
+    const snapshot = {
+      sessions: new Map(this.sessions),
+      agentRuns: new Map(this.agentRuns),
+      events: new Map(this.events),
+      eventSeqs: new Set(this.eventSeqs),
+      messages: new Map(this.messages),
+      fileChanges: new Map(this.fileChanges),
+      artifacts: new Map(this.artifacts),
+      chunks: new Map(this.chunks),
+      contextItems: new Map(this.contextItems)
+    };
+    try {
+      return await work(this);
+    } catch (error) {
+      replaceMap(this.sessions, snapshot.sessions);
+      replaceMap(this.agentRuns, snapshot.agentRuns);
+      replaceMap(this.events, snapshot.events);
+      replaceSet(this.eventSeqs, snapshot.eventSeqs);
+      replaceMap(this.messages, snapshot.messages);
+      replaceMap(this.fileChanges, snapshot.fileChanges);
+      replaceMap(this.artifacts, snapshot.artifacts);
+      replaceMap(this.chunks, snapshot.chunks);
+      replaceMap(this.contextItems, snapshot.contextItems);
+      throw error;
+    }
+  }
+
+  async upsertSession(input: SessionPersistenceInput): Promise<void> {
+    const existing = this.sessions.get(input.id);
+    this.sessions.set(input.id, {
+      ...existing,
+      ...definedObject(input),
+      id: input.id,
+      status: input.status
+    });
+  }
+
+  async upsertAgentRun(input: AgentRunPersistenceInput): Promise<void> {
+    const existing = this.agentRuns.get(input.id);
+    this.agentRuns.set(input.id, {
+      ...existing,
+      ...definedObject(input),
+      id: input.id,
+      sessionId: input.sessionId,
+      conversationId: input.conversationId,
+      agentId: input.agentId,
+      status: input.status,
+      prompt: input.prompt ?? existing?.prompt ?? ""
+    });
   }
 
   async createEventIfAbsent(event: AgentEvent): Promise<boolean> {
@@ -43,6 +95,9 @@ export class MemoryFactSourceRepository implements FactSourceRepository, FactSou
   async appendMessageDelta(input: MessageDeltaInput): Promise<MessageDto> {
     const now = new Date().toISOString();
     const existing = this.messages.get(input.id);
+    if (existing?.status === "completed") {
+      return { ...existing };
+    }
     const message: MessageDto = existing
       ? {
           ...existing,
@@ -252,4 +307,24 @@ export class MemoryFactSourceRepository implements FactSourceRepository, FactSou
   private async countArtifactChunks(artifactId: string): Promise<number> {
     return [...this.chunks.values()].filter((chunk) => chunk.artifactId === artifactId).length;
   }
+}
+
+function replaceMap<K, V>(target: Map<K, V>, source: Map<K, V>): void {
+  target.clear();
+  for (const [key, value] of source) {
+    target.set(key, value);
+  }
+}
+
+function replaceSet<T>(target: Set<T>, source: Set<T>): void {
+  target.clear();
+  for (const value of source) {
+    target.add(value);
+  }
+}
+
+function definedObject<T extends object>(input: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(input as Record<string, unknown>).filter(([, value]) => value !== undefined)
+  ) as Partial<T>;
 }

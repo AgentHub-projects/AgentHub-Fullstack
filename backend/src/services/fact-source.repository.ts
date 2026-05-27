@@ -29,6 +29,31 @@ export interface MessageCompleteInput {
   metadata?: unknown;
 }
 
+export interface SessionPersistenceInput {
+  id: string;
+  title?: string;
+  status: string;
+  agentId?: string;
+  prompt?: string;
+  output?: string;
+  error?: string;
+  createdAt?: string;
+}
+
+export interface AgentRunPersistenceInput {
+  id: string;
+  sessionId: string;
+  conversationId: string;
+  agentId: string;
+  status: string;
+  prompt?: string;
+  output?: unknown;
+  error?: unknown;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
 export interface FileChangeInput {
   id: string;
   runId: string;
@@ -87,6 +112,8 @@ export interface FactSourceReader {
 }
 
 export interface FactSourceWriter extends FactSourceReader {
+  upsertSession(input: SessionPersistenceInput): Promise<void>;
+  upsertAgentRun(input: AgentRunPersistenceInput): Promise<void>;
   createEventIfAbsent(event: AgentEvent): Promise<boolean>;
   appendMessageDelta(input: MessageDeltaInput): Promise<MessageDto>;
   completeMessage(input: MessageCompleteInput): Promise<MessageDto>;
