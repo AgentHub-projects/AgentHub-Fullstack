@@ -9,7 +9,7 @@ export interface RunnerContext {
   run: AgentRun;
   prompt: string;
   worktree: PreparedWorktree;
-  emit: (event: Omit<AgentEvent, "eventId" | "seq" | "ts">) => void;
+  emit: (event: Omit<AgentEvent, "eventId" | "seq" | "ts">) => Promise<void>;
 }
 
 export interface RunnerResult {
@@ -116,7 +116,7 @@ export class AgentRunner {
 
   private async runMock(context: RunnerContext): Promise<RunnerResult> {
     const wrappedPrompt = buildTodolistEngineeringPrompt(context.prompt);
-    context.emit({
+    await context.emit({
       type: "agent_thinking",
       runId: context.run.id,
       conversationId: context.run.conversationId,
@@ -158,7 +158,7 @@ export class AgentRunner {
 
     const output = `MOCK_AGENT=true mock run generated todo examples. Wrapped prompt:\n${wrappedPrompt}`;
     await writeFile(context.worktree.logPath, `${output}\n`, "utf8");
-    context.emit({
+    await context.emit({
       type: "text_delta",
       runId: context.run.id,
       conversationId: context.run.conversationId,
@@ -184,7 +184,7 @@ export class AgentRunner {
     };
     const evidenceLog = `Agent execution mode: ${JSON.stringify(evidence)}\n`;
 
-    context.emit({
+    await context.emit({
       type: "agent_thinking",
       runId: context.run.id,
       conversationId: context.run.conversationId,
@@ -211,6 +211,21 @@ export class AgentRunner {
       let output = "";
       let stderr = "";
       let settled = false;
+      let emitQueue: Promise<void> = Promise.resolve();
+      let emitFailure: unknown;
+
+      const enqueueEmit = (event: Omit<AgentEvent, "eventId" | "seq" | "ts">): void => {
+        emitQueue = emitQueue
+          .then(async () => {
+            if (emitFailure) {
+              return;
+            }
+            await context.emit(event);
+          })
+          .catch((error: unknown) => {
+            emitFailure = error;
+          });
+      };
 
       child.stdout.on("data", (chunk: Buffer) => {
         for (const line of chunk.toString("utf8").split(/\r?\n/)) {
@@ -219,7 +234,7 @@ export class AgentRunner {
             continue;
           }
           output += text;
-          context.emit({
+          enqueueEmit({
             type: "text_delta",
             runId: context.run.id,
             conversationId: context.run.conversationId,
@@ -250,6 +265,11 @@ export class AgentRunner {
         }
         settled = true;
         this.children.delete(context.run.id);
+        await emitQueue;
+        if (emitFailure) {
+          reject(emitFailure);
+          return;
+        }
         if (code !== 0) {
           const failure = stderr || `Agent command exited with code ${code}`;
           await writeFile(context.worktree.logPath, `${evidenceLog}${output}\n${stderr}Failure: ${failure}\n`, "utf8");

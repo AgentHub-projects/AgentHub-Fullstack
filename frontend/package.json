@@ -8,7 +8,7 @@
     "build": "next build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo \"No lint configured for @agenthub/frontend yet\"",
-    "test": "echo \"No tests for @agenthub/frontend yet\""
+    "test": "vitest run"
   },
   "dependencies": {
     "@agenthub/shared": "workspace:*",
@@ -21,6 +21,7 @@
     "@types/node": "^22.15.21",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }

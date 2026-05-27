@@ -18,13 +18,13 @@ export class SessionController {
 
   @Post("agent-runs/:runId/cancel")
   @HttpCode(200)
-  cancel(@Param("runId") runId: string): CancelRunResponse {
+  cancel(@Param("runId") runId: string): Promise<CancelRunResponse> {
     return this.sessions.cancel(runId);
   }
 
   @Post("session/cancel")
   @HttpCode(200)
-  cancelCurrent(): CancelRunResponse {
+  cancelCurrent(): Promise<CancelRunResponse> {
     return this.sessions.cancelCurrent();
   }
 }

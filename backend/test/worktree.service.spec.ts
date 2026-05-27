@@ -121,7 +121,7 @@ describe("WorktreeService", () => {
         run,
         prompt: run.prompt,
         worktree: prepared,
-        emit: vi.fn((_event: Omit<AgentEvent, "eventId" | "seq" | "ts">) => undefined)
+        emit: vi.fn(async (_event: Omit<AgentEvent, "eventId" | "seq" | "ts">) => undefined)
       });
       const sync = await worktrees.complete(prepared, result.summary);
 

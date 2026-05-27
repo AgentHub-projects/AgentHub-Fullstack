@@ -9,8 +9,20 @@ export type AgentEventType =
   | "agent_started"
   | "agent_thinking"
   | "text_delta"
+  | "message_delta"
+  | "message.delta"
+  | "message_completed"
+  | "message.completed"
   | "code_diff"
+  | "file_change"
+  | "file.change"
   | "preview_card"
+  | "artifact_chunk"
+  | "artifact.chunk"
+  | "artifact_completed"
+  | "artifact.completed"
+  | "context_item"
+  | "context.item"
   | "agent_completed"
   | "agent_failed"
   | "agent_cancelled"
@@ -29,6 +41,8 @@ export type SessionStatus = "idle" | "running" | "succeeded" | "failed";
 export type TestSyncStatus = "pending" | "synced" | "failed";
 
 export type TestSyncTargetBranch = "main";
+
+export type SessionMode = "direct" | "group";
 
 export interface ApiErrorDto {
   code: string;
@@ -82,7 +96,84 @@ export interface AgentEvent {
   ts: number;
 }
 
-export type SessionMode = "direct" | "group";
+export interface MessageDto {
+  id: string;
+  runId: string;
+  conversationId: string;
+  agentId: string;
+  role: string;
+  status: string;
+  content: string;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface FileChangeDto {
+  id: string;
+  runId: string;
+  path: string;
+  action: string;
+  status: string;
+  diff?: string;
+  sha256?: string;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArtifactChunkDto {
+  id: string;
+  artifactId: string;
+  runId: string;
+  index: number;
+  content: string;
+  sha256?: string;
+  byteLength: number;
+  createdAt: string;
+}
+
+export interface ArtifactDto {
+  id: string;
+  runId: string;
+  kind: string;
+  path: string;
+  status: string;
+  sha256?: string;
+  byteLength: number;
+  chunkCount: number;
+  storageProvider?: string;
+  storageKey?: string;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+  chunks?: ArtifactChunkDto[];
+}
+
+export interface ContextItemDto {
+  id: string;
+  runId?: string;
+  conversationId: string;
+  kind: string;
+  key: string;
+  value: unknown;
+  source?: string;
+  embedding?: unknown;
+  embeddingProvider?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RunStateDto {
+  runId: string;
+  timeline: AgentEvent[];
+  messages: MessageDto[];
+  fileChanges: FileChangeDto[];
+  artifacts: ArtifactDto[];
+  contextItems: ContextItemDto[];
+}
 
 export interface SessionDto {
   id: string;

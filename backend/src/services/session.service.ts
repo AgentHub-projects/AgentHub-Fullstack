@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   AgentEvent,
   AgentRun,
@@ -9,6 +9,7 @@ import type {
 } from "@agenthub/shared";
 import { AgentEventsGateway } from "../realtime/agent-events.gateway";
 import { AgentRunner } from "./agent-runner.service";
+import { EventStore } from "./event-store.service";
 import { ApiHttpException } from "./errors";
 import { createId } from "./ids";
 import { WorktreeService } from "./worktree.service";
@@ -17,6 +18,7 @@ type CompletedRunStatus = "succeeded" | "failed" | "cancelled";
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
   private current: SessionDto = {
     id: "session-current",
     title: "Current Session",
@@ -34,7 +36,8 @@ export class SessionService {
   constructor(
     @Inject(AgentRunner) private readonly runner: AgentRunner,
     @Inject(WorktreeService) private readonly worktrees: WorktreeService,
-    @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway
+    @Inject(AgentEventsGateway) private readonly gateway: AgentEventsGateway,
+    @Optional() @Inject(EventStore) private readonly eventStore?: EventStore
   ) {}
 
   getCurrentSession(): SessionDto {
@@ -100,14 +103,17 @@ export class SessionService {
       void this.executeGroupRuns(runs, request);
     } else {
       void this.executeRun(firstRun, request, { finalizeOnSuccess: true }).catch((error: unknown) => {
-        this.failRun(firstRun, error);
+        void this.failRun(firstRun, error).catch((failureError: unknown) => {
+          const message = failureError instanceof Error ? failureError.message : String(failureError);
+          this.logger.error(`Failed to persist or broadcast run failure for ${firstRun.id}: ${message}`);
+        });
       });
     }
 
     return { session: this.current, run: firstRun };
   }
 
-  cancel(runId: string): CancelRunResponse {
+  async cancel(runId: string): Promise<CancelRunResponse> {
     const run = this.runs.get(runId);
     if (!run) {
       throw new ApiHttpException(HttpStatus.NOT_FOUND, {
@@ -134,7 +140,8 @@ export class SessionService {
       status: "idle",
       updatedAt: finishedAt
     };
-    this.emit({
+    await this.persistRun(run);
+    await this.emit({
       type: "agent_cancelled",
       runId: run.id,
       conversationId: run.conversationId,
@@ -145,7 +152,7 @@ export class SessionService {
     return { session: this.current, run };
   }
 
-  cancelCurrent(): CancelRunResponse {
+  async cancelCurrent(): Promise<CancelRunResponse> {
     if (!this.activeRunId) {
       throw new ApiHttpException(HttpStatus.CONFLICT, {
         code: "NO_ACTIVE_RUN",
@@ -166,7 +173,7 @@ export class SessionService {
     const run = this.runs.get(runId);
     if (!run) return;
     if (run.status !== "running") return;
-    this.failRun(run, new Error(failure.message), failure.code);
+    void this.failRun(run, new Error(failure.message), failure.code);
   }
 
   private resolveAgentIds(request: RunSessionRequest): string[] {
@@ -245,7 +252,10 @@ export class SessionService {
       const status = await this.executeRun(run, request, {
         finalizeOnSuccess: index === runs.length - 1
       }).catch((error: unknown) => {
-        this.failRun(run, error);
+        void this.failRun(run, error).catch((failureError: unknown) => {
+          const message = failureError instanceof Error ? failureError.message : String(failureError);
+          this.logger.error(`Failed to persist or broadcast failure for ${run.id}: ${message}`);
+        });
         return "failed" as const;
       });
 
@@ -260,7 +270,7 @@ export class SessionService {
     request: RunSessionRequest,
     options: { finalizeOnSuccess: boolean }
   ): Promise<CompletedRunStatus> {
-    this.emit({
+    await this.emit({
       type: "agent_started",
       runId: run.id,
       conversationId: run.conversationId,
@@ -313,14 +323,15 @@ export class SessionService {
         testSync,
         updatedAt: finishedAt
       };
-      this.emit({
+      await this.persistRun(run);
+      await this.emit({
         type: "agent_failed",
         runId: run.id,
         conversationId: run.conversationId,
         agentId: run.agentId,
         payload: run.error
       });
-      this.emit({
+      await this.emit({
         type: "done",
         runId: run.id,
         conversationId: run.conversationId,
@@ -342,14 +353,15 @@ export class SessionService {
       testSync,
       updatedAt: finishedAt
     };
-    this.emit({
+    await this.persistRun(run);
+    await this.emit({
       type: "agent_completed",
       runId: run.id,
       conversationId: run.conversationId,
       agentId: run.agentId,
       payload: { output: result.output, testSync }
     });
-    this.emit({
+    await this.emit({
       type: "done",
       runId: run.id,
       conversationId: run.conversationId,
@@ -359,7 +371,7 @@ export class SessionService {
     return "succeeded";
   }
 
-  private failRun(run: AgentRun, error: unknown, code = "AGENT_RUN_FAILED"): void {
+  private async failRun(run: AgentRun, error: unknown, code = "AGENT_RUN_FAILED"): Promise<void> {
     if (run.status === "cancelled") {
       return;
     }
@@ -378,7 +390,8 @@ export class SessionService {
       error: message,
       updatedAt: finishedAt
     };
-    this.emit({
+    await this.persistRun(run);
+    await this.emit({
       type: "agent_failed",
       runId: run.id,
       conversationId: run.conversationId,
@@ -391,9 +404,13 @@ export class SessionService {
     return run.status === "cancelled";
   }
 
-  private emit(event: Omit<AgentEvent, "eventId" | "seq" | "ts">): void {
+  private async persistRun(run: AgentRun): Promise<void> {
+    await this.eventStore?.persistRun(this.current, run);
+  }
+
+  private async emit(event: Omit<AgentEvent, "eventId" | "seq" | "ts">): Promise<void> {
     this.eventSeq += 1;
-    this.gateway.emitAgentEvent({
+    await this.gateway.emitAgentEvent({
       ...event,
       eventId: createId("event"),
       seq: this.eventSeq,

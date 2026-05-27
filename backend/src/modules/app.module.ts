@@ -1,11 +1,18 @@
 import { Module, Provider } from "@nestjs/common";
 import { AgentRunner } from "../services/agent-runner.service";
 import { AgentEventsGateway } from "../realtime/agent-events.gateway";
+import { ArtifactService } from "../services/artifact.service";
+import { ContextService } from "../services/context.service";
+import { EventStore } from "../services/event-store.service";
+import { FactSourceController } from "../controllers/fact-source.controller";
+import { FACT_SOURCE_REPOSITORY } from "../services/fact-source.repository";
 import { HealthController } from "../controllers/health.controller";
-import { SessionController } from "../controllers/session.controller";
-import { StubController } from "../controllers/stub.controller";
+import { PrismaFactSourceRepository } from "../services/prisma-fact-source.repository";
 import { PrismaService } from "../services/prisma.service";
+import { RunStateService } from "../services/run-state.service";
+import { SessionController } from "../controllers/session.controller";
 import { SessionService } from "../services/session.service";
+import { StubController } from "../controllers/stub.controller";
 import { WorktreeService } from "../services/worktree.service";
 import {
   DownstreamSessionManager,
@@ -32,16 +39,22 @@ const downstreamRunFailureSinkProvider: Provider = {
 };
 
 @Module({
-  controllers: [HealthController, SessionController, StubController],
+  controllers: [HealthController, SessionController, StubController, FactSourceController],
   providers: [
     AgentEventsGateway,
     AgentRunner,
-    SessionService,
-    WorktreeService,
-    PrismaService,
+    ArtifactService,
+    ContextService,
+    DownstreamSessionManager,
     downstreamPersistenceProvider,
     downstreamRunFailureSinkProvider,
-    DownstreamSessionManager
+    EventStore,
+    PrismaService,
+    PrismaFactSourceRepository,
+    { provide: FACT_SOURCE_REPOSITORY, useExisting: PrismaFactSourceRepository },
+    RunStateService,
+    SessionService,
+    WorktreeService
   ]
 })
 export class AppModule {}

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent, AgentRun } from "@agenthub/shared";
-import { AgentRunner } from "../src/services/agent-runner.service";
+import { AgentEventsGateway } from "../src/realtime/agent-events.gateway";
+import { AgentRunner, type RunnerContext } from "../src/services/agent-runner.service";
+import { EventStore } from "../src/services/event-store.service";
+import { PrismaFactSourceRepository } from "../src/services/prisma-fact-source.repository";
 import { SessionService } from "../src/services/session.service";
 import { WorktreeService } from "../src/services/worktree.service";
 
@@ -26,7 +29,7 @@ describe("SessionService", () => {
       complete: vi.fn()
     } as unknown as WorktreeService;
     const gateway = {
-      emitAgentEvent: vi.fn((_event: AgentEvent) => undefined)
+      emitAgentEvent: vi.fn(async (_event: AgentEvent) => undefined)
     } as never;
     const service = new SessionService(runner, worktrees, gateway);
 
@@ -60,12 +63,12 @@ describe("SessionService", () => {
       complete: vi.fn()
     } as unknown as WorktreeService;
     const gateway = {
-      emitAgentEvent: vi.fn((_event: AgentEvent) => undefined)
+      emitAgentEvent: vi.fn(async (_event: AgentEvent) => undefined)
     } as never;
     const service = new SessionService(runner, worktrees, gateway);
 
     const started = await service.run({ prompt: "cancel me" });
-    const cancelled = service.cancelCurrent();
+    const cancelled = await service.cancelCurrent();
 
     expect(cancelled.run.id).toBe(started.run.id);
     expect(cancelled.run.status).toBe("cancelled");
@@ -146,7 +149,7 @@ describe("SessionService", () => {
       }))
     } as unknown as WorktreeService;
     const gateway = {
-      emitAgentEvent: vi.fn((_event: AgentEvent) => undefined)
+      emitAgentEvent: vi.fn(async (_event: AgentEvent) => undefined)
     } as never;
     const service = new SessionService(runner, worktrees, gateway);
 
@@ -165,6 +168,7 @@ describe("SessionService", () => {
       }
     });
   });
+
   it("accepts direct mode with an explicit single agentIds value", async () => {
     const runner = {
       run: vi.fn(
@@ -284,6 +288,59 @@ describe("SessionService", () => {
       status: 400
     });
   });
+
+  it("persists Session and AgentRun rows before live gateway events reach Prisma", async () => {
+    const prisma = new RecordingPrisma();
+    const repository = new PrismaFactSourceRepository(prisma as never);
+    const eventStore = new EventStore(repository);
+    const gateway = new AgentEventsGateway(eventStore);
+    const runner = {
+      run: vi.fn(async (context: RunnerContext) => {
+        await context.emit({
+          type: "text_delta",
+          runId: context.run.id,
+          conversationId: context.run.conversationId,
+          agentId: context.run.agentId,
+          payload: { text: "persisted output" }
+        });
+        return {
+          output: "persisted output",
+          summary: "# Summary\n"
+        };
+      }),
+      cancel: vi.fn()
+    } as unknown as AgentRunner;
+    const worktrees = {
+      prepare: vi.fn(async () => ({
+        repoPath: "repo",
+        branchName: "agent/run-004/main",
+        worktreePath: "worktree",
+        summaryPath: "summary.md",
+        logPath: "agent.log"
+      })),
+      complete: vi.fn(async () => ({
+        status: "synced",
+        targetBranch: "main",
+        commitSha: "abc123"
+      }))
+    } as unknown as WorktreeService;
+    const service = new SessionService(runner, worktrees, gateway, eventStore);
+
+    const started = await service.run({ prompt: "persist me" });
+    await waitFor(() => service.getCurrentSession().status === "succeeded");
+
+    const firstEventIndex = prisma.operations.findIndex((operation) => operation === "agentEvent.create:agent_started");
+    expect(firstEventIndex).toBeGreaterThan(-1);
+    expect(prisma.operations.indexOf("session.upsert:session-current")).toBeLessThan(firstEventIndex);
+    expect(prisma.operations.indexOf(`agentRun.upsert:${started.run.id}`)).toBeLessThan(firstEventIndex);
+    expect(prisma.agentRuns.get(started.run.id)).toMatchObject({
+      id: started.run.id,
+      sessionId: "session-current",
+      status: "succeeded",
+      prompt: "persist me"
+    });
+    expect(prisma.events).toHaveLength(4);
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -304,4 +361,98 @@ function expectApiError(fn: () => unknown, expected: object): void {
     thrown = error;
   }
   expect(thrown).toMatchObject(expected);
+}
+
+class RecordingPrisma {
+  readonly operations: string[] = [];
+  readonly sessions = new Map<string, any>();
+  readonly agentRuns = new Map<string, any>();
+  readonly events: any[] = [];
+  readonly messages = new Map<string, any>();
+
+  readonly session = {
+    upsert: async (args: any) => {
+      this.operations.push(`session.upsert:${args.where.id}`);
+      const existing = this.sessions.get(args.where.id);
+      const row = {
+        ...(existing ?? {}),
+        ...(existing ? args.update : args.create),
+        id: args.where.id,
+        createdAt: existing?.createdAt ?? args.create.createdAt ?? new Date(),
+        updatedAt: new Date()
+      };
+      this.sessions.set(args.where.id, row);
+      return row;
+    }
+  };
+
+  readonly agentRun = {
+    upsert: async (args: any) => {
+      this.operations.push(`agentRun.upsert:${args.where.id}`);
+      const data = this.compact(existingAwareData(this.agentRuns.get(args.where.id), args.update, args.create));
+      const sessionId = String(data.sessionId);
+      if (!this.sessions.has(sessionId)) {
+        throw new Error(`Missing Session ${data.sessionId}`);
+      }
+      const row = {
+        ...data,
+        sessionId,
+        id: args.where.id,
+        createdAt: data.createdAt ?? new Date()
+      };
+      this.agentRuns.set(args.where.id, row);
+      return row;
+    }
+  };
+
+  readonly agentEvent = {
+    create: async (args: any) => {
+      this.operations.push(`agentEvent.create:${args.data.type}`);
+      if (!this.agentRuns.has(args.data.runId)) {
+        throw new Error(`Missing AgentRun ${args.data.runId}`);
+      }
+      this.events.push(args.data);
+      return args.data;
+    }
+  };
+
+  readonly message = {
+    findUnique: async (args: any) => this.messages.get(args.where.id) ?? null,
+    create: async (args: any) => {
+      const now = new Date();
+      const row = {
+        ...args.data,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: args.data.completedAt
+      };
+      this.messages.set(args.data.id, row);
+      return row;
+    },
+    update: async (args: any) => {
+      const existing = this.messages.get(args.where.id);
+      if (!existing) {
+        throw new Error(`Missing Message ${args.where.id}`);
+      }
+      const row = {
+        ...existing,
+        ...this.compact(args.data),
+        updatedAt: args.data.updatedAt ?? new Date()
+      };
+      this.messages.set(args.where.id, row);
+      return row;
+    }
+  };
+
+  async $transaction<T>(work: (tx: RecordingPrisma) => Promise<T>): Promise<T> {
+    return work(this);
+  }
+
+  private compact(input: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+  }
+}
+
+function existingAwareData(existing: any, update: any, create: any): Record<string, unknown> {
+  return existing ? { ...existing, ...update } : create;
 }

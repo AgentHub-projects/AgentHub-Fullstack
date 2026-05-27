@@ -36,6 +36,10 @@ model AgentRun {
   finishedAt     DateTime?
   session        Session  @relation(fields: [sessionId], references: [id])
   events         AgentEvent[]
+  messages       Message[]
+  fileChanges    FileChange[]
+  artifacts      Artifact[]
+  contextItems   ContextItem[]
 }
 
 model AgentEvent {
@@ -48,14 +52,97 @@ model AgentEvent {
   payload        Json
   ts             BigInt
   run            AgentRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, seq])
+  @@index([runId, seq])
+}
+
+model Message {
+  id             String    @id
+  runId          String
+  conversationId String
+  agentId        String
+  role           String    @default("assistant")
+  status         String    @default("streaming")
+  content        String    @default("")
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  run            AgentRun  @relation(fields: [runId], references: [id])
+
+  @@index([runId, createdAt])
+  @@index([conversationId, createdAt])
+}
+
+model FileChange {
+  id        String   @id
+  runId     String
+  path      String
+  action    String   @default("modified")
+  status    String   @default("pending")
+  diff      String?
+  sha256    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  run       AgentRun @relation(fields: [runId], references: [id])
+
+  @@index([runId, path])
 }
 
 model Artifact {
-  id        String   @id
-  runId     String
-  kind      String
-  path      String
-  createdAt DateTime @default(now())
+  id              String          @id
+  runId           String
+  kind            String
+  path            String
+  status          String          @default("pending")
+  sha256          String?
+  byteLength      Int             @default(0)
+  chunkCount      Int             @default(0)
+  storageProvider String?
+  storageKey      String?
+  metadata        Json?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  completedAt     DateTime?
+  run             AgentRun        @relation(fields: [runId], references: [id])
+  chunks          ArtifactChunk[]
+
+  @@index([runId, createdAt])
+}
+
+model ArtifactChunk {
+  id         String   @id
+  artifactId String
+  runId      String
+  index      Int
+  content    String
+  sha256     String?
+  byteLength Int      @default(0)
+  createdAt  DateTime @default(now())
+  artifact   Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@unique([artifactId, index])
+  @@index([runId, artifactId])
+}
+
+model ContextItem {
+  id                String    @id
+  runId             String?
+  conversationId    String
+  kind              String
+  key               String
+  value             Json
+  source            String?
+  embedding         Json?
+  embeddingProvider String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  run               AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([runId, createdAt])
 }
 
 model AgentDefinition {
