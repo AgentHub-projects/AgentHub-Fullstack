@@ -20,6 +20,8 @@ export interface SocketLike {
 }
 
 const FRAME_EVENT = "rpc";
+const DISCONNECT_EVENT = "disconnect";
+const CONNECT_ERROR_EVENT = "connect_error";
 
 /**
  * Carries JSON-RPC frames over a Socket.IO connection. The downstream
@@ -31,8 +33,16 @@ export class SocketIoTransport implements Transport {
   private closeListener?: (error?: Error) => void;
   private closed = false;
 
+  // Bound handlers retained so `close()` can detach them and stop late
+  // events from firing the close path a second time after the transport
+  // is intentionally torn down.
+  private readonly onRpc: (payload: unknown) => void;
+  private readonly onDisconnect: (reason?: string) => void;
+  private readonly onConnectError: (err: Error) => void;
+
   constructor(private readonly socket: SocketLike) {
-    socket.on(FRAME_EVENT, (payload) => {
+    this.onRpc = (payload: unknown) => {
+      if (this.closed) return;
       if (isJsonRpcRequest(payload) || isJsonRpcResponse(payload)) {
         this.frameListener?.(payload);
         return;
@@ -42,17 +52,22 @@ export class SocketIoTransport implements Transport {
       void this.close(
         new DownstreamError(DownstreamErrorCode.Protocol, "received malformed JSON-RPC frame")
       );
-    });
-    socket.on("disconnect", (reason) => {
+    };
+    this.onDisconnect = (reason?: string) => {
+      if (this.closed) return;
       void this.close(
         new DownstreamError(DownstreamErrorCode.TransportClosed, `socket disconnected: ${reason ?? "unknown"}`)
       );
-    });
-    socket.on("connect_error", (err) => {
+    };
+    this.onConnectError = (err: Error) => {
+      if (this.closed) return;
       void this.close(
         new DownstreamError(DownstreamErrorCode.TransportClosed, `socket connect_error: ${err.message}`, err)
       );
-    });
+    };
+    socket.on(FRAME_EVENT, this.onRpc);
+    socket.on(DISCONNECT_EVENT, this.onDisconnect);
+    socket.on(CONNECT_ERROR_EVENT, this.onConnectError);
   }
 
   get isOpen(): boolean {
@@ -80,6 +95,19 @@ export class SocketIoTransport implements Transport {
   async close(error?: Error): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    // Detach our listeners before disconnecting so any late `disconnect` /
+    // `rpc` events the socket emits during teardown do not re-enter the
+    // close path (which would override `error` with a generic message) or
+    // leak through to a stale frameListener after teardown.
+    try {
+      this.socket.off?.(FRAME_EVENT, this.onRpc as (...args: unknown[]) => void);
+      this.socket.off?.(DISCONNECT_EVENT, this.onDisconnect as (...args: unknown[]) => void);
+      this.socket.off?.(CONNECT_ERROR_EVENT, this.onConnectError as (...args: unknown[]) => void);
+    } catch {
+      // `off` is optional on the SocketLike contract; if it throws on a
+      // strict implementation, the disconnect below still tears the socket
+      // down.
+    }
     try {
       this.socket.disconnect();
     } catch {

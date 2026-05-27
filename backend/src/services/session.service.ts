@@ -159,6 +159,20 @@ export class SessionService {
     return this.cancel(this.activeRunId);
   }
 
+  /**
+   * Public hook used by the downstream layer (DownstreamSessionManager's
+   * RunFailureSink) to mark a run failed when the orchestrator connection
+   * dies or rejects a prompt. The hook is a no-op for already-finished
+   * runs so a late connection-lost callback can't resurrect a run that
+   * already completed via the normal in-process path.
+   */
+  failRunExternally(runId: string, failure: { code: string; message: string }): void {
+    const run = this.runs.get(runId);
+    if (!run) return;
+    if (run.status !== "running") return;
+    this.failRun(run, new Error(failure.message), failure.code);
+  }
+
   private async executeRun(run: AgentRun, request: RunSessionRequest): Promise<void> {
     this.emit({
       type: "agent_started",
@@ -245,7 +259,7 @@ export class SessionService {
     });
   }
 
-  private failRun(run: AgentRun, error: unknown): void {
+  private failRun(run: AgentRun, error: unknown, code = "AGENT_RUN_FAILED"): void {
     if (run.status === "cancelled") {
       return;
     }
@@ -253,7 +267,7 @@ export class SessionService {
     const message = error instanceof Error ? error.message : String(error);
     const finishedAt = new Date().toISOString();
     run.status = "failed";
-    run.error = { code: "AGENT_RUN_FAILED", message };
+    run.error = { code, message };
     run.finishedAt = finishedAt;
     run.runtime.status = "failed";
     this.activeRunId = undefined;

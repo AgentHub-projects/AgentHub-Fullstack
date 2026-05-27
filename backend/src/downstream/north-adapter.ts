@@ -54,6 +54,7 @@ export class NorthAdapter {
   private closed = false;
   private closeError?: Error;
   private readonly timeoutMs: number;
+  private readonly closeListeners = new Set<(error?: Error) => void>();
 
   constructor(private readonly transport: Transport, options: NorthAdapterOptions = {}) {
     this.timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -64,6 +65,21 @@ export class NorthAdapter {
   /** Register the handler invoked for each server-initiated JSON-RPC request. */
   setServerRequestHandler(handler: ServerRequestHandler): void {
     this.serverRequestHandler = handler;
+  }
+
+  /**
+   * Subscribe to transport-close events. Multiple subscribers are
+   * supported (the underlying Transport contract only stores a single
+   * listener, so the adapter fans out to all subscribers). Used by the
+   * bootstrap layer to forward connection loss to the session manager.
+   */
+  onClose(listener: (error?: Error) => void): void {
+    this.closeListeners.add(listener);
+    if (this.closed) {
+      // Already closed — fire immediately so late subscribers still see
+      // the cause instead of silently waiting.
+      listener(this.closeError);
+    }
   }
 
   /** Number of in-flight client requests (exposed for tests/leak checks). */
@@ -204,6 +220,19 @@ export class NorthAdapter {
     for (const entry of entries) {
       if (entry.timer) clearTimeout(entry.timer);
       entry.reject(this.closeError);
+    }
+    // Fan out to subscribers (e.g. the session manager via bootstrap) so
+    // they can mark bound runs failed. We snapshot to be safe against
+    // listeners mutating the set during iteration.
+    const listeners = Array.from(this.closeListeners);
+    this.closeListeners.clear();
+    for (const listener of listeners) {
+      try {
+        listener(this.closeError);
+      } catch {
+        // A misbehaving listener must not block other listeners or
+        // cascade into the adapter's close path; swallow.
+      }
     }
   }
 }
