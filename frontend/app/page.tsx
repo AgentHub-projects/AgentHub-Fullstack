@@ -24,6 +24,8 @@ import {
   FileMarkdownOutlined,
   LinkOutlined,
   LoadingOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   MessageOutlined,
   PlusOutlined,
   PushpinFilled,
@@ -33,7 +35,6 @@ import {
 } from "@ant-design/icons";
 import {
   artifactContentUrl,
-  buildTimeline,
   cancelRun,
   connectHubSocket,
   createSession,
@@ -48,6 +49,32 @@ import {
 } from "../lib/agenthub-api";
 
 type InspectorTab = "diff" | "artifacts" | "context";
+
+type ConversationItem =
+  | { kind: "message"; id: string; ts: string; message: HubMessageDto }
+  | {
+      kind: "run";
+      id: string;
+      ts: string;
+      run: HubRunDto;
+      events: HubEventDto[];
+      messages: HubMessageDto[];
+    };
+
+interface AgentReplyBlockModel {
+  id: string;
+  speakerId?: string | null;
+  name: string;
+  text: string;
+  timestamp: string;
+  status?: string;
+}
+
+interface MentionMatch {
+  start: number;
+  end: number;
+  query: string;
+}
 
 const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
   messages: [],
@@ -66,20 +93,30 @@ export default function WorkbenchPage() {
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
   const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [composer, setComposer] = useState("");
-  const [mentionedAgentIds, setMentionedAgentIds] = useState<string[]>([]);
+  const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("diff");
   const [notice, setNotice] = useState("正在连接 AgentHub 后端");
   const [sending, setSending] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [draftGroupAgentIds, setDraftGroupAgentIds] = useState<string[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const orchestrator = agents.find((agent) => agent.isDefaultOrchestrator) ?? agents[0] ?? null;
   const workerAgents = agents.filter((agent) => !agent.isDefaultOrchestrator);
-  const timeline = useMemo(
-    () => buildTimeline(detail?.messages ?? [], detail?.events ?? []),
-    [detail?.messages, detail?.events],
+  const activeGroupMemberIds = useMemo(() => readMemberAgentIds(activeSession), [activeSession]);
+  const activeGroupMembers = workerAgents.filter((agent) => activeGroupMemberIds.includes(agent.id));
+  const composerAgents = activeGroupMemberIds.length > 0 ? activeGroupMembers : workerAgents;
+  const mentionCandidates = useMemo(
+    () => filterMentionCandidates(composerAgents, mentionMatch?.query ?? ""),
+    [composerAgents, mentionMatch?.query],
   );
+  const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
+  const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
 
   useEffect(() => {
     void bootstrap();
@@ -123,7 +160,13 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [timeline.length]);
+  }, [conversationItems.length, detail?.events.length]);
+
+  useEffect(() => {
+    if (activeMentionIndex >= mentionCandidates.length) {
+      setActiveMentionIndex(0);
+    }
+  }, [activeMentionIndex, mentionCandidates.length]);
 
   async function bootstrap() {
     const [agentRes, templateRes, sessionRes] = await Promise.all([listAgents(), listAgentTemplates(), listSessions()]);
@@ -155,11 +198,20 @@ export default function WorkbenchPage() {
       return;
     }
     setDetail(result.data);
-    setMentionedAgentIds([]);
+    closeMentionMenu();
   }
 
-  async function handleCreateSession() {
-    const result = await createSession({ title: "新 Agent 群聊" });
+  function openCreateGroupDialog() {
+    setDraftGroupAgentIds(workerAgents.map((agent) => agent.id));
+    setGroupDialogOpen(true);
+  }
+
+  async function handleCreateGroup() {
+    const selectedIds = draftGroupAgentIds.filter((id) => workerAgents.some((agent) => agent.id === id));
+    const result = await createSession({
+      title: buildGroupTitle(selectedIds, agents),
+      metadata: { memberAgentIds: selectedIds },
+    });
     if (!result.ok) {
       setNotice(`创建失败：${result.error}`);
       return;
@@ -167,7 +219,8 @@ export default function WorkbenchPage() {
     setSessions((current) => [result.data, ...current]);
     setDetail({ session: result.data, ...EMPTY_DETAIL });
     setActiveSessionId(result.data.id);
-    setMentionedAgentIds([]);
+    closeMentionMenu();
+    setGroupDialogOpen(false);
   }
 
   async function handleSend() {
@@ -175,10 +228,12 @@ export default function WorkbenchPage() {
     if (!text || !activeSessionId || sending) return;
     setSending(true);
     setComposer("");
+    closeMentionMenu();
     try {
+      const targetAgentIds = parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
       const result = await sendSessionMessage(activeSessionId, {
         content: text,
-        mentionedAgentIds,
+        mentionedAgentIds: targetAgentIds,
         orchestratorAgentId: orchestrator?.id,
       });
       if (!result.ok) {
@@ -196,7 +251,6 @@ export default function WorkbenchPage() {
         };
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
-      setMentionedAgentIds([]);
       setNotice("消息已发送给主 Orchestrator");
     } finally {
       setSending(false);
@@ -221,21 +275,39 @@ export default function WorkbenchPage() {
     setNotice(result.ok ? "已请求取消当前 run" : `取消失败：${result.error}`);
   }
 
-  function toggleMention(agentId: string) {
-    setMentionedAgentIds((current) =>
-      current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId],
-    );
+  function closeMentionMenu() {
+    setMentionMatch(null);
+    setActiveMentionIndex(0);
+  }
+
+  function refreshMentionMenu(value: string, caret: number | null) {
+    const next = findActiveMention(value, caret ?? value.length);
+    setMentionMatch(next);
+    setActiveMentionIndex(0);
+  }
+
+  function insertMention(agent: AgentInstanceDto) {
+    if (!mentionMatch) return;
+    const token = `@${agent.name} `;
+    const next = `${composer.slice(0, mentionMatch.start)}${token}${composer.slice(mentionMatch.end)}`;
+    const caret = mentionMatch.start + token.length;
+    setComposer(next);
+    closeMentionMenu();
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(caret, caret);
+    });
   }
 
   return (
-    <main className="agenthubShell">
+    <main className={`agenthubShell ${inspectorCollapsed ? "inspectorCollapsed" : ""}`}>
       <aside className="sessionRail">
         <div className="railHeader">
           <div>
             <strong>AgentHub</strong>
             <span>多 Agent 群聊</span>
           </div>
-          <button className="iconButton" type="button" title="新建会话" onClick={() => void handleCreateSession()}>
+          <button className="iconButton" type="button" title="新建群聊" onClick={openCreateGroupDialog}>
             <PlusOutlined />
           </button>
         </div>
@@ -243,13 +315,24 @@ export default function WorkbenchPage() {
         <div className="statusStack">
           <StatusPill state={socketState} />
           <div className="miniMetric">
-            <DatabaseOutlined />
-            <span>PostgreSQL / pgvector</span>
-          </div>
-          <div className="miniMetric">
             <ApiOutlined />
-            <span>{orchestrator?.name ?? "Orchestrator"}</span>
+            <span>默认协调者：{orchestrator?.name ?? "Orchestrator"}</span>
           </div>
+          <section className="groupSummary">
+            <div>
+              <strong>群聊成员</strong>
+              <span>{composerAgents.length ? `${composerAgents.length} 个 Agent` : "未选择成员"}</span>
+            </div>
+            {composerAgents.length > 0 ? (
+              <div className="memberList">
+                {composerAgents.map((agent) => (
+                  <span key={agent.id}>{agent.name}</span>
+                ))}
+              </div>
+            ) : (
+              <p>点击 + 选择要加入群聊的 Agent</p>
+            )}
+          </section>
         </div>
 
         <nav className="sessionList" aria-label="会话">
@@ -261,7 +344,7 @@ export default function WorkbenchPage() {
               onClick={() => void loadSession(session.id)}
             >
               <span>{session.title}</span>
-              <small>{session.lastRun?.status ?? session.status} · {formatTime(session.updatedAt)}</small>
+              <small>{sessionSubtitle(session)}</small>
             </button>
           ))}
         </nav>
@@ -284,14 +367,20 @@ export default function WorkbenchPage() {
         </header>
 
         <div className="timeline">
-          {timeline.map((item) =>
+          {conversationItems.map((item) =>
             item.kind === "message" ? (
-              <UserMessage key={item.id} message={item.message} onPin={handlePin} />
+              <TimelineMessage key={item.id} message={item.message} onPin={handlePin} agents={agents} />
             ) : (
-              <AgentEvent key={item.id} event={item.event} agents={agents} />
+              <RunThread
+                key={item.id}
+                run={item.run}
+                events={item.events}
+                messages={item.messages}
+                agents={agents}
+              />
             ),
           )}
-          {timeline.length === 0 && (
+          {conversationItems.length === 0 && (
             <div className="emptyState">
               <TeamOutlined />
               <span>等待第一条任务</span>
@@ -301,32 +390,92 @@ export default function WorkbenchPage() {
         </div>
 
         <footer className="composer">
-          <div className="mentionStrip">
-            {workerAgents.map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                className={`mentionChip ${mentionedAgentIds.includes(agent.id) ? "selected" : ""}`}
-                onClick={() => toggleMention(agent.id)}
-              >
-                @{agent.name}
-              </button>
-            ))}
+          <div className="composerInputWrap">
+            {mentionMatch && !sending && activeSessionId && (
+              <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
+                {mentionCandidates.length > 0 ? (
+                  mentionCandidates.map((agent, index) => (
+                    <button
+                      key={agent.id}
+                      className={index === activeMentionIndex ? "active" : ""}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeMentionIndex}
+                      onMouseEnter={() => setActiveMentionIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        insertMention(agent);
+                      }}
+                    >
+                      <span className="avatar" style={{ background: agentColor(agent.id) }}>
+                        {initials(agent.name)}
+                      </span>
+                      <span>
+                        <strong>@{agent.name}</strong>
+                        <small>{agent.template?.agentKind ?? "worker"}</small>
+                      </span>
+                      {index === activeMentionIndex && <CheckCircleOutlined />}
+                    </button>
+                  ))
+                ) : (
+                  <p>没有匹配的 Agent</p>
+                )}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={composer}
+              onChange={(event) => {
+                setComposer(event.target.value);
+                refreshMentionMenu(event.target.value, event.target.selectionStart);
+              }}
+              onClick={(event) => refreshMentionMenu(event.currentTarget.value, event.currentTarget.selectionStart)}
+              onSelect={(event) => refreshMentionMenu(event.currentTarget.value, event.currentTarget.selectionStart)}
+              onKeyDown={(event) => {
+                if (mentionMatch) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActiveMentionIndex((current) =>
+                      mentionCandidates.length ? (current + 1) % mentionCandidates.length : 0,
+                    );
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setActiveMentionIndex((current) =>
+                      mentionCandidates.length ? (current - 1 + mentionCandidates.length) % mentionCandidates.length : 0,
+                    );
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    event.preventDefault();
+                    const selected = mentionCandidates[activeMentionIndex] ?? mentionCandidates[0];
+                    if (selected) insertMention(selected);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeMentionMenu();
+                    return;
+                  }
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void handleSend();
+                }
+              }}
+              placeholder="输入任务，使用 @frontend-agent 指定群聊成员"
+              disabled={sending || !activeSessionId}
+            />
           </div>
-          <textarea
-            value={composer}
-            onChange={(event) => setComposer(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void handleSend();
-              }
-            }}
-            placeholder="输入任务，@Agent 会随消息交给主 Orchestrator"
-            disabled={sending || !activeSessionId}
-          />
           <div className="composerBar">
-            <span>{mentionedAgentIds.length ? `已选择 ${mentionedAgentIds.length} 个 Agent` : "默认由主 Orchestrator 协调"}</span>
+            <span>
+              {parsedMentionIds.length
+                ? `将发送给 ${parsedMentionIds.length} 个 Agent`
+                : composerAgents.length
+                  ? `群聊成员 ${composerAgents.length} 个 Agent`
+                  : "默认由主 Orchestrator 协调"}
+            </span>
             <button className="primaryButton" type="button" disabled={!composer.trim() || sending} onClick={() => void handleSend()}>
               {sending ? <LoadingOutlined /> : <SendOutlined />}
               <span>发送</span>
@@ -335,8 +484,17 @@ export default function WorkbenchPage() {
         </footer>
       </section>
 
-      <aside className="inspector">
+      <aside className={`inspector ${inspectorCollapsed ? "collapsed" : ""}`}>
         <div className="inspectorTabs">
+          <button
+            className="inspectorToggle"
+            type="button"
+            title={inspectorCollapsed ? "展开 Inspector" : "收起 Inspector"}
+            onClick={() => setInspectorCollapsed((current) => !current)}
+          >
+            {inspectorCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            <span>{inspectorCollapsed ? "展开" : "收起"}</span>
+          </button>
           <button className={inspectorTab === "diff" ? "active" : ""} type="button" onClick={() => setInspectorTab("diff")}>
             <BranchesOutlined />
             <span>Diff</span>
@@ -359,13 +517,101 @@ export default function WorkbenchPage() {
           </button>
         </div>
 
-        {inspectorTab === "diff" && <DiffPanel changes={detail?.fileChanges ?? []} />}
-        {inspectorTab === "artifacts" && <ArtifactPanel artifacts={detail?.artifacts ?? []} />}
-        {inspectorTab === "context" && (
-          <ContextPanel context={detail?.context ?? null} templates={templates} agents={agents} />
+        {!inspectorCollapsed && (
+          <>
+            {inspectorTab === "diff" && <DiffPanel changes={detail?.fileChanges ?? []} />}
+            {inspectorTab === "artifacts" && <ArtifactPanel artifacts={detail?.artifacts ?? []} />}
+            {inspectorTab === "context" && (
+              <ContextPanel context={detail?.context ?? null} templates={templates} agents={agents} />
+            )}
+          </>
         )}
       </aside>
+
+      {groupDialogOpen && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => setGroupDialogOpen(false)}>
+          <section
+            className="groupDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-group-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="create-group-title">新建群聊</strong>
+                <span>选择要加入这个群聊的 Agent</span>
+              </div>
+            </header>
+            <div className="agentChoiceList">
+              {workerAgents.length === 0 && <p className="dialogHint">暂无可加入的 worker Agent。</p>}
+              {workerAgents.map((agent) => {
+                const selected = draftGroupAgentIds.includes(agent.id);
+                return (
+                  <button
+                    key={agent.id}
+                    className={`agentChoice ${selected ? "selected" : ""}`}
+                    type="button"
+                    onClick={() =>
+                      setDraftGroupAgentIds((current) =>
+                        current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id],
+                      )
+                    }
+                  >
+                    <span className="avatar" style={{ background: agentColor(agent.id) }}>
+                      {initials(agent.name)}
+                    </span>
+                    <span>
+                      <strong>{agent.name}</strong>
+                      <small>{agent.template?.agentKind ?? "worker"}</small>
+                    </span>
+                    {selected && <CheckCircleOutlined />}
+                  </button>
+                );
+              })}
+            </div>
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => setGroupDialogOpen(false)}>
+                取消
+              </button>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={draftGroupAgentIds.length === 0}
+                onClick={() => void handleCreateGroup()}
+              >
+                创建群聊
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
+  );
+}
+
+function TimelineMessage({
+  message,
+  onPin,
+  agents,
+}: {
+  message: HubMessageDto;
+  onPin: (message: HubMessageDto) => void;
+  agents: AgentInstanceDto[];
+}) {
+  if (message.role === "user") return <UserMessage message={message} onPin={onPin} />;
+  const agent = agents.find((item) => item.id === message.agentId);
+  return (
+    <AgentReplyBlock
+      block={{
+        id: message.id,
+        speakerId: message.agentId,
+        name: message.agentName ?? agent?.name ?? "Agent",
+        text: message.contentText,
+        timestamp: message.createdAt,
+        status: message.status,
+      }}
+    />
   );
 }
 
@@ -385,38 +631,267 @@ function UserMessage({ message, onPin }: { message: HubMessageDto; onPin: (messa
   );
 }
 
-function AgentEvent({ event, agents }: { event: HubEventDto; agents: AgentInstanceDto[] }) {
-  const agent = agents.find((item) => item.id === event.speakerAgentId);
-  const name = event.speakerName ?? agent?.name ?? "Orchestrator";
-  const text = eventText(event);
-  const variant = event.eventType.includes("failed")
-    ? "danger"
-    : event.eventType.includes("completed")
-      ? "success"
-      : event.eventType === "file.change" || event.eventType.startsWith("artifact")
-        ? "artifact"
-        : "normal";
+function RunThread({
+  run,
+  events,
+  messages,
+  agents,
+}: {
+  run: HubRunDto;
+  events: HubEventDto[];
+  messages: HubMessageDto[];
+  agents: AgentInstanceDto[];
+}) {
+  const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
+  const hasPersistedReplies = persistedReplies.length > 0 && !isRunning(run.status);
+  const replyBlocks = hasPersistedReplies
+    ? persistedReplies.map((message) => {
+        const agent = agents.find((item) => item.id === message.agentId);
+        return {
+          id: message.id,
+          speakerId: message.agentId,
+          name: message.agentName ?? agent?.name ?? "Agent",
+          text: message.contentText,
+          timestamp: message.createdAt,
+          status: message.status,
+        };
+      })
+    : buildAgentReplyBlocks(events, agents);
+  const activityEvents = events.filter((event) => event.eventType !== "message.delta");
 
   return (
-    <article className={`timelineRow agentRow ${variant}`}>
-      <span className="avatar" style={{ background: agentColor(event.speakerAgentId ?? name) }}>
-        {initials(name)}
+    <section className="runThread">
+      <div className="runThreadTop">
+        <span>Run · {formatTime(run.createdAt)}</span>
+        <RunBadge run={run} />
+      </div>
+      {replyBlocks.map((block) => (
+        <AgentReplyBlock key={block.id} block={block} />
+      ))}
+      {activityEvents.length > 0 && <RunActivityTimeline events={activityEvents} defaultOpen={isRunning(run.status)} />}
+      {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
+      {run.status === "failed" && <RunFailureBlock run={run} events={events} />}
+    </section>
+  );
+}
+
+function AgentReplyBlock({ block }: { block: AgentReplyBlockModel }) {
+  const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
+  return (
+    <article className="agentReply">
+      <span className="avatar" style={{ background: agentColor(block.speakerId ?? block.name) }}>
+        {streaming ? <LoadingOutlined /> : initials(block.name)}
       </span>
-      <div className="bubble agentBubble">
+      <div className="agentReplyBody">
         <div className="bubbleMeta">
-          <span>{name} · {formatTime(event.occurredAt ?? event.persistedAt)}</span>
-          <code>{event.eventType}</code>
+          <span>{block.name} · {formatTime(block.timestamp)}</span>
+          {streaming && <small className="statusTag">生成中...</small>}
+          {block.status === "failed" && <small className="statusTag error">失败</small>}
         </div>
-        {event.eventType === "file.change" ? (
-          <InlineDiff event={event} />
-        ) : event.eventType.startsWith("artifact") ? (
-          <InlineArtifact event={event} />
-        ) : (
-          <RichText text={text} />
-        )}
+        <RichText text={block.text} />
       </div>
     </article>
   );
+}
+
+function RunActivityTimeline({ events, defaultOpen }: { events: HubEventDto[]; defaultOpen: boolean }) {
+  return (
+    <details className="runActivity" open={defaultOpen}>
+      <summary>
+        <span>运行时间线</span>
+        <small>{events.length} events</small>
+      </summary>
+      <div className="runActivityList">
+        {events.map((event) => (
+          <RunActivityEvent key={event.id} event={event} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function RunActivityEvent({ event }: { event: HubEventDto }) {
+  return (
+    <div className={`runActivityEvent ${activityVariant(event)}`}>
+      <span className="activityIcon">{activityIcon(event)}</span>
+      <div>
+        <strong>{activityTitle(event)}</strong>
+        <small>{event.eventType} · {formatTime(event.occurredAt ?? event.persistedAt)}</small>
+      </div>
+    </div>
+  );
+}
+
+function RunStatusPill({ run, events }: { run: HubRunDto; events: HubEventDto[] }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const anchor = Date.parse(run.startedAt ?? run.createdAt);
+  const elapsed = Number.isFinite(anchor) ? Math.max(0, Math.floor((now - anchor) / 1000)) : 0;
+
+  return (
+    <div className="runStatusPill" aria-live="polite">
+      <LoadingOutlined />
+      <span className="statusShimmer">{runStageLabel(run, events)}</span>
+      <small>{formatElapsed(elapsed)}</small>
+    </div>
+  );
+}
+
+function RunFailureBlock({ run, events }: { run: HubRunDto; events: HubEventDto[] }) {
+  const failedEvent = [...events].reverse().find((event) => event.eventType === "run.failed");
+  const raw = run.errorMessage ?? (failedEvent ? eventText(failedEvent) : "未知错误");
+  return (
+    <details className="runFailure" open>
+      <summary>运行失败</summary>
+      <pre>{raw}</pre>
+    </details>
+  );
+}
+
+function buildConversationItems(detail: SessionDetailDto | null): ConversationItem[] {
+  if (!detail) return [];
+
+  const messages = [...detail.messages].sort(sortMessage);
+  const runs = [...detail.runs].sort(sortRun);
+  const eventsByRun = new Map<string, HubEventDto[]>();
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  const claimedMessageIds = new Set<string>();
+  const items: ConversationItem[] = [];
+
+  for (const event of detail.events) {
+    const current = eventsByRun.get(event.runId) ?? [];
+    current.push(event);
+    eventsByRun.set(event.runId, current);
+  }
+
+  for (const run of runs) {
+    const associatedMessages = messages.filter((message) => message.runId === run.id);
+    const userMessage =
+      (run.userMessageId ? messagesById.get(run.userMessageId) : undefined) ??
+      associatedMessages.find((message) => message.role === "user");
+    const runMessages = associatedMessages.filter((message) => message.id !== userMessage?.id);
+    const runEvents = [...(eventsByRun.get(run.id) ?? [])].sort(sortEvent);
+    const shouldShowRun = runMessages.length > 0 || runEvents.length > 0 || isRunning(run.status) || run.status === "failed";
+
+    if (userMessage) {
+      claimedMessageIds.add(userMessage.id);
+      items.push({ kind: "message", id: userMessage.id, ts: userMessage.createdAt, message: userMessage });
+    }
+    for (const message of runMessages) claimedMessageIds.add(message.id);
+    if (shouldShowRun) {
+      items.push({
+        kind: "run",
+        id: run.id,
+        ts: userMessage?.createdAt ?? run.createdAt,
+        run,
+        events: runEvents,
+        messages: runMessages,
+      });
+    }
+  }
+
+  for (const message of messages) {
+    if (!claimedMessageIds.has(message.id)) {
+      items.push({ kind: "message", id: message.id, ts: message.createdAt, message });
+    }
+  }
+
+  return items.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+}
+
+function buildAgentReplyBlocks(events: HubEventDto[], agents: AgentInstanceDto[]): AgentReplyBlockModel[] {
+  const blocks: AgentReplyBlockModel[] = [];
+  for (const event of events) {
+    if (event.eventType !== "message.delta" || event.visibility === "private") continue;
+    const text = eventText(event);
+    if (!text.trim()) continue;
+    const speaker = resolveSpeaker(event, agents);
+    const append = event.payload.append !== false;
+    const last = blocks.at(-1);
+    if (append && last?.speakerId === speaker.speakerId) {
+      last.text = `${last.text}${text}`;
+      last.timestamp = event.occurredAt ?? event.persistedAt;
+      continue;
+    }
+    blocks.push({
+      id: event.id,
+      speakerId: speaker.speakerId,
+      name: speaker.name,
+      text,
+      timestamp: event.occurredAt ?? event.persistedAt,
+    });
+  }
+  return blocks;
+}
+
+function resolveSpeaker(event: HubEventDto, agents: AgentInstanceDto[]) {
+  const payloadSpeaker = typeof event.payload.speaker === "string" ? event.payload.speaker : null;
+  const speakerId = event.speakerAgentId ?? payloadSpeaker;
+  const agent = speakerId ? agents.find((item) => item.id === speakerId) : undefined;
+  return {
+    speakerId,
+    name: event.speakerName ?? agent?.name ?? "Orchestrator",
+  };
+}
+
+function runStageLabel(run: HubRunDto, events: HubEventDto[]) {
+  if (run.status === "queued") return "等待调度";
+  if (run.status === "context_building") return "构建上下文";
+  if (run.status === "connecting") return "连接 Orchestrator";
+  if (run.status !== "running") return run.status;
+
+  const latest = [...events].reverse().find((event) => event.eventType !== "run.status" && event.eventType !== "run.created");
+  if (!latest) return "正在思考";
+  if (latest.eventType === "message.delta") return "正在生成回复";
+  if (latest.eventType === "tool.call") return `调用 ${payloadString(latest.payload, "tool") ?? "工具"}`;
+  if (latest.eventType === "tool.result") return "处理工具结果";
+  if (latest.eventType === "file.change") return "写入文件变更";
+  if (latest.eventType.startsWith("artifact")) return "生成 artifact";
+  return "运行中";
+}
+
+function activityVariant(event: HubEventDto) {
+  if (event.eventType.includes("failed")) return "danger";
+  if (event.eventType.includes("completed")) return "success";
+  if (event.eventType === "file.change" || event.eventType.startsWith("artifact")) return "artifact";
+  return "normal";
+}
+
+function activityIcon(event: HubEventDto) {
+  if (event.eventType.includes("failed")) return <CloseCircleOutlined />;
+  if (event.eventType.includes("completed")) return <CheckCircleOutlined />;
+  if (event.eventType === "file.change") return <CodeOutlined />;
+  if (event.eventType.startsWith("artifact")) return <FileDoneOutlined />;
+  if (event.eventType.startsWith("tool")) return <ApiOutlined />;
+  return <MessageOutlined />;
+}
+
+function activityTitle(event: HubEventDto) {
+  if (event.eventType === "tool.call") return `调用 ${payloadString(event.payload, "tool") ?? "工具"}`;
+  if (event.eventType === "tool.result") return `工具返回 ${payloadString(event.payload, "status") ?? "结果"}`;
+  if (event.eventType === "file.change") return payloadString(event.payload, "path") ?? "文件变更";
+  if (event.eventType.startsWith("artifact")) return payloadString(event.payload, "title") ?? "Artifact 更新";
+  if (event.eventType === "run.completed") return "Run 完成";
+  if (event.eventType === "run.failed") return "Run 失败";
+  if (event.eventType === "run.cancelled") return "Run 已取消";
+  return payloadString(event.payload, "message") ?? payloadString(event.payload, "status") ?? event.eventType;
+}
+
+function payloadString(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
 }
 
 function DiffPanel({ changes }: { changes: HubFileChangeDto[] }) {
@@ -595,6 +1070,61 @@ function PanelEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {
 function eventText(event: HubEventDto) {
   const value = event.payload.text ?? event.payload.content ?? event.payload.message ?? event.payload.delta ?? event.payload.status;
   return typeof value === "string" ? value : JSON.stringify(event.payload, null, 2);
+}
+
+function findActiveMention(text: string, caret: number): MentionMatch | null {
+  const beforeCaret = text.slice(0, caret);
+  const at = beforeCaret.lastIndexOf("@");
+  if (at < 0) return null;
+  if (at > 0 && !/\s/.test(beforeCaret[at - 1])) return null;
+
+  const query = beforeCaret.slice(at + 1);
+  if (!/^[a-zA-Z0-9_-]*$/.test(query)) return null;
+  return { start: at, end: caret, query };
+}
+
+function filterMentionCandidates(agents: AgentInstanceDto[], query: string) {
+  const normalized = query.toLowerCase();
+  if (!normalized) return agents;
+  return agents.filter(
+    (agent) =>
+      agent.name.toLowerCase().startsWith(normalized) ||
+      agent.id.toLowerCase().startsWith(normalized),
+  );
+}
+
+function parseMentionedAgentIds(text: string, agents: AgentInstanceDto[]) {
+  const byToken = new Map<string, string>();
+  for (const agent of agents) {
+    byToken.set(agent.name.toLowerCase(), agent.id);
+    byToken.set(agent.id.toLowerCase(), agent.id);
+  }
+
+  const ids = new Set<string>();
+  for (const match of text.matchAll(/@([a-zA-Z0-9_-]+)/g)) {
+    const id = byToken.get(match[1].toLowerCase());
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+function readMemberAgentIds(session: HubSessionDto | null | undefined) {
+  const value = session?.metadata.memberAgentIds;
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function buildGroupTitle(agentIds: string[], agents: AgentInstanceDto[]) {
+  const names = agentIds
+    .map((id) => agents.find((agent) => agent.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+  if (names.length === 0) return "新 Agent 群聊";
+  return `Agent 群聊 · ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个` : ""}`;
+}
+
+function sessionSubtitle(session: HubSessionDto) {
+  const memberCount = readMemberAgentIds(session).length;
+  const status = session.lastRun?.status ?? session.status;
+  return `${memberCount ? `${memberCount} 个 Agent · ` : ""}${status} · ${formatTime(session.updatedAt)}`;
 }
 
 function formatTime(value: string) {
