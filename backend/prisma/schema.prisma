@@ -7,51 +7,381 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum SessionStatusDb {
+  active
+  archived
+  deleted
+
+  @@map("session_status")
+}
+
+enum MessageRoleDb {
+  user
+  assistant
+  agent
+  system
+  tool
+
+  @@map("message_role")
+}
+
+enum RunStatusDb {
+  queued
+  context_building
+  connecting
+  running
+  completed
+  failed
+  cancelled
+
+  @@map("run_status")
+}
+
+enum AgentStatusDb {
+  enabled
+  disabled
+  offline
+  error
+
+  @@map("agent_status")
+}
+
+enum MessageStatusDb {
+  queued
+  thinking
+  streaming
+  completed
+  failed
+  cancelled
+
+  @@map("message_status")
+}
+
+enum ArtifactKindDb {
+  markdown
+  text
+  html
+  pdf
+  docx
+  image
+  archive
+  log
+  other
+
+  @@map("artifact_kind")
+}
+
+enum StorageKindDb {
+  inline_text
+  oss_object
+  remote_url
+
+  @@map("storage_kind")
+}
+
+enum FileChangeTypeDb {
+  added
+  modified
+  deleted
+  renamed
+
+  @@map("file_change_type")
+}
+
+enum ContextItemKindDb {
+  message
+  artifact
+  file_change
+  run_summary
+  manual_pin
+
+  @@map("context_item_kind")
+}
+
+model AgentTemplate {
+  id                  String        @id @default(uuid()) @db.Uuid
+  name                String
+  description         String        @default("")
+  agentKind           String        @default("worker") @map("agent_kind")
+  systemPrompt        String        @default("") @map("system_prompt")
+  promptConfig        Json          @default("{}") @map("prompt_config")
+  defaultCapabilities Json          @default("[]") @map("default_capabilities")
+  defaultModelConfig  Json          @default("{}") @map("default_model_config")
+  metadata            Json          @default("{}")
+  status              AgentStatusDb @default(enabled)
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agents              Agent[]
+
+  @@index([agentKind], map: "idx_agent_templates_kind")
+  @@map("agent_templates")
+}
+
+model Agent {
+  id                    String        @id @default(uuid()) @db.Uuid
+  templateId            String        @map("template_id") @db.Uuid
+  name                  String        @unique
+  description           String        @default("")
+  provider              Int           @default(0) // 0=claude-code, 1=codex, 2=opencode
+  isDefaultOrchestrator Boolean       @default(false) @map("is_default_orchestrator")
+  status                AgentStatusDb @default(offline)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  template              AgentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  sessionAgents         SessionAgent[]
+  messages              Message[]
+  runs                  AgentRun[]
+  events                AgentEvent[]
+
+  @@index([templateId], map: "idx_agents_template")
+  @@index([isDefaultOrchestrator], map: "idx_agents_default_orchestrator")
+  @@map("agents")
+}
+
 model Session {
-  id        String   @id
-  title     String?
-  status    String
-  agentId   String?
-  prompt    String?
-  output    String?
-  error     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  runs      AgentRun[]
+  id               String             @id @default(uuid()) @db.Uuid
+  title            String             @default("Untitled Session")
+  status           SessionStatusDb    @default(active)
+  metadata         Json               @default("{}")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  participants     SessionAgent[]
+  messages         Message[]
+  runs             AgentRun[]
+  contextSnapshots ContextSnapshot[]
+  events           AgentEvent[]
+  artifacts        Artifact[]
+  fileChanges      FileChange[]
+  contextItems     ContextItem[]
+  contextEmbeddings ContextEmbedding[]
+  contextUpdateJobs ContextUpdateJob[]
+  longTermSummaries LongTermSummary[]
+
+  @@index([updatedAt(sort: Desc)], map: "idx_sessions_updated_at")
+  @@map("sessions")
+}
+
+model SessionAgent {
+  sessionId        String    @map("session_id") @db.Uuid
+  agentId          String    @map("agent_id") @db.Uuid
+  participantRole  String    @default("member") @map("participant_role")
+  source           String    @default("mention")
+  firstMentionedAt DateTime? @map("first_mentioned_at") @db.Timestamptz(6)
+  lastActiveAt     DateTime? @map("last_active_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  session          Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agent            Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, agentId])
+  @@map("session_agents")
+}
+
+model Message {
+  id              String          @id @default(uuid()) @db.Uuid
+  sessionId       String          @map("session_id") @db.Uuid
+  runId           String?         @map("run_id") @db.Uuid
+  role            MessageRoleDb
+  agentId         String?         @map("agent_id") @db.Uuid
+  parentMessageId String?         @map("parent_message_id") @db.Uuid
+  contentText     String          @default("") @map("content_text")
+  contentJson     Json            @default("{}") @map("content_json")
+  tokenCount      Int             @default(0) @map("token_count")
+  status          MessageStatusDb @default(completed)
+  isPinned        Boolean         @default(false) @map("is_pinned")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session         Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agent           Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt], map: "idx_messages_session_created")
+  @@index([sessionId, isPinned], map: "idx_messages_pinned")
+  @@index([sessionId, status], map: "idx_messages_status")
+  @@map("messages")
+}
+
+model ContextSnapshot {
+  id              String   @id @default(uuid()) @db.Uuid
+  sessionId       String   @map("session_id") @db.Uuid
+  runId           String?  @map("run_id") @db.Uuid
+  version         Int      @default(1)
+  tokenBudget     Int      @map("token_budget")
+  tokenCount      Int      @default(0) @map("token_count")
+  selectedItemIds String[] @default([]) @map("selected_item_ids")
+  snapshotJson    Json     @map("snapshot_json")
+  promptText      String   @default("") @map("prompt_text")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("context_snapshots")
 }
 
 model AgentRun {
-  id             String   @id
-  sessionId      String
-  conversationId String
-  agentId        String
-  status         String
-  prompt         String
-  output         Json?
-  error          Json?
-  createdAt      DateTime @default(now())
-  startedAt      DateTime?
-  finishedAt     DateTime?
-  session        Session  @relation(fields: [sessionId], references: [id])
-  events         AgentEvent[]
+  id                  String      @id @default(uuid()) @db.Uuid
+  sessionId           String      @map("session_id") @db.Uuid
+  orchestratorAgentId String      @map("orchestrator_agent_id") @db.Uuid
+  userMessageId       String?     @map("user_message_id") @db.Uuid
+  assistantMessageId  String?     @map("assistant_message_id") @db.Uuid
+  contextSnapshotId   String?     @map("context_snapshot_id") @db.Uuid
+  status              RunStatusDb @default(queued)
+  downstreamSessionId String?     @map("downstream_session_id")
+  downstreamRunId     String?     @map("downstream_run_id")
+  errorCode           String?     @map("error_code")
+  errorMessage        String?     @map("error_message")
+  usageJson           Json        @default("{}") @map("usage_json")
+  startedAt           DateTime?   @map("started_at") @db.Timestamptz(6)
+  completedAt         DateTime?   @map("completed_at") @db.Timestamptz(6)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session             Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orchestratorAgent   Agent       @relation(fields: [orchestratorAgentId], references: [id], onDelete: Restrict)
+  events              AgentEvent[]
+  artifacts           Artifact[]
+  fileChanges         FileChange[]
+
+  @@index([sessionId, createdAt(sort: Desc)], map: "idx_agent_runs_session_created")
+  @@index([status], map: "idx_agent_runs_status")
+  @@map("agent_runs")
 }
 
 model AgentEvent {
-  eventId        String   @id
-  runId          String
-  conversationId String
-  agentId        String
-  type           String
-  seq            Int
+  id             String    @id @default(uuid()) @db.Uuid
+  sessionId      String    @map("session_id") @db.Uuid
+  runId          String    @map("run_id") @db.Uuid
+  seq            BigInt
+  source         String    @default("downstream_agent")
+  eventType      String    @map("event_type")
+  visibility     String    @default("public")
+  speakerAgentId String?   @map("speaker_agent_id") @db.Uuid
+  speakerName    String?   @map("speaker_name")
   payload        Json
-  ts             BigInt
-  run            AgentRun @relation(fields: [runId], references: [id])
+  occurredAt     DateTime? @map("occurred_at") @db.Timestamptz(6)
+  persistedAt    DateTime  @default(now()) @map("persisted_at") @db.Timestamptz(6)
+  session        Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run            AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  speakerAgent   Agent?    @relation(fields: [speakerAgentId], references: [id], onDelete: SetNull)
+
+  @@unique([runId, seq])
+  @@index([runId, seq], map: "idx_agent_events_run_seq")
+  @@index([sessionId, persistedAt], map: "idx_agent_events_session_persisted")
+  @@map("agent_events")
 }
 
 model Artifact {
-  id        String   @id
-  runId     String
-  kind      String
-  path      String
-  createdAt DateTime @default(now())
+  id               String        @id @default(uuid()) @db.Uuid
+  sessionId        String        @map("session_id") @db.Uuid
+  runId            String?       @map("run_id") @db.Uuid
+  producingEventId String?       @map("producing_event_id") @db.Uuid
+  artifactKey      String?       @map("artifact_key")
+  kind             ArtifactKindDb
+  title            String
+  mimeType         String        @default("application/octet-stream") @map("mime_type")
+  storageKind      StorageKindDb @default(inline_text) @map("storage_kind")
+  storageUri       String?       @map("storage_uri")
+  textContent      String?       @map("text_content")
+  sha256           String?
+  sizeBytes        BigInt?       @map("size_bytes")
+  version          Int           @default(1)
+  final            Boolean       @default(false)
+  metadata         Json          @default("{}")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session          Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run              AgentRun?     @relation(fields: [runId], references: [id], onDelete: SetNull)
+  fileChanges      FileChange[]
+
+  @@unique([runId, artifactKey])
+  @@index([sessionId, updatedAt(sort: Desc)], map: "idx_artifacts_session_updated")
+  @@map("artifacts")
+}
+
+model FileChange {
+  id               String           @id @default(uuid()) @db.Uuid
+  sessionId        String           @map("session_id") @db.Uuid
+  runId            String           @map("run_id") @db.Uuid
+  artifactId       String?          @map("artifact_id") @db.Uuid
+  producingEventId String?          @map("producing_event_id") @db.Uuid
+  path             String
+  oldPath          String?          @map("old_path")
+  changeType       FileChangeTypeDb @map("change_type")
+  language         String?
+  beforeContent    String?          @map("before_content")
+  beforeSha256     String?          @map("before_sha256")
+  beforeTruncated  Boolean          @default(false) @map("before_truncated")
+  afterContent     String?          @map("after_content")
+  afterSha256      String?          @map("after_sha256")
+  afterTruncated   Boolean          @default(false) @map("after_truncated")
+  patch            String?
+  stats            Json             @default("{}")
+  metadata         Json             @default("{}")
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  session          Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run              AgentRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  artifact         Artifact?        @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+
+  @@index([runId, path], map: "idx_file_changes_run_path")
+  @@map("file_changes")
+}
+
+model ContextItem {
+  id                String             @id @default(uuid()) @db.Uuid
+  sessionId         String             @map("session_id") @db.Uuid
+  sourceType        String             @map("source_type")
+  sourceId          String?            @map("source_id") @db.Uuid
+  kind              ContextItemKindDb
+  text              String
+  tokenCount        Int                @default(0) @map("token_count")
+  importance        Int                @default(0)
+  pinned            Boolean            @default(false)
+  metadata          Json               @default("{}")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session           Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  contextEmbeddings ContextEmbedding[]
+
+  @@index([sessionId, kind, createdAt(sort: Desc)], map: "idx_context_items_session_kind")
+  @@index([sessionId, pinned], map: "idx_context_items_pinned")
+  @@map("context_items")
+}
+
+model ContextEmbedding {
+  id            String                    @id @default(uuid()) @db.Uuid
+  contextItemId String                    @map("context_item_id") @db.Uuid
+  sessionId     String                    @map("session_id") @db.Uuid
+  model         String
+  dims          Int                       @default(1536)
+  embedding     Unsupported("vector(1536)")
+  createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  contextItem   ContextItem               @relation(fields: [contextItemId], references: [id], onDelete: Cascade)
+  session       Session                   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([contextItemId, model])
+  @@index([sessionId], map: "idx_context_embeddings_session")
+  @@map("context_embeddings")
+}
+
+model ContextUpdateJob {
+  id           String    @id @default(uuid()) @db.Uuid
+  sessionId    String    @map("session_id") @db.Uuid
+  reason       String
+  status       String    @default("pending")
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt    DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+  session      Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("context_update_jobs")
+}
+
+model LongTermSummary {
+  id         String   @id @default(uuid()) @db.Uuid
+  sessionId  String   @map("session_id") @db.Uuid
+  seq        Int
+  content    String   @default("")
+  tokenCount Int      @default(0) @map("token_count")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, seq], map: "idx_long_term_summaries_session_seq")
+  @@map("long_term_summaries")
 }

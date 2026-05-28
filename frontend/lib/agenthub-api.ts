@@ -1,66 +1,30 @@
 import type {
-  AgentDto,
-  AgentEvent,
-  AgentRun,
-  ApiErrorDto,
-  ConversationDto,
-  CreateConversationRequest,
-  CreateMessageRequest,
-  CreateTeamRequest,
-  MessageDto,
-  PinMessageRequest,
-  RunSessionRequest,
-  SessionDto,
-  TeamDto,
-  TeamRunDto,
-  StartTeamRunRequest,
-  UpdateConversationRequest,
+  AgentInstanceDto,
+  AgentTemplateDto,
+  CreateHubSessionRequest,
+  FrontendRealtimeEnvelope,
+  HubArtifactDto,
+  HubContextSnapshotDto,
+  HubEventDto,
+  HubFileChangeDto,
+  HubMessageDto,
+  HubRunDto,
+  HubSessionDto,
+  PinHubMessageRequest,
+  SendHubMessageRequest,
+  SendHubMessageResponse,
+  SessionDetailDto,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
 
-export type SessionSnapshot = {
-  session: SessionDto | null;
-  events: AgentEvent[];
-};
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+export type SocketState = "connecting" | "connected" | "disconnected" | "unavailable";
 
-export type RunSessionResponse = {
-  session: SessionDto;
-  run: AgentRun;
-};
+const RAW_API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3001";
+const API_BASE_URL = RAW_API_BASE.endsWith("/api") ? RAW_API_BASE : `${RAW_API_BASE}/api`;
+const SOCKET_URL = RAW_API_BASE.replace(/\/api$/, "");
 
-export type CancelRunResponse = {
-  session: SessionDto;
-  run: AgentRun;
-};
-
-export type ApiResult<T> =
-  | { ok: true; data: T; source: "api" }
-  | { ok: false; error: string };
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3001";
-
-const now = new Date().toISOString();
-
-export const initialEvents: AgentEvent[] = [];
-
-export const initialSession: SessionDto = {
-  id: "local-offline-session",
-  title: "等待连接后端会话",
-  status: "idle",
-  agentId: "claude-code-agent",
-  runIds: [],
-  activeRunIds: [],
-  prompt: "帮我写一个前后端分离的架构的todolist系统。",
-  output: undefined,
-  createdAt: now,
-  updatedAt: now,
-};
-
-async function requestJson<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<ApiResult<T>> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -71,134 +35,44 @@ async function requestJson<T>(
     });
 
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as
-        | ApiErrorDto
-        | null;
-      return {
-        ok: false,
-        error: payload?.message ?? `HTTP ${response.status}`,
-      };
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, error: payload?.message ?? `HTTP ${response.status}` };
     }
-
-    return {
-      ok: true,
-      data: (await response.json()) as T,
-      source: "api",
-    };
+    return { ok: true, data: (await response.json()) as T };
   } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Network request failed",
-    };
+    return { ok: false, error: error instanceof Error ? error.message : "Network request failed" };
   }
 }
 
-// ---- Session ----
+export function artifactContentUrl(artifactId: string) {
+  return `${API_BASE_URL}/artifacts/${encodeURIComponent(artifactId)}/content`;
+}
 
-export async function runSession(
-  prompt: string,
-  conversationId?: string,
-  mode?: "single" | "team",
-  teamId?: string,
-): Promise<ApiResult<RunSessionResponse>> {
-  const body: RunSessionRequest = { prompt, conversationId, mode, teamId };
-  return requestJson<RunSessionResponse>("/api/session/run", {
+export function listSessions() {
+  return requestJson<{ items: HubSessionDto[] }>("/sessions");
+}
+
+export function createSession(body: CreateHubSessionRequest) {
+  return requestJson<HubSessionDto>("/sessions", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export async function getCurrentSession(): Promise<ApiResult<SessionSnapshot>> {
-  const result = await requestJson<SessionDto | SessionSnapshot>(
-    "/api/session/current",
-  );
-
-  if (!result.ok) {
-    return result;
-  }
-
-  if ("session" in result.data) {
-    return {
-      ok: true,
-      data: {
-        session: result.data.session,
-        events: result.data.events ?? [],
-      },
-      source: result.source,
-    };
-  }
-
-  return {
-    ok: true,
-    data: {
-      session: result.data,
-      events: [],
-    },
-    source: result.source,
-  };
+export function getSessionDetail(sessionId: string) {
+  return requestJson<SessionDetailDto>(`/sessions/${encodeURIComponent(sessionId)}`);
 }
 
-export async function cancelAgentRun(
-  runId: string,
-): Promise<ApiResult<CancelRunResponse>> {
-  return requestJson<CancelRunResponse>(
-    `/api/agent-runs/${encodeURIComponent(runId)}/cancel`,
-    {
-      method: "POST",
-      body: JSON.stringify({}),
-    },
-  );
-}
-
-// ---- Conversations ----
-
-export async function listConversations(): Promise<ApiResult<{ items: ConversationDto[] }>> {
-  return requestJson<{ items: ConversationDto[] }>("/api/conversations");
-}
-
-export async function createConversation(
-  body: CreateConversationRequest,
-): Promise<ApiResult<ConversationDto>> {
-  return requestJson<ConversationDto>("/api/conversations", {
+export function sendSessionMessage(sessionId: string, body: SendHubMessageRequest) {
+  return requestJson<SendHubMessageResponse>(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export async function getConversation(id: string): Promise<ApiResult<ConversationDto>> {
-  return requestJson<ConversationDto>(`/api/conversations/${encodeURIComponent(id)}`);
-}
-
-export async function updateConversation(
-  id: string,
-  body: UpdateConversationRequest,
-): Promise<ApiResult<ConversationDto>> {
-  return requestJson<ConversationDto>(`/api/conversations/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function deleteConversation(id: string): Promise<ApiResult<{ ok: boolean }>> {
-  return requestJson<{ ok: boolean }>(`/api/conversations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
-}
-
-export async function listMessages(
-  conversationId: string,
-): Promise<ApiResult<{ conversationId: string; items: MessageDto[] }>> {
-  return requestJson<{ conversationId: string; items: MessageDto[] }>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
-  );
-}
-
-export async function createMessage(
-  conversationId: string,
-  body: CreateMessageRequest,
-): Promise<ApiResult<MessageDto>> {
-  return requestJson<MessageDto>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+export function pinSessionMessage(sessionId: string, messageId: string, body: PinHubMessageRequest) {
+  return requestJson<HubMessageDto>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/pin`,
     {
       method: "POST",
       body: JSON.stringify(body),
@@ -206,118 +80,89 @@ export async function createMessage(
   );
 }
 
-export async function pinMessage(
-  conversationId: string,
-  messageId: string,
-  body: PinMessageRequest,
-): Promise<ApiResult<MessageDto>> {
-  return requestJson<MessageDto>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/pin`,
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    },
+export function cancelRun(sessionId: string, runId: string) {
+  return requestJson<{ runId: string; status: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
-// ---- Agents ----
-
-export async function listAgents(): Promise<ApiResult<{ items: AgentDto[] }>> {
-  return requestJson<{ items: AgentDto[] }>("/api/agents");
+export function listAgents() {
+  return requestJson<{ items: AgentInstanceDto[] }>("/agents");
 }
 
-export async function createAgent(
-  body: Omit<AgentDto, "id" | "createdAt">,
-): Promise<ApiResult<AgentDto>> {
-  return requestJson<AgentDto>("/api/agents", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+export function listAgentTemplates() {
+  return requestJson<{ items: AgentTemplateDto[] }>("/agents/templates");
 }
 
-export async function getAgent(id: string): Promise<ApiResult<AgentDto>> {
-  return requestJson<AgentDto>(`/api/agents/${encodeURIComponent(id)}`);
-}
-
-// ---- Teams ----
-
-export async function listTeams(): Promise<ApiResult<{ items: TeamDto[] }>> {
-  return requestJson<{ items: TeamDto[] }>("/api/teams");
-}
-
-export async function createTeam(
-  body: CreateTeamRequest,
-): Promise<ApiResult<TeamDto>> {
-  return requestJson<TeamDto>("/api/teams", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function getTeam(id: string): Promise<ApiResult<TeamDto>> {
-  return requestJson<TeamDto>(`/api/teams/${encodeURIComponent(id)}`);
-}
-
-export async function startTeamRun(
-  teamId: string,
-  body: StartTeamRunRequest,
-): Promise<ApiResult<TeamRunDto>> {
-  return requestJson<TeamRunDto>(`/api/teams/${encodeURIComponent(teamId)}/run`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function getTeamRun(
-  id: string,
-): Promise<ApiResult<TeamRunDto>> {
-  return requestJson<TeamRunDto>(`/api/team-runs/${encodeURIComponent(id)}`);
-}
-
-// ---- Socket ----
-
-export function joinConversation(
-  socket: Socket | null,
-  conversationId: string | null,
+export function connectHubSocket(
+  sessionId: string | null,
+  handlers: {
+    onState: (state: SocketState) => void;
+    onEvent: (event: HubEventDto) => void;
+    onSession: (session: HubSessionDto) => void;
+    onArtifact: (artifact: HubArtifactDto) => void;
+    onFileChange: (fileChange: HubFileChangeDto) => void;
+    onContext: (context: HubContextSnapshotDto) => void;
+  },
 ) {
-  if (socket && conversationId) {
-    socket.emit("joinConversation", { conversationId });
-  }
-}
-
-export function connectSessionSocket(
-  conversationId: string | null,
-  onEvent: (event: AgentEvent) => void,
-  onStatus: (status: "connected" | "disconnected" | "unavailable") => void,
-): () => void {
   let socket: Socket | null = null;
-
   try {
-    socket = io(API_BASE_URL || undefined, {
+    socket = io(SOCKET_URL, {
       path: "/socket.io",
       transports: ["websocket", "polling"],
-      reconnectionAttempts: 3,
+      reconnectionAttempts: 5,
     });
   } catch {
-    onStatus("unavailable");
+    handlers.onState("unavailable");
     return () => undefined;
   }
 
   socket.on("connect", () => {
-    onStatus("connected");
-    joinConversation(socket, conversationId);
+    handlers.onState("connected");
+    if (sessionId) socket?.emit("session.subscribe", { sessionId });
   });
-  socket.on("disconnect", () => onStatus("disconnected"));
-  socket.on("connect_error", () => onStatus("unavailable"));
-  socket.on("AgentEvent", (event: AgentEvent) => onEvent(event));
-  socket.on("agent:event", (event: AgentEvent) => onEvent(event));
-  socket.on("session:event", (event: AgentEvent) => onEvent(event));
-
-  if (socket.connected) {
-    joinConversation(socket, conversationId);
-  }
+  socket.on("disconnect", () => handlers.onState("disconnected"));
+  socket.on("connect_error", () => handlers.onState("unavailable"));
+  socket.on("hub:event", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "event") handlers.onEvent(envelope.payload as HubEventDto);
+  });
+  socket.on("hub:session", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "session") handlers.onSession(envelope.payload as HubSessionDto);
+  });
+  socket.on("hub:artifact", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "artifact") handlers.onArtifact(envelope.payload as HubArtifactDto);
+  });
+  socket.on("hub:file_change", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "file_change") handlers.onFileChange(envelope.payload as HubFileChangeDto);
+  });
+  socket.on("hub:context", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "context") handlers.onContext(envelope.payload as HubContextSnapshotDto);
+  });
 
   return () => {
     socket?.disconnect();
   };
+}
+
+export type TimelineItem =
+  | { kind: "message"; id: string; ts: string; message: HubMessageDto }
+  | { kind: "event"; id: string; ts: string; event: HubEventDto };
+
+export function buildTimeline(messages: HubMessageDto[], events: HubEventDto[]): TimelineItem[] {
+  return [
+    ...messages.map((message) => ({ kind: "message" as const, id: message.id, ts: message.createdAt, message })),
+    ...events.map((event) => ({
+      kind: "event" as const,
+      id: event.id,
+      ts: event.occurredAt ?? event.persistedAt,
+      event,
+    })),
+  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+}
+
+export function upsertById<T extends { id: string }>(items: T[], item: T) {
+  const next = items.filter((current) => current.id !== item.id);
+  next.push(item);
+  return next;
 }
