@@ -57,7 +57,6 @@ import {
   startBuild,
   updateAgent,
   upsertById,
-  type SocketState,
 } from "../lib/agenthub-api";
 
 type InspectorTab = "diff" | "artifacts" | "context";
@@ -119,7 +118,6 @@ export default function WorkbenchPage() {
   const [detail, setDetail] = useState<SessionDetailDto | null>(null);
   const [agents, setAgents] = useState<AgentInstanceDto[]>([]);
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
-  const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [composer, setComposer] = useState("");
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -175,7 +173,7 @@ export default function WorkbenchPage() {
   useEffect(() => {
     if (!activeSessionId) return;
     const disconnect = connectHubSocket(activeSessionId, {
-      onState: setSocketState,
+      onState: () => undefined,
       onEvent: (event) => {
         setDetail((current) =>
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,
@@ -421,11 +419,6 @@ export default function WorkbenchPage() {
         </div>
 
         <div className="statusStack">
-          <StatusPill state={socketState} />
-          <div className="miniMetric">
-            <ApiOutlined />
-            <span>默认协调者：{orchestrator?.name ?? "Orchestrator"}</span>
-          </div>
           <section className="groupSummary">
             <button
               className="groupSummaryHeader"
@@ -1932,16 +1925,6 @@ function diffMarker(kind: DiffLineKind) {
 
 function normalizePath(path: string) {
   return path.replace(/\\/g, "/");
-}
-
-function StatusPill({ state }: { state: SocketState }) {
-  const icon = state === "connected" ? <CheckCircleOutlined /> : state === "connecting" ? <LoadingOutlined /> : <CloseCircleOutlined />;
-  return (
-    <div className={`socketPill ${state}`}>
-      {icon}
-      <span>{state}</span>
-    </div>
-  );
 }
 
 function RunBadge({ run }: { run: HubRunDto }) {
