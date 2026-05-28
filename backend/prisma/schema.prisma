@@ -102,7 +102,7 @@ model AgentTemplate {
   id                  String        @id @default(uuid()) @db.Uuid
   name                String
   description         String        @default("")
-  agentKind           String        @default("worker") @map("agent_kind")
+  defaultProvider     Int           @default(0) @map("default_provider") // 0=claude-code, 1=codex, 2=opencode
   systemPrompt        String        @default("") @map("system_prompt")
   promptConfig        Json          @default("{}") @map("prompt_config")
   defaultCapabilities Json          @default("[]") @map("default_capabilities")
@@ -113,8 +113,31 @@ model AgentTemplate {
   updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   agents              Agent[]
 
-  @@index([agentKind], map: "idx_agent_templates_kind")
   @@map("agent_templates")
+}
+
+model BuildSession {
+  id              String         @id @default(uuid()) @db.Uuid
+  status          String         @default("active") // active | completed | cancelled
+  context         Json           @default("{}")
+  agentTemplateId String?        @map("agent_template_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages        BuildMessage[]
+
+  @@map("build_sessions")
+}
+
+model BuildMessage {
+  id              String       @id @default(uuid()) @db.Uuid
+  buildSessionId  String       @map("build_session_id") @db.Uuid
+  role            String       // user | assistant
+  content         String       @default("")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  buildSession    BuildSession @relation(fields: [buildSessionId], references: [id], onDelete: Cascade)
+
+  @@index([buildSessionId, createdAt], map: "idx_build_messages_session_created")
+  @@map("build_messages")
 }
 
 model Agent {

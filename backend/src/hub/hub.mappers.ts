@@ -37,7 +37,7 @@ export function mapTemplate(row: Row): AgentTemplateDto {
     id: row.id,
     name: row.name,
     description: row.description ?? "",
-    agentKind: row.agentKind ?? "worker",
+    defaultProvider: row.defaultProvider ?? 0,
     systemPrompt: row.systemPrompt ?? "",
     promptConfig: asObject(row.promptConfig),
     defaultCapabilities: asArray(row.defaultCapabilities),

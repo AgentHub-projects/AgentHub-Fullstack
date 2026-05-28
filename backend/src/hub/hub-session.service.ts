@@ -57,7 +57,74 @@ export class HubSessionService {
       },
       include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
-    const dto = mapSession(session);
+
+    // Create agent instances from templates
+    if (input.orchestratorTemplateId) {
+      const tpl = await this.prisma.agentTemplate.findUnique({
+        where: { id: input.orchestratorTemplateId },
+      });
+      if (tpl) {
+        const provider = input.orchestratorProvider ?? tpl.defaultProvider;
+        const agent = await this.prisma.agent.create({
+          data: {
+            templateId: tpl.id,
+            name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
+            description: tpl.description,
+            provider,
+            isDefaultOrchestrator: false,
+            status: "enabled",
+          },
+        });
+        await this.prisma.sessionAgent.create({
+          data: {
+            sessionId: session.id,
+            agentId: agent.id,
+            participantRole: "orchestrator",
+            source: "manual_add",
+            firstMentionedAt: new Date(),
+            lastActiveAt: new Date(),
+          },
+        });
+      }
+    }
+
+    if (input.memberTemplates?.length) {
+      for (const mt of input.memberTemplates) {
+        const tpl = await this.prisma.agentTemplate.findUnique({
+          where: { id: mt.templateId },
+        });
+        if (tpl) {
+          const provider = mt.provider ?? tpl.defaultProvider;
+          const agent = await this.prisma.agent.create({
+            data: {
+              templateId: tpl.id,
+              name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
+              description: tpl.description,
+              provider,
+              isDefaultOrchestrator: false,
+              status: "enabled",
+            },
+          });
+          await this.prisma.sessionAgent.create({
+            data: {
+              sessionId: session.id,
+              agentId: agent.id,
+              participantRole: "member",
+              source: "manual_add",
+              firstMentionedAt: new Date(),
+              lastActiveAt: new Date(),
+            },
+          });
+        }
+      }
+    }
+
+    // Reload session with updated participants
+    const updated = await this.prisma.session.findUnique({
+      where: { id: session.id },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    const dto = mapSession(updated!);
     this.gateway.emitSession(dto);
     return dto;
   }
@@ -293,12 +360,12 @@ export class HubSessionService {
       );
       return participantAgents.length > 0
         ? participantAgents
-        : agents.filter((agent) => agent.template?.agentKind !== "orchestrator").slice(0, 2);
+        : agents.filter((agent) => !agent.isDefaultOrchestrator).slice(0, 2);
     }
 
     const mentioned = agents.filter((agent) => ids.has(agent.id));
     if (mentioned.length > 0) return mentioned;
-    return agents.filter((agent) => agent.template?.agentKind !== "orchestrator").slice(0, 2);
+    return agents.filter((agent) => !agent.isDefaultOrchestrator).slice(0, 2);
   }
 
   private async upsertSessionAgent(sessionId: string, agentId: string, role: string, source: string) {
