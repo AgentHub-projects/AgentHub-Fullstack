@@ -1,7 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
 import type { AgentInstanceDto, DownstreamPromptInput, HubContextSnapshotDto } from "@agenthub/shared";
 import { io, Socket } from "socket.io-client";
-import { AgentRegistryService } from "./agent-registry.service";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "./hub-realtime.gateway";
 import { mapSession } from "./hub.mappers";
@@ -11,7 +10,8 @@ type ConnectionRecord = {
   key: string;
   socket: Socket;
   sessionId: string;
-  orchestrator: AgentInstanceDto;
+  idleTimer: NodeJS.Timeout | null;
+  lastActivityAt: number;
 };
 
 type DownstreamEnvelope = {
@@ -26,6 +26,8 @@ type DownstreamEnvelope = {
   speaker?: string;
 };
 
+const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+
 @Injectable()
 export class DownstreamOrchestratorService implements OnModuleDestroy {
   private readonly connections = new Map<string, ConnectionRecord>();
@@ -33,8 +35,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
-    @Inject(AgentRegistryService)
-    private readonly agents: AgentRegistryService,
     @Inject(HubEventService)
     private readonly events: HubEventService,
     @Inject(HubRealtimeGateway)
@@ -43,6 +43,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
   onModuleDestroy() {
     for (const record of this.connections.values()) {
+      this.clearIdleTimer(record);
       record.socket.disconnect();
     }
     this.connections.clear();
@@ -67,16 +68,19 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       eventType: "run.status",
       speakerAgentId: input.orchestrator.id,
       source: "agenthub_backend",
-      payload: { status: "connecting", endpointUrl: input.orchestrator.endpointUrl },
+      payload: { status: "connecting" },
     });
 
-    if (!input.orchestrator.endpointUrl) {
+    const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
+    if (!downstreamUrl) {
       await this.simulateRun(input);
       return;
     }
 
     try {
-      const connection = await this.ensureConnection(input.sessionId, input.orchestrator);
+      const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator);
+      this.resetIdleTimer(connection);
+
       const promptInput: DownstreamPromptInput = {
         agenthubSessionId: input.sessionId,
         runId: input.runId,
@@ -89,7 +93,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           { type: "text", text: input.context.promptText },
         ],
         context: input.context,
-        metadata: { source: "agenthub", protocolProfile: input.orchestrator.protocolProfile },
+        metadata: { source: "agenthub" },
       };
 
       connection.socket.emit("acp:message", {
@@ -128,7 +132,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: runId },
       data: { status: "cancelled", completedAt: new Date() },
     });
-    const record = this.connections.get(connectionKey(sessionId, orchestratorAgentId));
+    const record = this.connections.get(sessionId);
     record?.socket.emit("acp:message", {
       jsonrpc: "2.0",
       id: `cancel-${runId}`,
@@ -144,25 +148,63 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 
-  private async ensureConnection(sessionId: string, orchestrator: AgentInstanceDto): Promise<ConnectionRecord> {
-    const key = connectionKey(sessionId, orchestrator.id);
-    const existing = this.connections.get(key);
-    if (existing?.socket.connected) return existing;
+  /** Push context to downstream on connect/reconnect (complete context injection) */
+  async pushContext(
+    sessionId: string,
+    payload: {
+      agents: Array<{ agentId: string; name: string; description: string; provider: number }>;
+      summaryChain: Array<{ seq: number; content: string }>;
+      message: string;
+      recentMessages: Array<{ role: string; content: string }>;
+    },
+  ) {
+    const record = this.connections.get(sessionId);
+    if (!record?.socket.connected) return;
+    record.socket.emit("acp:message", {
+      jsonrpc: "2.0",
+      id: `context-${sessionId}-${Date.now()}`,
+      method: "session/context",
+      params: {
+        type: "init",
+        sessionId,
+        ...payload,
+      },
+    });
+    this.resetIdleTimer(record);
+  }
 
-    const endpointUrl = orchestrator.endpointUrl;
-    if (!endpointUrl) throw new Error("orchestrator endpointUrl is empty");
+  private async ensureConnection(
+    sessionId: string,
+    downstreamUrl: string,
+    _orchestrator: AgentInstanceDto,
+  ): Promise<ConnectionRecord> {
+    const existing = this.connections.get(sessionId);
+    if (existing?.socket.connected) {
+      this.resetIdleTimer(existing);
+      return existing;
+    }
 
-    const socket = io(endpointUrl, {
+    if (existing) {
+      existing.socket.disconnect();
+      this.connections.delete(sessionId);
+    }
+
+    const socket = io(downstreamUrl, {
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: 5,
-      auth: this.authPayload(orchestrator),
     });
-    const record: ConnectionRecord = { key, socket, sessionId, orchestrator };
-    this.connections.set(key, record);
+
+    const record: ConnectionRecord = {
+      key: sessionId,
+      socket,
+      sessionId,
+      idleTimer: null,
+      lastActivityAt: Date.now(),
+    };
+    this.connections.set(sessionId, record);
 
     socket.on("connect", () => {
-      void this.markConnected(record);
       socket.emit("acp:message", {
         jsonrpc: "2.0",
         id: `init-${sessionId}`,
@@ -179,18 +221,27 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         method: "session/load",
         params: {
           agenthubSessionId: sessionId,
-          agentId: orchestrator.id,
-          cwd: orchestrator.sandbox.cwd ?? "/workspace",
+          cwd: "/workspace",
         },
       });
     });
 
     socket.on("disconnect", (reason) => {
-      void this.markClosed(record, reason);
+      this.clearIdleTimer(record);
+      if (reason !== "io client disconnect") {
+        // Reconnect will be handled by socket.io reconnection; remove after timeout
+        setTimeout(() => {
+          if (!socket.connected) {
+            this.connections.delete(sessionId);
+          }
+        }, 5000);
+      }
     });
-    socket.on("connect_error", (error) => {
-      void this.markFailed(record, error.message);
+
+    socket.on("connect_error", () => {
+      // socket.io handles reconnection internally
     });
+
     socket.on("session/event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
     socket.on("acp:event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
     socket.on("acp:message", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
@@ -200,7 +251,25 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return record;
   }
 
+  private resetIdleTimer(record: ConnectionRecord) {
+    record.lastActivityAt = Date.now();
+    this.clearIdleTimer(record);
+    record.idleTimer = setTimeout(() => {
+      record.socket.disconnect();
+      this.connections.delete(record.key);
+    }, IDLE_TIMEOUT_MS);
+  }
+
+  private clearIdleTimer(record: ConnectionRecord) {
+    if (record.idleTimer) {
+      clearTimeout(record.idleTimer);
+      record.idleTimer = null;
+    }
+  }
+
   private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
+    this.resetIdleTimer(record);
+
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
     if (envelope.method && envelope.method !== "session/event") return;
     const runId = stringValue(params.runId) ?? stringValue(envelope.runId);
@@ -209,11 +278,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const eventType = stringValue(params.type) ?? stringValue(params.eventType) ?? stringValue(envelope.type);
     if (!eventType) return;
     const payload = asRecord(params.payload ?? params);
+
     const speaker =
       stringValue(params.speaker) ??
       stringValue(payload.speaker) ??
       stringValue(envelope.speaker) ??
-      record.orchestrator.id;
+      "orchestrator";
 
     await this.events.append({
       sessionId: record.sessionId,
@@ -230,7 +300,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       await this.completeRun(record.sessionId, runId, speaker, payload);
     }
     if (eventType === "run.failed") {
-      await this.failRun(record.sessionId, runId, speaker, "DOWNSTREAM_RUN_FAILED", stringValue(payload.message) ?? "run failed");
+      await this.failRun(
+        record.sessionId,
+        runId,
+        speaker,
+        "DOWNSTREAM_RUN_FAILED",
+        stringValue(payload.message) ?? "run failed",
+      );
     }
   }
 
@@ -241,13 +317,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     orchestrator: AgentInstanceDto;
     mentionedAgents: AgentInstanceDto[];
   }) {
-    const speakers = input.mentionedAgents.length
-      ? input.mentionedAgents
-      : (await this.agents.getAgents([
-          "10000000-0000-4000-8000-000000000002",
-          "10000000-0000-4000-8000-000000000003",
-          "10000000-0000-4000-8000-000000000004",
-        ]));
+    const speakers = input.mentionedAgents.length > 0 ? input.mentionedAgents : [
+      // Default mock agents
+      { id: "10000000-0000-4000-8000-000000000002", name: "frontend-agent" } as AgentInstanceDto,
+      { id: "10000000-0000-4000-8000-000000000003", name: "backend-agent" } as AgentInstanceDto,
+      { id: "10000000-0000-4000-8000-000000000004", name: "review-agent" } as AgentInstanceDto,
+    ];
 
     await this.prisma.agentRun.update({
       where: { id: input.runId },
@@ -283,7 +358,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         speakerAgentId: agent.id,
         source: "mock_orchestrator",
         payload: {
-          text: `${agent.name}：基于任务“${input.promptText.slice(0, 80)}”，我会输出可落库的事件、artifact 和文件变更快照。`,
+          text: `${agent.name}：基于任务"${input.promptText.slice(0, 80)}"，我会输出可落库的事件、artifact 和文件变更快照。`,
           speaker: agent.id,
         },
       });
@@ -369,62 +444,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       payload: { code, message },
     });
   }
-
-  private async markConnected(record: ConnectionRecord) {
-    await this.prisma.downstreamConnection.upsert({
-      where: { sessionId_agentId: { sessionId: record.sessionId, agentId: record.orchestrator.id } },
-      create: {
-        sessionId: record.sessionId,
-        agentId: record.orchestrator.id,
-        endpointUrl: record.orchestrator.endpointUrl ?? "",
-        status: "connected",
-        connectedAt: new Date(),
-      },
-      update: { status: "connected", connectedAt: new Date(), closedAt: null, closeReason: null },
-    });
-  }
-
-  private async markClosed(record: ConnectionRecord, reason: string) {
-    await this.prisma.downstreamConnection.upsert({
-      where: { sessionId_agentId: { sessionId: record.sessionId, agentId: record.orchestrator.id } },
-      create: {
-        sessionId: record.sessionId,
-        agentId: record.orchestrator.id,
-        endpointUrl: record.orchestrator.endpointUrl ?? "",
-        status: "closed",
-        closedAt: new Date(),
-        closeReason: reason,
-      },
-      update: { status: "closed", closedAt: new Date(), closeReason: reason },
-    });
-  }
-
-  private async markFailed(record: ConnectionRecord, reason: string) {
-    await this.prisma.downstreamConnection.upsert({
-      where: { sessionId_agentId: { sessionId: record.sessionId, agentId: record.orchestrator.id } },
-      create: {
-        sessionId: record.sessionId,
-        agentId: record.orchestrator.id,
-        endpointUrl: record.orchestrator.endpointUrl ?? "",
-        status: "failed",
-        closedAt: new Date(),
-        closeReason: reason,
-      },
-      update: { status: "failed", closedAt: new Date(), closeReason: reason },
-    });
-  }
-
-  private authPayload(agent: AgentInstanceDto) {
-    if (agent.authType === "bearer" && agent.authSecretRef) {
-      const token = process.env[agent.authSecretRef] ?? agent.authSecretRef;
-      return { token };
-    }
-    return undefined;
-  }
-}
-
-function connectionKey(sessionId: string, orchestratorAgentId: string) {
-  return `${sessionId}:${orchestratorAgentId}`;
 }
 
 function waitForSocket(socket: Socket): Promise<void> {

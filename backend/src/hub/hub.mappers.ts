@@ -8,6 +8,7 @@ import type {
   HubMessageDto,
   HubRunDto,
   HubSessionDto,
+  LongTermSummaryDto,
 } from "@agenthub/shared";
 
 type Row = Record<string, any>;
@@ -54,17 +55,10 @@ export function mapAgent(row: Row): AgentInstanceDto {
     templateId: row.templateId,
     name: row.name,
     description: row.description ?? "",
-    endpointUrl: row.endpointUrl ?? null,
-    protocolProfile: row.protocolProfile ?? "north-socketio-jsonrpc",
+    provider: row.provider ?? 0,
     isDefaultOrchestrator: Boolean(row.isDefaultOrchestrator),
-    authType: row.authType ?? "none",
-    authSecretRef: row.authSecretRef ?? null,
-    capabilitiesOverride: asObject(row.capabilitiesOverride),
-    runtimeConfig: asObject(row.runtimeConfig),
-    sandbox: asObject(row.sandbox),
     status: row.status,
     template: row.template ? mapTemplate(row.template) : undefined,
-    lastSeenAt: maybeIso(row.lastSeenAt),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -94,6 +88,7 @@ export function mapMessage(row: Row): HubMessageDto {
     contentText: row.contentText ?? "",
     contentJson: asObject(row.contentJson),
     tokenCount: row.tokenCount ?? 0,
+    status: row.status ?? "completed",
     isPinned: Boolean(row.isPinned),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
@@ -118,15 +113,6 @@ export function mapRun(row: Row): HubRunDto {
     completedAt: maybeIso(row.completedAt),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
-    mentions: row.mentions?.map((mention: Row) => ({
-      id: mention.id,
-      sessionId: mention.sessionId,
-      runId: mention.runId,
-      agentId: mention.agentId ?? null,
-      mentionLabel: mention.mentionLabel,
-      source: mention.source,
-      createdAt: iso(mention.createdAt),
-    })),
   };
 }
 
@@ -203,8 +189,19 @@ export function mapContextSnapshot(row: Row): HubContextSnapshotDto {
     tokenBudget: row.tokenBudget,
     tokenCount: row.tokenCount,
     selectedItemIds: Array.isArray(row.selectedItemIds) ? row.selectedItemIds : [],
-    snapshotJson: row.snapshotJson,
+    snapshotJson: row.snapshotJson as HubContextSnapshotDto["snapshotJson"],
     promptText: row.promptText,
+    createdAt: iso(row.createdAt),
+  };
+}
+
+export function mapLongTermSummary(row: Row): LongTermSummaryDto {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    seq: row.seq,
+    content: row.content ?? "",
+    tokenCount: row.tokenCount ?? 0,
     createdAt: iso(row.createdAt),
   };
 }

@@ -99,40 +99,42 @@ export class ArtifactStorageService {
     producingEventId?: string;
     payload: ArtifactPayload;
   }) {
-    const artifact = await this.upsertArtifact({
+    // Chunked artifacts simplified: just accumulate content text
+    const artifactKey = stringValue(input.payload.artifactKey) ?? "artifact";
+    const delta = stringValue(input.payload.data) ?? stringValue(input.payload.text) ?? "";
+
+    if (!delta) return null;
+
+    const existing = await this.prisma.artifact.findUnique({
+      where: { runId_artifactKey: { runId: input.runId, artifactKey } },
+    });
+
+    if (existing) {
+      const updated = await this.prisma.artifact.update({
+        where: { id: existing.id },
+        data: {
+          textContent: (existing.textContent ?? "") + delta,
+          sizeBytes: BigInt(((existing.textContent ?? "").length + delta.length)),
+          producingEventId: input.producingEventId,
+        },
+      });
+      return mapArtifact(updated);
+    }
+
+    return this.upsertArtifact({
       sessionId: input.sessionId,
       runId: input.runId,
       producingEventId: input.producingEventId,
       payload: {
-        artifactKey: input.payload.artifactKey,
-        kind: input.payload.kind ?? "other",
-        title: input.payload.title ?? input.payload.artifactKey,
-        mimeType: input.payload.mimeType,
-        metadata: input.payload.metadata,
+        artifactKey,
+        kind: input.payload.kind ?? "text",
+        title: input.payload.title ?? artifactKey,
+        mimeType: input.payload.mimeType ?? "text/plain; charset=utf-8",
+        content: delta,
         final: false,
+        metadata: input.payload.metadata,
       },
     });
-    if (!artifact) return null;
-
-    await this.prisma.artifactChunk.upsert({
-      where: {
-        artifactId_chunkIndex: {
-          artifactId: artifact.id,
-          chunkIndex: numberValue(input.payload.chunkIndex) ?? 0,
-        },
-      },
-      create: {
-        artifactId: artifact.id,
-        chunkIndex: numberValue(input.payload.chunkIndex) ?? 0,
-        encoding: stringValue(input.payload.encoding) ?? "base64",
-        data: stringValue(input.payload.data) ?? "",
-      },
-      update: {
-        encoding: stringValue(input.payload.encoding) ?? "base64",
-        data: stringValue(input.payload.data) ?? "",
-      },
-    });
-    return artifact;
   }
 
   async completeArtifact(input: {
@@ -142,11 +144,11 @@ export class ArtifactStorageService {
     payload: ArtifactPayload;
   }): Promise<HubArtifactDto | null> {
     const artifactKey = stringValue(input.payload.artifactKey) ?? "artifact";
-    const artifact = await this.prisma.artifact.findUnique({
+    const existing = await this.prisma.artifact.findUnique({
       where: { runId_artifactKey: { runId: input.runId, artifactKey } },
-      include: { chunks: { orderBy: { chunkIndex: "asc" } } },
     });
-    if (!artifact) {
+
+    if (!existing) {
       return this.upsertArtifact({
         sessionId: input.sessionId,
         runId: input.runId,
@@ -155,37 +157,11 @@ export class ArtifactStorageService {
       });
     }
 
-    if (artifact.chunks.length === 0) {
-      const updated = await this.prisma.artifact.update({
-        where: { id: artifact.id },
-        data: { final: true, producingEventId: input.producingEventId },
-      });
-      return mapArtifact(updated);
-    }
-
-    const binary = Buffer.concat(
-      artifact.chunks.map((chunk) =>
-        chunk.encoding === "utf8" ? Buffer.from(chunk.data, "utf8") : Buffer.from(chunk.data, "base64"),
-      ),
-    );
-    const uploaded = await this.uploadToOss(
-      input.sessionId,
-      input.runId,
-      artifactKey,
-      binary,
-      stringValue(input.payload.mimeType) ?? artifact.mimeType,
-    );
-
     const updated = await this.prisma.artifact.update({
-      where: { id: artifact.id },
+      where: { id: existing.id },
       data: {
         final: true,
         producingEventId: input.producingEventId,
-        storageKind: uploaded ? "oss_object" : "inline_text",
-        storageUri: uploaded?.uri ?? artifact.storageUri,
-        textContent: uploaded ? null : binary.toString("base64"),
-        sha256: uploaded?.sha256 ?? sha256Buffer(binary),
-        sizeBytes: BigInt(binary.length),
       },
     });
     return mapArtifact(updated);
@@ -275,10 +251,6 @@ export class ArtifactStorageService {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeArtifactKind(value: string): HubArtifactKind {

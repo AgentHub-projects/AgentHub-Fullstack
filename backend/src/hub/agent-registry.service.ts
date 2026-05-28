@@ -73,7 +73,6 @@ export class AgentRegistryService implements OnModuleInit {
   }
 
   private async seedDefaults() {
-    const endpointUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL ?? null;
     await this.prisma.agentTemplate.upsert({
       where: { id: IDS.tplOrchestrator },
       create: {
@@ -144,15 +143,12 @@ export class AgentRegistryService implements OnModuleInit {
         templateId: IDS.tplOrchestrator,
         name: "main-orchestrator",
         description: "会话级长连接入口。用户 @ 多个 Agent 时也先进入该 Agent。",
-        endpointUrl,
+        provider: 0, // claude-code
         isDefaultOrchestrator: true,
-        status: endpointUrl ? "enabled" : "offline",
-        sandbox: { cwd: "/workspace" },
+        status: "offline",
       },
       update: {
-        endpointUrl,
         isDefaultOrchestrator: true,
-        status: endpointUrl ? "enabled" : "offline",
       },
     });
 
@@ -163,6 +159,7 @@ export class AgentRegistryService implements OnModuleInit {
         templateId: IDS.tplFrontend,
         name: "frontend-agent",
         description: "群聊成员：前端实现。",
+        provider: 0, // claude-code
         status: "enabled",
       },
       update: { status: "enabled" },
@@ -175,6 +172,7 @@ export class AgentRegistryService implements OnModuleInit {
         templateId: IDS.tplBackend,
         name: "backend-agent",
         description: "群聊成员：后端实现。",
+        provider: 1, // codex
         status: "enabled",
       },
       update: { status: "enabled" },
@@ -187,6 +185,7 @@ export class AgentRegistryService implements OnModuleInit {
         templateId: IDS.tplReviewer,
         name: "review-agent",
         description: "群聊成员：验收与审查。",
+        provider: 1, // codex
         status: "enabled",
       },
       update: { status: "enabled" },

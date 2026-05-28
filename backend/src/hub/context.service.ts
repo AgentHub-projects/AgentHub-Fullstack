@@ -5,9 +5,10 @@ import type {
   ContextSnapshotPayload,
   HubContextSnapshotDto,
   HubContextItemKind,
+  LongTermSummaryDto,
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapContextSnapshot } from "./hub.mappers";
+import { mapContextSnapshot, mapLongTermSummary } from "./hub.mappers";
 
 type ContextRow = {
   id: string;
@@ -19,12 +20,21 @@ type ContextRow = {
   createdAt: Date;
 };
 
+// Short-term summary buffer (P0: in-memory; P1: Redis)
+const shortTermBuffers = new Map<string, { events: string[]; tokenCount: number }>();
+
+const SHORT_TERM_EVENT_LIMIT = 20;
+const SHORT_TERM_TOKEN_LIMIT = 2000;
+
 @Injectable()
 export class HubContextService {
   private readonly tokenBudget = Number(process.env.CONTEXT_TOKEN_BUDGET ?? 9000);
   private readonly recentTokenBudget = Number(process.env.CONTEXT_RECENT_TOKEN_BUDGET ?? 4800);
   private readonly retrievalLimit = Number(process.env.CONTEXT_RETRIEVAL_LIMIT ?? 8);
   private readonly embeddingModel = process.env.CONTEXT_EMBEDDING_MODEL ?? "text-embedding-3-small";
+  private readonly summaryModel = process.env.CONTEXT_SUMMARY_MODEL ?? "deepseek-chat";
+  private readonly summaryApiKey = process.env.SUMMARY_API_KEY ?? process.env.OPENAI_API_KEY;
+  private readonly summaryBaseUrl = (process.env.SUMMARY_BASE_URL ?? process.env.OPENAI_COMPATIBLE_BASE_URL ?? process.env.OPENAI_BASE_URL)?.replace(/\/$/, "");
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -56,7 +66,7 @@ export class HubContextService {
       },
     });
     await this.persistEmbedding(item.id, input.sessionId, input.text);
-    await this.refreshSummary(input.sessionId);
+    await this.appendShortTermBuffer(input.sessionId, `${input.kind}: ${input.text}`);
     return item;
   }
 
@@ -111,9 +121,7 @@ export class HubContextService {
     });
 
     const retrievedRows = await this.recallByPgvector(input.sessionId, input.promptText, this.retrievalLimit);
-    const summary = await this.prisma.sessionContext.findUnique({
-      where: { sessionId: input.sessionId },
-    });
+    const longTermSummaries = await this.loadSummaryChain(input.sessionId);
 
     const selectedIds = new Set<string>();
     let total = 0;
@@ -121,9 +129,7 @@ export class HubContextService {
       pinned.map(toItem),
       this.tokenBudget,
       selectedIds,
-      (count) => {
-        total += count;
-      },
+      (count) => { total += count; },
     );
 
     const recent = this.selectWithinBudget(
@@ -131,7 +137,7 @@ export class HubContextService {
         .reverse()
         .map((message) => ({
           id: message.id,
-          kind: "message",
+          kind: "message" as const,
           text: `${message.role}${message.agentId ? `:${message.agentId}` : ""}: ${message.contentText}`,
           tokenCount: message.tokenCount || this.estimateTokens(message.contentText),
           importance: message.isPinned ? 100 : 0,
@@ -140,21 +146,24 @@ export class HubContextService {
         })),
       this.recentTokenBudget,
       selectedIds,
-      (count) => {
-        total += count;
-      },
+      (count) => { total += count; },
     );
 
     const remainingBudget = Math.max(1000, this.tokenBudget - total);
-    const retrieved = this.selectWithinBudget(retrievedRows.map(toItem), remainingBudget, selectedIds, (count) => {
-      total += count;
-    });
+    const retrieved = this.selectWithinBudget(
+      retrievedRows.map(toItem),
+      remainingBudget,
+      selectedIds,
+      (count) => { total += count; },
+    );
+
+    const summaryText = longTermSummaries.map((s) => s.content).join("\n");
 
     const payload: ContextSnapshotPayload = {
       pins,
       recent,
       retrieved,
-      summary: summary?.summaryText || "",
+      summary: summaryText || "",
       mentionedAgents: input.mentionedAgents.map((agent) => ({ id: agent.id, name: agent.name })),
     };
 
@@ -164,7 +173,7 @@ export class HubContextService {
         sessionId: input.sessionId,
         runId: input.runId,
         tokenBudget: this.tokenBudget,
-        tokenCount: total + this.estimateTokens(summary?.summaryText ?? ""),
+        tokenCount: total + this.estimateTokens(summaryText),
         selectedItemIds: [...selectedIds],
         snapshotJson: payload as any,
         promptText,
@@ -178,6 +187,100 @@ export class HubContextService {
 
     return mapContextSnapshot(snapshot);
   }
+
+  // ---- Incremental Summary Chain ----
+
+  async loadSummaryChain(sessionId: string): Promise<LongTermSummaryDto[]> {
+    const rows = await this.prisma.longTermSummary.findMany({
+      where: { sessionId },
+      orderBy: { seq: "asc" },
+    });
+    return rows.map(mapLongTermSummary);
+  }
+
+  private async appendShortTermBuffer(sessionId: string, text: string) {
+    let buffer = shortTermBuffers.get(sessionId);
+    if (!buffer) {
+      buffer = { events: [], tokenCount: 0 };
+      shortTermBuffers.set(sessionId, buffer);
+    }
+
+    buffer.events.push(text);
+    buffer.tokenCount += this.estimateTokens(text);
+
+    if (buffer.events.length >= SHORT_TERM_EVENT_LIMIT || buffer.tokenCount >= SHORT_TERM_TOKEN_LIMIT) {
+      await this.compressShortTerm(sessionId, buffer);
+    }
+  }
+
+  private async compressShortTerm(
+    sessionId: string,
+    buffer: { events: string[]; tokenCount: number },
+  ) {
+    const text = buffer.events.join("\n");
+    const summary = await this.invokeSummaryLLM(text);
+
+    const lastSeq = await this.getNextSeq(sessionId);
+    await this.prisma.longTermSummary.create({
+      data: {
+        sessionId,
+        seq: lastSeq,
+        content: summary,
+        tokenCount: this.estimateTokens(summary),
+      },
+    });
+
+    // Reset short-term buffer
+    buffer.events = [];
+    buffer.tokenCount = 0;
+  }
+
+  private async invokeSummaryLLM(text: string): Promise<string> {
+    if (!this.summaryApiKey || !this.summaryBaseUrl) {
+      // Fallback: simple truncation
+      return text.slice(0, 4000);
+    }
+
+    try {
+      const response = await fetch(`${this.summaryBaseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.summaryApiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.summaryModel,
+          messages: [
+            {
+              role: "system",
+              content: "请用中文将以下 Agent 群聊记录压缩为简洁摘要（200字以内），保留关键任务、决策、产出和未解决问题。",
+            },
+            { role: "user", content: text.slice(0, 8000) },
+          ],
+          max_tokens: 400,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!response.ok) return text.slice(0, 4000);
+      const payload = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return payload.choices?.[0]?.message?.content ?? text.slice(0, 4000);
+    } catch {
+      return text.slice(0, 4000);
+    }
+  }
+
+  private async getNextSeq(sessionId: string): Promise<number> {
+    const result = await this.prisma.longTermSummary.aggregate({
+      where: { sessionId },
+      _max: { seq: true },
+    });
+    return (result._max.seq ?? 0) + 1;
+  }
+
+  // ---- Embedding & Vector Recall ----
 
   private selectWithinBudget(
     items: ContextSnapshotItem[],
@@ -218,7 +321,7 @@ export class HubContextService {
           limit,
         );
       } catch {
-        // pgvector may not be migrated yet in local dev; lexical fallback keeps the app usable.
+        // pgvector may not be migrated yet; lexical fallback
       }
     }
 
@@ -263,7 +366,7 @@ export class HubContextService {
         vectorLiteral,
       );
     } catch {
-      // Missing pgvector extension or migration should not block message persistence.
+      // Missing pgvector extension should not block message persistence.
     }
   }
 
@@ -291,37 +394,6 @@ export class HubContextService {
     } catch {
       return null;
     }
-  }
-
-  private async refreshSummary(sessionId: string) {
-    const items = await this.prisma.contextItem.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "desc" },
-      take: 18,
-    });
-    const summaryText = items
-      .slice()
-      .reverse()
-      .map((item) => `- ${item.kind}: ${item.text.slice(0, 260)}`)
-      .join("\n")
-      .slice(0, 5000);
-
-    await this.prisma.sessionContext.upsert({
-      where: { sessionId },
-      create: {
-        sessionId,
-        summaryVersion: 1,
-        summaryText,
-        summaryJson: { strategy: "lightweight-rolling-summary" },
-        tokenCount: this.estimateTokens(summaryText),
-      },
-      update: {
-        summaryVersion: { increment: 1 },
-        summaryText,
-        summaryJson: { strategy: "lightweight-rolling-summary" },
-        tokenCount: this.estimateTokens(summaryText),
-      },
-    });
   }
 }
 

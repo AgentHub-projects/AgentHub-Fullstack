@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
+  AddParticipantRequest,
   CreateHubSessionRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
@@ -77,7 +78,6 @@ export class HubSessionService {
       }),
       this.prisma.agentRun.findMany({
         where: { sessionId },
-        include: { mentions: true },
         orderBy: { createdAt: "asc" },
       }),
       this.prisma.agentEvent.findMany({
@@ -110,6 +110,46 @@ export class HubSessionService {
     };
   }
 
+  async addParticipant(sessionId: string, input: AddParticipantRequest) {
+    const agent = await this.agents.getAgent(input.agentId);
+    if (!agent) throw new Error("Agent not found");
+
+    await this.prisma.sessionAgent.upsert({
+      where: { sessionId_agentId: { sessionId, agentId: input.agentId } },
+      create: {
+        sessionId,
+        agentId: input.agentId,
+        participantRole: "member",
+        source: "manual_add",
+        firstMentionedAt: new Date(),
+        lastActiveAt: new Date(),
+      },
+      update: {
+        source: "manual_add",
+        lastActiveAt: new Date(),
+      },
+    });
+
+    const session = await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { updatedAt: new Date() },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+
+    const sessionDto = mapSession(session);
+    this.gateway.emitSession(sessionDto);
+
+    await this.events.append({
+      sessionId,
+      runId: await this.getLatestRunId(sessionId),
+      eventType: "context.updated",
+      source: "agenthub_backend",
+      payload: { action: "participant_added", agentId: input.agentId, agentName: agent.name },
+    });
+
+    return { session: sessionDto, agent };
+  }
+
   async sendMessage(sessionId: string, input: SendHubMessageRequest): Promise<SendHubMessageResponse> {
     const text = input.content.trim();
     if (!text) throw new Error("Message content is required");
@@ -122,7 +162,7 @@ export class HubSessionService {
       : await this.agents.getDefaultOrchestrator();
     if (!orchestrator) throw new Error("Orchestrator agent not found");
 
-    const mentionedAgents = await this.resolveMentions(text, input.mentionedAgentIds ?? []);
+    const mentionedAgents = await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
     const message = await this.prisma.message.create({
       data: {
         sessionId,
@@ -150,27 +190,11 @@ export class HubSessionService {
         userMessageId: message.id,
         status: "queued",
       },
-      include: { mentions: true },
     });
 
     await this.upsertSessionAgent(sessionId, orchestrator.id, "orchestrator", "default_orchestrator");
     for (const agent of mentionedAgents) {
       await this.upsertSessionAgent(sessionId, agent.id, "member", "mention");
-      await this.prisma.runAgentMention.upsert({
-        where: {
-          runId_agentId: {
-            runId: run.id,
-            agentId: agent.id,
-          },
-        },
-        create: {
-          sessionId,
-          runId: run.id,
-          agentId: agent.id,
-          mentionLabel: agent.name,
-        },
-        update: { mentionLabel: agent.name },
-      });
     }
 
     const contextSnapshot = await this.context.buildSnapshot({
@@ -183,7 +207,6 @@ export class HubSessionService {
     const updatedRun = await this.prisma.agentRun.update({
       where: { id: run.id },
       data: { contextSnapshotId: contextSnapshot.id },
-      include: { mentions: true },
     });
     const updatedSession = await this.prisma.session.update({
       where: { id: sessionId },
@@ -247,9 +270,11 @@ export class HubSessionService {
     return { runId, status: "cancelled" };
   }
 
-  private async resolveMentions(text: string, explicitIds: string[]) {
+  private async resolveMentions(sessionId: string, text: string, explicitIds: string[]) {
     const agents = await this.agents.listAgents();
     const ids = new Set(explicitIds);
+
+    // Check text for @mentions
     const lowerText = text.toLowerCase();
     for (const agent of agents) {
       const labels = [`@${agent.name}`, `@${agent.id}`].map((label) => label.toLowerCase());
@@ -257,6 +282,20 @@ export class HubSessionService {
         ids.add(agent.id);
       }
     }
+
+    // Also include session participants (group members)
+    if (ids.size === 0) {
+      const participants = await this.prisma.sessionAgent.findMany({
+        where: { sessionId },
+      });
+      const participantAgents = agents.filter((agent) =>
+        participants.some((p) => p.agentId === agent.id && p.participantRole !== "orchestrator"),
+      );
+      return participantAgents.length > 0
+        ? participantAgents
+        : agents.filter((agent) => agent.template?.agentKind !== "orchestrator").slice(0, 2);
+    }
+
     const mentioned = agents.filter((agent) => ids.has(agent.id));
     if (mentioned.length > 0) return mentioned;
     return agents.filter((agent) => agent.template?.agentKind !== "orchestrator").slice(0, 2);

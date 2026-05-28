@@ -3,11 +3,24 @@ import type { HubEventDto, HubEventType } from "@agenthub/shared";
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubContextService } from "./context.service";
 import { HubRealtimeGateway } from "./hub-realtime.gateway";
-import { asObject, mapArtifact, mapEvent, mapFileChange } from "./hub.mappers";
+import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage } from "./hub.mappers";
 import { PrismaService } from "./prisma.service";
+
+// In-memory buffer for streaming messages (dual-track: real-time push + buffer for persistence)
+type MessageBuffer = {
+  messageId: string;
+  contentText: string;
+  speakerAgentId: string;
+  speakerName: string;
+  payload: Record<string, unknown>;
+  startedAt: Date;
+};
 
 @Injectable()
 export class HubEventService {
+  private readonly messageBuffers = new Map<string, Map<string, MessageBuffer>>();
+  // key: runId -> Map<speakerAgentId, MessageBuffer>
+
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
@@ -75,8 +88,17 @@ export class HubEventService {
 
   private async applySideEffects(event: HubEventDto) {
     const payload = event.payload;
+
+    if (event.eventType === "message.delta") {
+      const text = textFromPayload(payload);
+      if (text.trim()) {
+        const speakerId = event.speakerAgentId ?? "orchestrator";
+        this.upsertMessageBuffer(event, speakerId, text);
+      }
+    }
+
     if (event.eventType === "message.completed") {
-      await this.persistAssistantMessage(event);
+      await this.persistCompletedMessage(event);
     }
 
     if (event.eventType === "file.change") {
@@ -141,32 +163,75 @@ export class HubEventService {
     }
   }
 
-  private async persistAssistantMessage(event: HubEventDto) {
+  // ---- Message Buffer Management (dual-track) ----
+
+  private upsertMessageBuffer(event: HubEventDto, speakerId: string, delta: string) {
+    let runBuffers = this.messageBuffers.get(event.runId);
+    if (!runBuffers) {
+      runBuffers = new Map();
+      this.messageBuffers.set(event.runId, runBuffers);
+    }
+
+    let buffer = runBuffers.get(speakerId);
+    if (!buffer) {
+      buffer = {
+        messageId: "", // Will be set on first persist
+        contentText: "",
+        speakerAgentId: speakerId,
+        speakerName: event.speakerName ?? speakerId,
+        payload: {},
+        startedAt: new Date(),
+      };
+      runBuffers.set(speakerId, buffer);
+    }
+
+    buffer.contentText += delta;
+    buffer.payload = event.payload;
+  }
+
+  private async persistCompletedMessage(event: HubEventDto) {
     const text = textFromPayload(event.payload);
-    if (!text.trim()) return;
+    const speakerId = event.speakerAgentId ?? "orchestrator";
+
+    // Get buffered content or use event payload directly
+    const runBuffers = this.messageBuffers.get(event.runId);
+    const buffer = runBuffers?.get(speakerId);
+    const fullText = buffer?.contentText || text;
+
+    if (!fullText.trim()) return;
+
+    // Clean up buffer
+    if (buffer) {
+      runBuffers?.delete(speakerId);
+      if (runBuffers?.size === 0) this.messageBuffers.delete(event.runId);
+    }
+
     const message = await this.prisma.message.create({
       data: {
         sessionId: event.sessionId,
         runId: event.runId,
         role: "assistant",
-        agentId: event.speakerAgentId,
-        contentText: text,
-        contentJson: event.payload as any,
-        tokenCount: this.context.estimateTokens(text),
+        agentId: speakerId,
+        contentText: fullText,
+        contentJson: (event.payload ?? {}) as any,
+        tokenCount: this.context.estimateTokens(fullText),
+        status: "completed",
       },
     });
+
     await this.prisma.agentRun.update({
       where: { id: event.runId },
       data: { assistantMessageId: message.id },
     });
+
     await this.context.recordContextItem({
       sessionId: event.sessionId,
       sourceType: "message",
       sourceId: message.id,
       kind: "message",
-      text,
+      text: fullText,
       importance: 10,
-      metadata: { runId: event.runId, agentId: event.speakerAgentId },
+      metadata: { runId: event.runId, agentId: speakerId },
     });
   }
 

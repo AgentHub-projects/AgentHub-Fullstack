@@ -1,11 +1,16 @@
 import { Body, Controller, Get, Inject, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
-import type { CreateHubSessionRequest, PinHubMessageRequest, SendHubMessageRequest } from "@agenthub/shared";
+import type {
+  AddParticipantRequest,
+  CreateHubSessionRequest,
+  PinHubMessageRequest,
+  SendHubMessageRequest,
+} from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubSessionService } from "./hub-session.service";
 import { PrismaService } from "./prisma.service";
-import { mapArtifact, mapEvent, mapFileChange } from "./hub.mappers";
+import { mapAgent, mapArtifact, mapEvent, mapFileChange } from "./hub.mappers";
 
 @Controller("sessions")
 export class HubSessionController {
@@ -45,6 +50,14 @@ export class HubSessionController {
     return this.sessions.pinMessage(sessionId, messageId, body);
   }
 
+  @Post(":sessionId/participants")
+  addParticipant(
+    @Param("sessionId") sessionId: string,
+    @Body() body: AddParticipantRequest,
+  ) {
+    return this.sessions.addParticipant(sessionId, body);
+  }
+
   @Post(":sessionId/runs/:runId/cancel")
   cancelRun(@Param("sessionId") sessionId: string, @Param("runId") runId: string) {
     return this.sessions.cancelRun(sessionId, runId);
@@ -77,7 +90,6 @@ export class HubSessionController {
     });
     return { items: items.map(mapFileChange) };
   }
-
 }
 
 @Controller("agents")
@@ -92,6 +104,15 @@ export class HubAgentController {
   @Get("templates")
   listTemplates() {
     return this.agents.listTemplates().then((items) => ({ items }));
+  }
+
+  @Get(":id/detail")
+  async getAgentDetail(@Param("id") id: string) {
+    const agent = await this.agents.getAgent(id);
+    if (!agent) {
+      throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
+    }
+    return { agent, template: agent.template ?? null };
   }
 }
 
