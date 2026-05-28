@@ -1,19 +1,23 @@
 :root {
-  --bg: #eef1f4;
-  --rail: #171a20;
-  --rail-soft: #242a32;
+  --bg: #f6f7f8;
   --surface: #ffffff;
-  --surface-soft: #f7f8fa;
-  --ink: #20242c;
-  --muted: #68717d;
-  --line: #d8dee7;
-  --line-strong: #bdc7d3;
-  --blue: #365f91;
-  --green: #2c6d67;
-  --amber: #8a5b2c;
-  --red: #8a3f3f;
-  --violet: #7d476d;
-  --shadow: 0 16px 34px rgba(29, 34, 42, 0.08);
+  --surface-soft: #f9fafb;
+  --surface-strong: #f1f3f5;
+  --ink: #1f2328;
+  --muted: #6b7280;
+  --muted-soft: #8b949e;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --brand: #3867d6;
+  --brand-soft: #eef4ff;
+  --green: #2f7d5c;
+  --green-soft: #edf8f3;
+  --amber: #9a6a1f;
+  --amber-soft: #fff7e6;
+  --red: #b83b36;
+  --red-soft: #fff1f0;
+  --violet: #6d5bd0;
+  --shadow: 0 12px 28px rgba(31, 35, 40, 0.07);
 }
 
 * {
@@ -64,10 +68,10 @@ pre {
   max-width: 100%;
   margin: 0;
   overflow: auto;
-  border: 1px solid #d7dee8;
-  border-radius: 7px;
-  background: #f8fafc;
-  color: #243040;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+  color: #263242;
   padding: 10px;
   font-size: 12px;
   line-height: 1.55;
@@ -77,10 +81,15 @@ pre {
 
 .agenthubShell {
   display: grid;
-  grid-template-columns: 268px minmax(520px, 1fr) minmax(340px, 420px);
+  grid-template-columns: 264px minmax(520px, 1fr) minmax(360px, 420px);
   height: 100vh;
   min-width: 0;
   overflow: hidden;
+  background: var(--bg);
+}
+
+.agenthubShell.inspectorCollapsed {
+  grid-template-columns: 264px minmax(520px, 1fr) 56px;
 }
 
 .sessionRail,
@@ -96,9 +105,8 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background: var(--rail);
-  color: #edf2f7;
-  padding: 14px;
+  padding: 12px;
+  color: var(--ink);
 }
 
 .railHeader,
@@ -107,16 +115,23 @@ pre {
 .bubbleMeta,
 .artifactTop,
 .contextSummary,
-.contextSectionTitle {
+.contextSectionTitle,
+.runThreadTop {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
+.railHeader {
+  min-height: 42px;
+  padding: 2px 2px 6px;
+}
+
 .railHeader strong {
   display: block;
-  font-size: 18px;
+  font-size: 17px;
+  letter-spacing: 0;
 }
 
 .railHeader span,
@@ -126,20 +141,16 @@ pre {
 .composerBar span,
 .bubbleMeta,
 .artifactTop small,
-.contextSummary span {
+.contextSummary span,
+.runThreadTop,
+.runActivityEvent small,
+.runStatusPill small {
   color: var(--muted);
-}
-
-.sessionRail .railHeader span,
-.sessionRail .miniMetric,
-.sessionItem small {
-  color: #aeb8c5;
 }
 
 .iconButton,
 .ghostButton,
 .primaryButton,
-.mentionChip,
 .inspectorTabs button,
 .bubbleMeta button {
   display: inline-flex;
@@ -149,14 +160,26 @@ pre {
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .iconButton {
   width: 34px;
   height: 34px;
-  border-color: rgba(255, 255, 255, 0.14);
-  background: var(--rail-soft);
-  color: #edf2f7;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.iconButton:hover,
+.ghostButton:hover,
+.inspectorTabs button:hover,
+.bubbleMeta button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-strong);
+  color: var(--ink);
 }
 
 .statusStack {
@@ -171,12 +194,61 @@ pre {
   align-items: center;
   min-width: 0;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--rail-soft);
+  background: var(--surface);
   padding: 8px 10px;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 700;
+}
+
+.groupSummary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.groupSummary > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.groupSummary strong {
+  font-size: 13px;
+}
+
+.groupSummary span,
+.groupSummary p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.groupSummary p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.memberList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memberList span {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  padding: 3px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .socketPill span,
@@ -189,20 +261,21 @@ pre {
 }
 
 .socketPill.connected {
-  color: #7ad6b8;
+  color: var(--green);
 }
 
 .socketPill.connecting,
 .socketPill.disconnected,
 .socketPill.unavailable {
-  color: #e3b46f;
+  color: var(--amber);
 }
 
 .sessionList {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-height: 0;
   overflow: auto;
+  padding-right: 2px;
 }
 
 .sessionItem {
@@ -213,15 +286,19 @@ pre {
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: #edf2f7;
-  padding: 10px;
+  color: var(--ink);
+  padding: 9px 10px;
   text-align: left;
 }
 
 .sessionItem:hover,
 .sessionItem.active {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: var(--rail-soft);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.sessionItem.active {
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 .sessionItem span,
@@ -239,20 +316,20 @@ pre {
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--line);
-  background: #fcfcfb;
+  background: var(--surface);
 }
 
 .conversationHeader {
-  min-height: 68px;
+  min-height: 58px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
-  padding: 13px 18px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 10px 18px;
 }
 
 .conversationHeader strong {
   display: block;
   overflow-wrap: anywhere;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .conversationHeader span {
@@ -269,7 +346,6 @@ pre {
 }
 
 .conversationHeader .runBadge {
-  border-color: var(--line);
   background: var(--surface-soft);
   color: var(--muted);
 }
@@ -298,68 +374,67 @@ pre {
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   min-height: 0;
   overflow: auto;
   padding: 22px;
 }
 
+.timelineRow,
+.runThread,
+.agentReply {
+  max-width: min(900px, 96%);
+}
+
 .timelineRow {
   display: flex;
   gap: 10px;
-  max-width: min(860px, 95%);
 }
 
 .userRow {
   align-self: flex-end;
 }
 
-.agentRow {
+.agentReply,
+.runThread {
   align-self: flex-start;
 }
 
 .avatar {
   display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
   place-items: center;
   border-radius: 8px;
   color: #fff;
-  font-size: 12px;
-  font-weight: 850;
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.bubble {
+.bubble,
+.agentReplyBody {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+  padding: 11px 13px;
+}
+
+.bubble {
   box-shadow: var(--shadow);
-  padding: 12px 14px;
 }
 
 .userBubble {
-  border-color: rgba(54, 95, 145, 0.25);
-  background: #f7fbff;
-}
-
-.agentRow.artifact .bubble {
-  border-left: 4px solid var(--green);
-}
-
-.agentRow.success .bubble {
-  border-left: 4px solid var(--blue);
-}
-
-.agentRow.danger .bubble {
-  border-left: 4px solid var(--red);
+  border-color: #dbe5f7;
+  background: var(--brand-soft);
+  box-shadow: none;
 }
 
 .bubbleMeta {
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .bubbleMeta code {
@@ -375,6 +450,185 @@ pre {
   width: 26px;
   height: 26px;
   padding: 0;
+}
+
+.runThread {
+  display: grid;
+  width: min(900px, 96%);
+  gap: 10px;
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
+}
+
+.runThreadTop {
+  min-height: 28px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runThreadTop .runBadge {
+  padding: 5px 8px;
+}
+
+.agentReply {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+}
+
+.agentReplyBody {
+  flex: 1;
+  background: #fff;
+  box-shadow: none;
+}
+
+.runActivity {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.runActivity summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  cursor: pointer;
+  padding: 0 11px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runActivity summary small {
+  color: var(--muted-soft);
+  font-weight: 700;
+}
+
+.runActivityList {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.runActivityEvent {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.runActivityEvent + .runActivityEvent {
+  border-top: 1px solid var(--line);
+}
+
+.activityIcon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.runActivityEvent strong,
+.runActivityEvent small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runActivityEvent strong {
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.runActivityEvent small {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.runActivityEvent.success .activityIcon {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.runActivityEvent.danger .activityIcon {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.runActivityEvent.artifact .activityIcon {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.runStatusPill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+@keyframes status-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.statusShimmer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background-image: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    var(--muted) 35%,
+    var(--ink) 50%,
+    var(--muted) 65%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: status-shimmer 2.4s linear infinite;
+}
+
+.runFailure {
+  border: 1px solid #f0c4c0;
+  border-radius: 8px;
+  background: var(--red-soft);
+}
+
+.runFailure summary {
+  cursor: pointer;
+  padding: 9px 11px;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.runFailure pre {
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: #fffafa;
 }
 
 .richText {
@@ -397,19 +651,6 @@ pre {
   padding-left: 8px;
 }
 
-.inlineArtifact {
-  display: grid;
-  gap: 9px;
-}
-
-.inlineArtifact strong {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .emptyState,
 .panelEmpty {
   display: grid;
@@ -429,36 +670,87 @@ pre {
 
 .composer {
   border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
-  padding: 12px;
+  background: rgba(255, 255, 255, 0.97);
+  padding: 10px 12px 12px;
 }
 
-.mentionStrip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 9px;
+.composerInputWrap {
+  position: relative;
+  min-width: 0;
 }
 
-.mentionChip {
-  max-width: 170px;
-  min-height: 30px;
-  padding: 0 10px;
-  color: var(--muted);
+.mentionMenu {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  width: min(360px, calc(100% - 20px));
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 18px 42px rgba(31, 35, 40, 0.14);
+  padding: 6px;
+}
+
+.mentionMenu button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px;
+  text-align: left;
+}
+
+.mentionMenu button:hover,
+.mentionMenu button.active {
+  border-color: #c6d5f4;
+  background: var(--brand-soft);
+}
+
+.mentionMenu button > span:nth-child(2) {
+  min-width: 0;
+}
+
+.mentionMenu strong,
+.mentionMenu small {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mentionChip.selected {
-  border-color: rgba(44, 109, 103, 0.35);
-  background: #eef8f6;
-  color: var(--green);
+.mentionMenu strong {
+  font-size: 13px;
+}
+
+.mentionMenu small,
+.mentionMenu p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mentionMenu p {
+  margin: 0;
+  padding: 8px;
+}
+
+.mentionMenu .anticon {
+  color: var(--brand);
 }
 
 .composer textarea {
   width: 100%;
-  min-height: 86px;
+  min-height: 84px;
   max-height: 220px;
   resize: vertical;
   border: 1px solid var(--line-strong);
@@ -471,37 +763,48 @@ pre {
 }
 
 .composer textarea:focus {
-  border-color: rgba(54, 95, 145, 0.75);
-  box-shadow: 0 0 0 3px rgba(54, 95, 145, 0.1);
+  border-color: rgba(56, 103, 214, 0.75);
+  box-shadow: 0 0 0 3px rgba(56, 103, 214, 0.09);
 }
 
 .composerBar {
-  margin-top: 9px;
+  margin-top: 8px;
 }
 
 .primaryButton {
   gap: 8px;
-  min-height: 36px;
-  border-color: var(--blue);
-  background: var(--blue);
+  min-height: 34px;
+  border-color: var(--brand);
+  background: var(--brand);
   color: #fff;
-  padding: 0 15px;
+  padding: 0 14px;
   font-weight: 780;
+}
+
+.primaryButton:hover {
+  border-color: #2e58bb;
+  background: #2e58bb;
 }
 
 .inspector {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: #f6f7f9;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.inspector.collapsed {
+  overflow: hidden;
 }
 
 .inspectorTabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
   gap: 6px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
-  padding: 10px;
+  background: var(--surface);
+  padding: 9px;
 }
 
 .inspectorTabs button {
@@ -514,17 +817,148 @@ pre {
   font-weight: 800;
 }
 
-.inspectorTabs button span {
+.inspectorTabs button > span:not(.anticon) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.inspectorTabs button .anticon {
+  flex: 0 0 auto;
+}
+
 .inspectorTabs button.active {
-  border-color: rgba(54, 95, 145, 0.35);
-  background: #eef4fb;
-  color: var(--blue);
+  border-color: #c6d5f4;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.inspectorTabs .inspectorToggle {
+  width: 36px;
+  padding: 0;
+}
+
+.inspectorTabs .inspectorToggle > span:not(.anticon) {
+  display: none;
+}
+
+.inspector.collapsed .inspectorTabs {
+  grid-template-columns: 1fr;
+  align-content: start;
+  min-height: 100%;
+  border-bottom: 0;
+  padding: 8px;
+}
+
+.inspector.collapsed .inspectorTabs button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+}
+
+.inspector.collapsed .inspectorTabs button > span:not(.anticon) {
+  display: none;
+}
+
+.dialogLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(31, 35, 40, 0.28);
+  padding: 20px;
+}
+
+.groupDialog {
+  display: grid;
+  width: min(460px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 64px rgba(31, 35, 40, 0.18);
+}
+
+.groupDialog header,
+.groupDialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+}
+
+.groupDialog header {
+  border-bottom: 1px solid var(--line);
+}
+
+.groupDialog footer {
+  border-top: 1px solid var(--line);
+}
+
+.groupDialog strong {
+  display: block;
+}
+
+.groupDialog header span,
+.dialogHint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.agentChoiceList {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.agentChoice {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+}
+
+.agentChoice:hover,
+.agentChoice.selected {
+  border-color: #c6d5f4;
+  background: var(--brand-soft);
+}
+
+.agentChoice > span:nth-child(2) {
+  min-width: 0;
+}
+
+.agentChoice strong,
+.agentChoice small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentChoice small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agentChoice > .anticon {
+  color: var(--brand);
 }
 
 .panelScroll {
@@ -605,7 +1039,7 @@ pre {
   flex: 0 0 34px;
   place-items: center;
   border-radius: 8px;
-  background: #eef8f6;
+  background: var(--green-soft);
   color: var(--green);
 }
 
@@ -664,8 +1098,8 @@ pre {
 
 .contextSectionTitle span {
   border-radius: 999px;
-  background: #eef4fb;
-  color: var(--blue);
+  background: var(--brand-soft);
+  color: var(--brand);
   padding: 2px 8px;
   font-size: 12px;
   font-weight: 800;
@@ -709,20 +1143,39 @@ pre {
 }
 
 @media (max-width: 1180px) {
-  .agenthubShell {
-    grid-template-columns: 230px minmax(0, 1fr);
+  .agenthubShell,
+  .agenthubShell.inspectorCollapsed {
+    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
-  .inspector {
+  .inspector,
+  .inspector.collapsed {
     grid-column: 1 / -1;
-    min-height: 430px;
+    min-height: 390px;
     border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .inspector.collapsed {
+    min-height: auto;
+  }
+
+  .inspector.collapsed .inspectorTabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-height: auto;
+  }
+
+  .inspector.collapsed .inspectorTabs button {
+    width: auto;
   }
 }
 
 @media (max-width: 760px) {
-  .agenthubShell {
+  .agenthubShell,
+  .agenthubShell.inspectorCollapsed {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
     height: auto;
     min-height: 100vh;
     overflow: visible;
@@ -730,7 +1183,8 @@ pre {
 
   .sessionRail,
   .conversationPane,
-  .inspector {
+  .inspector,
+  .inspector.collapsed {
     min-height: 0;
     overflow: visible;
   }
@@ -749,8 +1203,15 @@ pre {
     padding: 14px;
   }
 
-  .timelineRow {
+  .timelineRow,
+  .runThread,
+  .agentReply {
     max-width: 100%;
+    width: 100%;
+  }
+
+  .userRow {
+    justify-content: flex-end;
   }
 
   .primaryButton {

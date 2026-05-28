@@ -1,19 +1,151 @@
-# AgentHub Fullstack
+# AgentHub — 多 Agent 协作平台
 
-AgentHub fullstack workspace.
+基于 IM 群聊范式的多 Agent 协作平台。用户像使用微信/飞书一样，通过新建群聊、@Agent 的方式与不同 AI Agent 交互，由下游 Orchestrator 自动协调分工，多个 Agent 像群聊成员一样依次回复。
 
-## Workspace
+## 架构
 
-- `shared`: P0 TypeScript contracts shared by frontend and backend.
-
-## Commands
-
-```powershell
-pnpm install
-pnpm build
-pnpm typecheck
-pnpm test
-pnpm lint
+```
+用户发消息 → REST POST /api/sessions/:id/messages
+  → 后端落库 → 构建上下文（增量摘要链 + 向量召回）
+  → 推送到下游 Orchestrator（WS 长连接）
+  → 下游回推 JSON 帧（带 speaker AgentId）
+  → 后端持久化 + WebSocket 实时推前端
 ```
 
-Root scripts dispatch to workspace packages with `--if-present`, so packages can add commands incrementally.
+- **后端**：NestJS + PostgreSQL + Prisma + Socket.IO + pgvector
+- **前端**：Next.js 15 + React 19 + Ant Design + Socket.IO Client
+- **包管理**：pnpm monorepo（`@agenthub/shared`、`@agenthub/backend`、`@agenthub/frontend`）
+
+## 项目结构
+
+```
+AgentHub-Fullstack/
+├── shared/          # 前后端共享 TypeScript 类型契约
+├── backend/         # NestJS 后端（上下文注入 + 消息路由层）
+│   ├── prisma/      # 数据库 Schema + 迁移
+│   └── src/hub/     # 核心服务
+│       ├── hub-session.service.ts          # 会话与消息管理
+│       ├── hub.controller.ts               # REST API 控制器
+│       ├── hub-realtime.gateway.ts         # WebSocket 实时推送
+│       ├── downstream-orchestrator.service.ts  # 下游 WS 连接管理
+│       ├── context.service.ts              # 上下文构建（摘要链 + 向量召回）
+│       ├── event.service.ts                # 事件持久化 + 副作用
+│       ├── agent-registry.service.ts       # Agent 注册中心
+│       ├── artifact-storage.service.ts     # 产物存储
+│       └── prisma.service.ts               # Prisma 客户端
+└── frontend/        # Next.js 前端
+    ├── app/
+    │   ├── page.tsx      # 主页面（群聊列表 + 对话 + Inspector）
+    │   ├── layout.tsx    # 根布局
+    │   └── globals.css   # 全局样式
+    └── lib/
+        └── agenthub-api.ts  # REST + WebSocket API 客户端
+```
+
+## 快速开始
+
+### 环境要求
+
+- Node.js >= 20
+- pnpm >= 9
+- PostgreSQL >= 15（需安装 pgvector 扩展）
+
+### 环境变量
+
+```bash
+# backend/.env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agenthub
+
+# 可选：真实下游 Orchestrator 地址（不配置则使用 mock 模式）
+DOWNSTREAM_ORCHESTRATOR_WS_URL=ws://localhost:4000
+
+# 可选：Embedding 模型配置（兼容 OpenAI 格式）
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+CONTEXT_EMBEDDING_MODEL=text-embedding-3-small
+
+# 可选：摘要模型配置
+SUMMARY_API_KEY=sk-xxx
+SUMMARY_BASE_URL=https://api.deepseek.com/v1
+CONTEXT_SUMMARY_MODEL=deepseek-chat
+```
+
+### 安装与启动
+
+```bash
+# 安装依赖
+pnpm install
+
+# 初始化数据库
+cd backend
+npx prisma migrate dev
+npx prisma generate
+cd ..
+
+# 启动后端（端口 3001）
+cd backend
+pnpm build
+node dist/src/main.js
+
+# 新终端：启动前端（端口 3000）
+cd frontend
+pnpm dev
+```
+
+打开 `http://localhost:3000`，新建群聊，选择 Agent，发送消息即可。
+
+## API 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/health` | 健康检查 |
+| GET | `/api/agents` | 列出所有 Agent |
+| GET | `/api/agents/templates` | 列出 Agent 模板 |
+| GET | `/api/agents/:id/detail` | Agent 详情（下游查询用，含 systemPrompt + provider） |
+| GET | `/api/artifacts/:id/content` | 获取产物内容 |
+| GET | `/api/sessions` | 列出会话 |
+| POST | `/api/sessions` | 创建会话 |
+| GET | `/api/sessions/:id` | 会话详情（含消息、事件、产物） |
+| POST | `/api/sessions/:id/messages` | 发送消息 |
+| POST | `/api/sessions/:id/messages/:mid/pin` | Pin/Unpin 消息 |
+| POST | `/api/sessions/:id/participants` | 添加 Agent 到群聊 |
+| POST | `/api/sessions/:id/runs/:rid/cancel` | 取消 Run |
+| GET | `/api/sessions/:id/events` | 列出事件 |
+| GET | `/api/sessions/:id/artifacts` | 列出产物 |
+| GET | `/api/sessions/:id/file-changes` | 列出文件变更 |
+
+## 核心概念
+
+### 增量摘要链
+
+长期对话历史通过增量压缩管理：短期事件 buffer 达到阈值（20 个事件或 2000 token）时，自动调 LLM 压缩为不可变的长期摘要片段存入 `long_term_summaries` 表。每次向 Orchestrator 推送时附上完整摘要链，保证下游始终拥有上下文。
+
+### 向量召回
+
+用户消息通过 embedding 模型生成向量，利用 pgvector 从 `context_embeddings` 表召回语义相关的历史消息和 pinned 内容，注入到上下文快照中。
+
+### Agent 管理
+
+- `provider` 字段标识底层实例类型：0 = claude-code, 1 = codex, 2 = opencode
+- 下游可调用 `GET /api/agents/:id/detail` 获取 Agent 的 systemPrompt 和 provider
+- 群聊参与者通过 `POST /api/sessions/:id/participants` 动态添加
+
+## 开发命令
+
+```bash
+# 构建 shared 契约
+pnpm --filter @agenthub/shared build
+
+# 构建后端
+pnpm --filter @agenthub/backend build
+
+# 类型检查
+cd backend && npx tsc -p tsconfig.json --noEmit
+cd frontend && npx tsc -p tsconfig.json --noEmit
+
+# 数据库迁移
+cd backend && npx prisma migrate dev
+
+# 运行测试
+pnpm test
+```
