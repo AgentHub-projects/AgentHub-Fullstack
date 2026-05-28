@@ -36,6 +36,7 @@ import {
   PushpinFilled,
   PushpinOutlined,
   SendOutlined,
+  SearchOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
 import {
@@ -146,6 +147,7 @@ export default function WorkbenchPage() {
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: string; provider: number; name: string }>>([]);
+  const [inviteQuery, setInviteQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgentInstanceDto | null>(null);
   const [groupMembersExpanded, setGroupMembersExpanded] = useState(false);
@@ -162,6 +164,10 @@ export default function WorkbenchPage() {
   const mentionCandidates = useMemo(
     () => filterMentionCandidates(composerAgents, mentionMatch?.query ?? ""),
     [composerAgents, mentionMatch?.query],
+  );
+  const filteredInviteTemplates = useMemo(
+    () => filterInviteTemplates(templates, inviteQuery),
+    [templates, inviteQuery],
   );
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
@@ -375,6 +381,7 @@ export default function WorkbenchPage() {
       }
     }
     setInviteDialogOpen(false);
+    setInviteQuery("");
     setNotice(errorCount > 0 ? `${selected.length - errorCount} 个 Agent 已加入，${errorCount} 个失败` : `${selected.length} 个 Agent 已加入`);
   }
 
@@ -452,7 +459,8 @@ export default function WorkbenchPage() {
                   className="addMemberRow"
                   type="button"
                   onClick={() => {
-                    setInviteSelection(templates.map((tpl) => ({ templateId: tpl.id, provider: 0, name: tpl.name })));
+                    setInviteSelection([]);
+                    setInviteQuery("");
                     setInviteDialogOpen(true);
                   }}
                 >
@@ -861,7 +869,7 @@ export default function WorkbenchPage() {
       {inviteDialogOpen && (
         <div className="dialogLayer" role="presentation" onMouseDown={() => setInviteDialogOpen(false)}>
           <section
-            className="agentDialog"
+            className="agentDialog inviteAgentDialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="invite-agent-title"
@@ -873,9 +881,21 @@ export default function WorkbenchPage() {
                 <span>选择模板并设置名称和 Provider</span>
               </div>
             </header>
+            <div className="inviteSearchBar">
+              <SearchOutlined />
+              <input
+                aria-label="搜索 Agent 模板"
+                value={inviteQuery}
+                onChange={(e) => setInviteQuery(e.target.value)}
+                placeholder="搜索模板名称、描述或 ID"
+              />
+            </div>
             <div className="agentChoiceList">
               {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板</p>}
-              {templates.map((tpl) => {
+              {templates.length > 0 && filteredInviteTemplates.length === 0 && (
+                <p className="dialogHint">没有匹配的 Agent 模板</p>
+              )}
+              {filteredInviteTemplates.map((tpl) => {
                 const idx = inviteSelection.findIndex((item) => item.templateId === tpl.id);
                 const selected = idx >= 0;
                 return (
@@ -1969,6 +1989,26 @@ function filterMentionCandidates(agents: AgentInstanceDto[], query: string) {
       agent.name.toLowerCase().startsWith(normalized) ||
       agent.id.toLowerCase().startsWith(normalized),
   );
+}
+
+function filterInviteTemplates(templates: AgentTemplateDto[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return templates;
+  const tokens = normalized.split(/\s+/);
+  return templates.filter((tpl) => {
+    const target = `${tpl.name} ${tpl.description} ${tpl.id}`.toLowerCase();
+    return tokens.every((token) => fuzzyIncludes(target, token));
+  });
+}
+
+function fuzzyIncludes(target: string, query: string) {
+  if (target.includes(query)) return true;
+  let queryIndex = 0;
+  for (const char of target) {
+    if (char === query[queryIndex]) queryIndex++;
+    if (queryIndex === query.length) return true;
+  }
+  return false;
 }
 
 function parseMentionedAgentIds(text: string, agents: AgentInstanceDto[]) {
