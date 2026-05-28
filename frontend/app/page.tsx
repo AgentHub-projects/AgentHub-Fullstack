@@ -61,6 +61,22 @@ import {
 } from "../lib/agenthub-api";
 
 type InspectorTab = "diff" | "artifacts" | "context";
+type DiffLineKind = "context" | "add" | "remove" | "meta";
+
+interface DiffLine {
+  kind: DiffLineKind;
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+}
+
+interface FileTreeRow {
+  key: string;
+  depth: number;
+  label: string;
+  kind: "folder" | "file";
+  change?: HubFileChangeDto;
+}
 
 type ConversationItem =
   | { kind: "message"; id: string; ts: string; message: HubMessageDto }
@@ -950,14 +966,14 @@ export default function WorkbenchPage() {
                 <strong id="delete-agent-title">确认移除</strong>
               </div>
             </header>
-            <p style={{ padding: "16px 0" }}>
+            <p className="deleteConfirmText">
               确定要从群聊中移除 <strong>{deleteTarget.name}</strong> 吗？此操作不可撤销。
             </p>
             <footer>
               <button className="ghostButton" type="button" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
                 取消
               </button>
-              <button className="primaryButton" type="button" style={{ background: "var(--red)", borderColor: "var(--red)" }} onClick={() => void handleDeleteAgent()}>
+              <button className="dangerButton" type="button" onClick={() => void handleDeleteAgent()}>
                 确认移除
               </button>
             </footer>
@@ -1396,25 +1412,68 @@ function formatElapsed(seconds: number) {
 }
 
 function DiffPanel({ changes }: { changes: HubFileChangeDto[] }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (changes.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !changes.some((change) => change.id === selectedId)) {
+      setSelectedId(changes[0].id);
+    }
+  }, [changes, selectedId]);
+
   if (changes.length === 0) return <PanelEmpty icon={<BranchesOutlined />} text="暂无文件变更" />;
+  const activeChange = changes.find((change) => change.id === selectedId) ?? changes[0];
+  const rows = buildFileTreeRows(changes);
+  const additions = countChangeLines(activeChange, "add");
+  const deletions = countChangeLines(activeChange, "remove");
+
   return (
-    <div className="panelScroll">
-      {changes.map((change) => (
-        <details className="diffBlock" key={change.id} open>
-          <summary>
-            <span>{change.path}</span>
-            <code>{change.changeType}</code>
-          </summary>
-          {change.patch ? (
-            <pre className="patch">{change.patch}</pre>
-          ) : (
-            <div className="splitDiff">
-              <pre>{change.beforeContent ?? ""}</pre>
-              <pre>{change.afterContent ?? ""}</pre>
-            </div>
+    <div className="panelScroll diffPanelLayout">
+      <section className="diffFileTree" aria-label="文件变更树">
+        <div className="diffPanelHeader">
+          <strong>Files</strong>
+          <span>{changes.length}</span>
+        </div>
+        <div className="diffTreeRows">
+          {rows.map((row) =>
+            row.kind === "folder" ? (
+              <div className="diffTreeFolder" key={row.key} style={{ paddingLeft: 10 + row.depth * 14 }}>
+                {row.label}
+              </div>
+            ) : (
+              <button
+                className={`diffTreeFile ${row.change?.id === activeChange.id ? "active" : ""}`}
+                key={row.key}
+                type="button"
+                onClick={() => row.change && setSelectedId(row.change.id)}
+                style={{ paddingLeft: 10 + row.depth * 14 }}
+              >
+                <span>{row.label}</span>
+                <code>{row.change?.changeType}</code>
+              </button>
+            ),
           )}
-        </details>
-      ))}
+        </div>
+      </section>
+
+      <section className="diffViewerCard">
+        <div className="diffViewerTop">
+          <div>
+            <strong>{activeChange.path}</strong>
+            {activeChange.oldPath && <small>{activeChange.oldPath}</small>}
+          </div>
+          <span className={`changeType ${activeChange.changeType}`}>{activeChange.changeType}</span>
+        </div>
+        <div className="diffStats">
+          <span className="add">+{additions}</span>
+          <span className="remove">-{deletions}</span>
+          {activeChange.afterTruncated || activeChange.beforeTruncated ? <span>内容已截断</span> : null}
+        </div>
+        <UnifiedDiffView change={activeChange} />
+      </section>
     </div>
   );
 }
@@ -1429,13 +1488,13 @@ function ArtifactPanel({ artifacts }: { artifacts: HubArtifactDto[] }) {
             <span>{artifactIcon(artifact.kind)}</span>
             <div>
               <strong>{artifact.title}</strong>
-              <small>{artifact.kind} · v{artifact.version} · {artifact.final ? "final" : "draft"}</small>
+              <small>{artifact.kind} · {artifact.mimeType} · v{artifact.version} · {artifact.final ? "final" : "draft"}</small>
             </div>
             <a title="打开内容" href={artifactContentUrl(artifact.id)} target="_blank" rel="noreferrer">
               <LinkOutlined />
             </a>
           </div>
-          {artifact.textContent ? <RichText text={artifact.textContent} /> : <code>{artifact.storageUri ?? "inline"}</code>}
+          <ArtifactPreview artifact={artifact} />
         </article>
       ))}
     </div>
@@ -1505,7 +1564,7 @@ function InlineDiff({ event }: { event: HubEventDto }) {
   return (
     <div className="inlineArtifact">
       <strong><CodeOutlined /> {path}</strong>
-      {patch ? <pre className="patch">{patch}</pre> : <pre>{JSON.stringify(event.payload, null, 2)}</pre>}
+      {patch ? <UnifiedDiffLines lines={parseUnifiedPatch(patch)} /> : <pre>{JSON.stringify(event.payload, null, 2)}</pre>}
     </div>
   );
 }
@@ -1521,23 +1580,358 @@ function InlineArtifact({ event }: { event: HubEventDto }) {
   );
 }
 
+function ArtifactPreview({ artifact }: { artifact: HubArtifactDto }) {
+  const contentUrl = artifactContentUrl(artifact.id);
+  if (artifact.kind === "image") {
+    return (
+      <div className="mediaPreview">
+        <img alt={artifact.title} src={contentUrl} />
+      </div>
+    );
+  }
+
+  if (artifact.kind === "pdf") {
+    return <iframe className="documentFrame" title={artifact.title} src={contentUrl} />;
+  }
+
+  if (artifact.kind === "html" && artifact.textContent) {
+    return <iframe className="documentFrame" title={artifact.title} srcDoc={artifact.textContent} sandbox="" />;
+  }
+
+  if (artifact.kind === "docx") {
+    return (
+      <div className="documentFallback">
+        <FileDoneOutlined />
+        <div>
+          <strong>DOCX 原始文件</strong>
+          <span>后端当前提供只读下载入口；接入 HTML render 后可在此处内联预览。</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (artifact.textContent) {
+    return artifact.kind === "log" ? <pre>{artifact.textContent}</pre> : <RichText text={artifact.textContent} />;
+  }
+
+  return <code>{artifact.storageUri ?? "inline artifact"}</code>;
+}
+
 function RichText({ text }: { text: string }) {
   if (!text) return null;
-  const blocks = text.split(/(```[\s\S]*?```)/g).filter(Boolean);
+  const blocks = parseMarkdownBlocks(text);
   return (
     <div className="richText">
-      {blocks.map((block, index) => {
-        if (block.startsWith("```")) {
-          return <pre key={index}>{block.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/```$/, "")}</pre>;
-        }
-        return block.split(/\n+/).map((line, lineIndex) => {
-          if (line.startsWith("# ")) return <h3 key={`${index}-${lineIndex}`}>{line.slice(2)}</h3>;
-          if (line.startsWith("- ")) return <p className="listLine" key={`${index}-${lineIndex}`}>{line}</p>;
-          return <p key={`${index}-${lineIndex}`}>{line}</p>;
-        });
-      })}
+      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
     </div>
   );
+}
+
+function UnifiedDiffView({ change }: { change: HubFileChangeDto }) {
+  return <UnifiedDiffLines lines={buildDiffLines(change)} />;
+}
+
+function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
+  return (
+    <div className="unifiedDiff" role="table">
+      {lines.map((line, index) => (
+        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
+          <span className="lineNo">{line.oldLine ?? ""}</span>
+          <span className="lineNo">{line.newLine ?? ""}</span>
+          <span className="lineMarker">{diffMarker(line.kind)}</span>
+          <code>{line.text || " "}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type MarkdownBlock =
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "code"; language: string; text: string }
+  | { kind: "ul"; items: string[] }
+  | { kind: "ol"; items: string[] }
+  | { kind: "quote"; text: string }
+  | { kind: "table"; headers: string[]; rows: string[][] };
+
+function parseMarkdownBlocks(text: string): MarkdownBlock[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index++;
+      continue;
+    }
+
+    const fence = line.match(/^```([a-zA-Z0-9_-]*)\s*$/);
+    if (fence) {
+      const code: string[] = [];
+      index++;
+      while (index < lines.length && !lines[index].startsWith("```")) {
+        code.push(lines[index]);
+        index++;
+      }
+      if (index < lines.length) index++;
+      blocks.push({ kind: "code", language: fence[1] ?? "", text: code.join("\n") });
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ kind: "heading", level: heading[1].length, text: heading[2] });
+      index++;
+      continue;
+    }
+
+    if (line.startsWith(">")) {
+      const quote: string[] = [];
+      while (index < lines.length && lines[index].startsWith(">")) {
+        quote.push(lines[index].replace(/^>\s?/, ""));
+        index++;
+      }
+      blocks.push({ kind: "quote", text: quote.join("\n") });
+      continue;
+    }
+
+    if (isTableStart(lines, index)) {
+      const headers = splitTableRow(lines[index]);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && /^\s*\|/.test(lines[index])) {
+        rows.push(splitTableRow(lines[index]));
+        index++;
+      }
+      blocks.push({ kind: "table", headers, rows });
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index++;
+      }
+      blocks.push({ kind: "ul", items });
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
+        index++;
+      }
+      blocks.push({ kind: "ol", items });
+      continue;
+    }
+
+    const paragraph: string[] = [];
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !lines[index].startsWith("```") &&
+      !/^(#{1,4})\s+/.test(lines[index]) &&
+      !/^\s*[-*]\s+/.test(lines[index]) &&
+      !/^\s*\d+\.\s+/.test(lines[index]) &&
+      !lines[index].startsWith(">") &&
+      !isTableStart(lines, index)
+    ) {
+      paragraph.push(lines[index]);
+      index++;
+    }
+    blocks.push({ kind: "paragraph", text: paragraph.join(" ") });
+  }
+
+  return blocks;
+}
+
+function renderMarkdownBlock(block: MarkdownBlock, index: number): React.ReactNode {
+  if (block.kind === "heading") {
+    const Tag = block.level <= 1 ? "h2" : "h3";
+    return <Tag key={index}>{block.text}</Tag>;
+  }
+  if (block.kind === "code") {
+    return (
+      <div className="codeBlock" key={index}>
+        {block.language && <span>{block.language}</span>}
+        <pre>{block.text}</pre>
+      </div>
+    );
+  }
+  if (block.kind === "ul") {
+    return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>;
+  }
+  if (block.kind === "ol") {
+    return <ol key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ol>;
+  }
+  if (block.kind === "quote") {
+    return <blockquote key={index}>{block.text}</blockquote>;
+  }
+  if (block.kind === "table") {
+    return (
+      <div className="markdownTableWrap" key={index}>
+        <table>
+          <thead>
+            <tr>{block.headers.map((header, cellIndex) => <th key={cellIndex}>{header}</th>)}</tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {block.headers.map((_, cellIndex) => <td key={cellIndex}>{row[cellIndex] ?? ""}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return <p key={index}>{block.text}</p>;
+}
+
+function isTableStart(lines: string[], index: number) {
+  return Boolean(
+    lines[index]?.includes("|") &&
+      lines[index + 1] &&
+      /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1]),
+  );
+}
+
+function splitTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function buildFileTreeRows(changes: HubFileChangeDto[]): FileTreeRow[] {
+  const rows: FileTreeRow[] = [];
+  const seenFolders = new Set<string>();
+  const sorted = [...changes].sort((a, b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
+
+  for (const change of sorted) {
+    const parts = normalizePath(change.path).split("/").filter(Boolean);
+    for (let depth = 0; depth < parts.length - 1; depth++) {
+      const key = parts.slice(0, depth + 1).join("/");
+      if (!seenFolders.has(key)) {
+        seenFolders.add(key);
+        rows.push({ key, depth, label: parts[depth], kind: "folder" });
+      }
+    }
+    rows.push({
+      key: change.id,
+      depth: Math.max(0, parts.length - 1),
+      label: parts.at(-1) ?? change.path,
+      kind: "file",
+      change,
+    });
+  }
+
+  return rows;
+}
+
+function buildDiffLines(change: HubFileChangeDto): DiffLine[] {
+  if (change.patch?.trim()) return parseUnifiedPatch(change.patch);
+  return diffText(change.beforeContent ?? "", change.afterContent ?? "");
+}
+
+function parseUnifiedPatch(patch: string): DiffLine[] {
+  const result: DiffLine[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (const raw of patch.replace(/\r\n/g, "\n").split("\n")) {
+    const hunk = raw.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      result.push({ kind: "meta", text: raw });
+      continue;
+    }
+    if (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("diff --git") || raw.startsWith("index ")) {
+      result.push({ kind: "meta", text: raw });
+      continue;
+    }
+    if (raw.startsWith("+")) {
+      result.push({ kind: "add", newLine: newLine++, text: raw.slice(1) });
+      continue;
+    }
+    if (raw.startsWith("-")) {
+      result.push({ kind: "remove", oldLine: oldLine++, text: raw.slice(1) });
+      continue;
+    }
+    if (raw.startsWith("\\")) {
+      result.push({ kind: "meta", text: raw });
+      continue;
+    }
+    result.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text: raw.startsWith(" ") ? raw.slice(1) : raw });
+  }
+
+  return result;
+}
+
+function diffText(before: string, after: string): DiffLine[] {
+  const beforeLines = splitLinesForDiff(before);
+  const afterLines = splitLinesForDiff(after);
+  if (beforeLines.length === 0 && afterLines.length === 0) return [{ kind: "context", text: "" }];
+  if (beforeLines.length * afterLines.length > 20000) {
+    return [
+      ...beforeLines.map((text, index) => ({ kind: "remove" as const, oldLine: index + 1, text })),
+      ...afterLines.map((text, index) => ({ kind: "add" as const, newLine: index + 1, text })),
+    ];
+  }
+
+  const matrix = Array.from({ length: beforeLines.length + 1 }, () => Array(afterLines.length + 1).fill(0) as number[]);
+  for (let i = beforeLines.length - 1; i >= 0; i--) {
+    for (let j = afterLines.length - 1; j >= 0; j--) {
+      matrix[i][j] = beforeLines[i] === afterLines[j] ? matrix[i + 1][j + 1] + 1 : Math.max(matrix[i + 1][j], matrix[i][j + 1]);
+    }
+  }
+
+  const lines: DiffLine[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < beforeLines.length || newIndex < afterLines.length) {
+    if (oldIndex < beforeLines.length && newIndex < afterLines.length && beforeLines[oldIndex] === afterLines[newIndex]) {
+      lines.push({ kind: "context", oldLine: oldIndex + 1, newLine: newIndex + 1, text: beforeLines[oldIndex] });
+      oldIndex++;
+      newIndex++;
+    } else if (newIndex < afterLines.length && (oldIndex === beforeLines.length || matrix[oldIndex][newIndex + 1] >= matrix[oldIndex + 1][newIndex])) {
+      lines.push({ kind: "add", newLine: newIndex + 1, text: afterLines[newIndex] });
+      newIndex++;
+    } else if (oldIndex < beforeLines.length) {
+      lines.push({ kind: "remove", oldLine: oldIndex + 1, text: beforeLines[oldIndex] });
+      oldIndex++;
+    }
+  }
+  return lines;
+}
+
+function splitLinesForDiff(text: string) {
+  if (!text) return [];
+  return text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+}
+
+function countChangeLines(change: HubFileChangeDto, kind: "add" | "remove") {
+  const value = change.stats[kind === "add" ? "additions" : "deletions"];
+  if (typeof value === "number") return value;
+  return buildDiffLines(change).filter((line) => line.kind === kind).length;
+}
+
+function diffMarker(kind: DiffLineKind) {
+  if (kind === "add") return "+";
+  if (kind === "remove") return "-";
+  if (kind === "meta") return "";
+  return " ";
+}
+
+function normalizePath(path: string) {
+  return path.replace(/\\/g, "/");
 }
 
 function StatusPill({ state }: { state: SocketState }) {
