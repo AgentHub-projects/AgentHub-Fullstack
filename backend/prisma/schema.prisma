@@ -46,13 +46,15 @@ enum AgentStatusDb {
   @@map("agent_status")
 }
 
-enum ConnectionStatusDb {
-  connecting
-  connected
-  closed
+enum MessageStatusDb {
+  queued
+  thinking
+  streaming
+  completed
   failed
+  cancelled
 
-  @@map("connection_status")
+  @@map("message_status")
 }
 
 enum ArtifactKindDb {
@@ -116,30 +118,20 @@ model AgentTemplate {
 }
 
 model Agent {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  templateId            String                 @map("template_id") @db.Uuid
-  name                  String                 @unique
-  description           String                 @default("")
-  endpointUrl           String?                @map("endpoint_url")
-  protocolProfile       String                 @default("north-socketio-jsonrpc") @map("protocol_profile")
-  isDefaultOrchestrator Boolean                @default(false) @map("is_default_orchestrator")
-  authType              String                 @default("none") @map("auth_type")
-  authSecretRef         String?                @map("auth_secret_ref")
-  capabilitiesOverride  Json                   @default("{}") @map("capabilities_override")
-  runtimeConfig         Json                   @default("{}") @map("runtime_config")
-  sandbox               Json                   @default("{}")
-  status                AgentStatusDb          @default(offline)
-  lastSeenAt            DateTime?              @map("last_seen_at") @db.Timestamptz(6)
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  template              AgentTemplate          @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  id                    String        @id @default(uuid()) @db.Uuid
+  templateId            String        @map("template_id") @db.Uuid
+  name                  String        @unique
+  description           String        @default("")
+  provider              Int           @default(0) // 0=claude-code, 1=codex, 2=opencode
+  isDefaultOrchestrator Boolean       @default(false) @map("is_default_orchestrator")
+  status                AgentStatusDb @default(offline)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  template              AgentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
   sessionAgents         SessionAgent[]
   messages              Message[]
   runs                  AgentRun[]
-  mentions              RunAgentMention[]
   events                AgentEvent[]
-  downstreamConnections DownstreamConnection[]
-  downstreamSessions    DownstreamSession[]
 
   @@index([templateId], map: "idx_agents_template")
   @@index([isDefaultOrchestrator], map: "idx_agents_default_orchestrator")
@@ -147,25 +139,23 @@ model Agent {
 }
 
 model Session {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  title                 String                 @default("Untitled Session")
-  status                SessionStatusDb        @default(active)
-  metadata              Json                   @default("{}")
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  participants          SessionAgent[]
-  messages              Message[]
-  runs                  AgentRun[]
-  contextSnapshots      ContextSnapshot[]
-  downstreamConnections DownstreamConnection[]
-  downstreamSessions    DownstreamSession[]
-  events                AgentEvent[]
-  artifacts             Artifact[]
-  fileChanges           FileChange[]
-  sessionContext        SessionContext?
-  contextItems          ContextItem[]
-  contextEmbeddings     ContextEmbedding[]
-  contextUpdateJobs     ContextUpdateJob[]
+  id               String             @id @default(uuid()) @db.Uuid
+  title            String             @default("Untitled Session")
+  status           SessionStatusDb    @default(active)
+  metadata         Json               @default("{}")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  participants     SessionAgent[]
+  messages         Message[]
+  runs             AgentRun[]
+  contextSnapshots ContextSnapshot[]
+  events           AgentEvent[]
+  artifacts        Artifact[]
+  fileChanges      FileChange[]
+  contextItems     ContextItem[]
+  contextEmbeddings ContextEmbedding[]
+  contextUpdateJobs ContextUpdateJob[]
+  longTermSummaries LongTermSummary[]
 
   @@index([updatedAt(sort: Desc)], map: "idx_sessions_updated_at")
   @@map("sessions")
@@ -187,23 +177,25 @@ model SessionAgent {
 }
 
 model Message {
-  id              String        @id @default(uuid()) @db.Uuid
-  sessionId       String        @map("session_id") @db.Uuid
-  runId           String?       @map("run_id") @db.Uuid
+  id              String          @id @default(uuid()) @db.Uuid
+  sessionId       String          @map("session_id") @db.Uuid
+  runId           String?         @map("run_id") @db.Uuid
   role            MessageRoleDb
-  agentId         String?       @map("agent_id") @db.Uuid
-  parentMessageId String?       @map("parent_message_id") @db.Uuid
-  contentText     String        @default("") @map("content_text")
-  contentJson     Json          @default("{}") @map("content_json")
-  tokenCount      Int           @default(0) @map("token_count")
-  isPinned        Boolean       @default(false) @map("is_pinned")
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session         Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  agent           Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId         String?         @map("agent_id") @db.Uuid
+  parentMessageId String?         @map("parent_message_id") @db.Uuid
+  contentText     String          @default("") @map("content_text")
+  contentJson     Json            @default("{}") @map("content_json")
+  tokenCount      Int             @default(0) @map("token_count")
+  status          MessageStatusDb @default(completed)
+  isPinned        Boolean         @default(false) @map("is_pinned")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session         Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agent           Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
   @@index([sessionId, createdAt], map: "idx_messages_session_created")
   @@index([sessionId, isPinned], map: "idx_messages_pinned")
+  @@index([sessionId, status], map: "idx_messages_status")
   @@map("messages")
 }
 
@@ -224,25 +216,24 @@ model ContextSnapshot {
 }
 
 model AgentRun {
-  id                  String            @id @default(uuid()) @db.Uuid
-  sessionId           String            @map("session_id") @db.Uuid
-  orchestratorAgentId String            @map("orchestrator_agent_id") @db.Uuid
-  userMessageId       String?           @map("user_message_id") @db.Uuid
-  assistantMessageId  String?           @map("assistant_message_id") @db.Uuid
-  contextSnapshotId   String?           @map("context_snapshot_id") @db.Uuid
-  status              RunStatusDb       @default(queued)
-  downstreamSessionId String?           @map("downstream_session_id")
-  downstreamRunId     String?           @map("downstream_run_id")
-  errorCode           String?           @map("error_code")
-  errorMessage        String?           @map("error_message")
-  usageJson           Json              @default("{}") @map("usage_json")
-  startedAt           DateTime?         @map("started_at") @db.Timestamptz(6)
-  completedAt         DateTime?         @map("completed_at") @db.Timestamptz(6)
-  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session             Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  orchestratorAgent   Agent             @relation(fields: [orchestratorAgentId], references: [id], onDelete: Restrict)
-  mentions            RunAgentMention[]
+  id                  String      @id @default(uuid()) @db.Uuid
+  sessionId           String      @map("session_id") @db.Uuid
+  orchestratorAgentId String      @map("orchestrator_agent_id") @db.Uuid
+  userMessageId       String?     @map("user_message_id") @db.Uuid
+  assistantMessageId  String?     @map("assistant_message_id") @db.Uuid
+  contextSnapshotId   String?     @map("context_snapshot_id") @db.Uuid
+  status              RunStatusDb @default(queued)
+  downstreamSessionId String?     @map("downstream_session_id")
+  downstreamRunId     String?     @map("downstream_run_id")
+  errorCode           String?     @map("error_code")
+  errorMessage        String?     @map("error_message")
+  usageJson           Json        @default("{}") @map("usage_json")
+  startedAt           DateTime?   @map("started_at") @db.Timestamptz(6)
+  completedAt         DateTime?   @map("completed_at") @db.Timestamptz(6)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session             Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orchestratorAgent   Agent       @relation(fields: [orchestratorAgentId], references: [id], onDelete: Restrict)
   events              AgentEvent[]
   artifacts           Artifact[]
   fileChanges         FileChange[]
@@ -250,61 +241,6 @@ model AgentRun {
   @@index([sessionId, createdAt(sort: Desc)], map: "idx_agent_runs_session_created")
   @@index([status], map: "idx_agent_runs_status")
   @@map("agent_runs")
-}
-
-model RunAgentMention {
-  id           String   @id @default(uuid()) @db.Uuid
-  sessionId    String   @map("session_id") @db.Uuid
-  runId        String   @map("run_id") @db.Uuid
-  agentId      String?  @map("agent_id") @db.Uuid
-  mentionLabel String   @map("mention_label")
-  source       String   @default("user_mention")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  agent        Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
-
-  @@unique([runId, agentId])
-  @@index([runId], map: "idx_run_agent_mentions_run")
-  @@map("run_agent_mentions")
-}
-
-model DownstreamConnection {
-  id                  String             @id @default(uuid()) @db.Uuid
-  sessionId           String             @map("session_id") @db.Uuid
-  agentId             String             @map("agent_id") @db.Uuid
-  downstreamSessionId String?            @map("downstream_session_id")
-  endpointUrl         String             @map("endpoint_url")
-  status              ConnectionStatusDb @default(connecting)
-  connectedAt         DateTime?          @map("connected_at") @db.Timestamptz(6)
-  closedAt            DateTime?          @map("closed_at") @db.Timestamptz(6)
-  closeCode           Int?               @map("close_code")
-  closeReason         String?            @map("close_reason")
-  lastAckSeq          BigInt             @default(0) @map("last_ack_seq")
-  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  session             Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  agent               Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, agentId])
-  @@map("downstream_connections")
-}
-
-model DownstreamSession {
-  id                  String    @id @default(uuid()) @db.Uuid
-  sessionId           String    @map("session_id") @db.Uuid
-  agentId             String    @map("agent_id") @db.Uuid
-  downstreamSessionId String    @map("downstream_session_id")
-  cwd                 String    @default("/workspace")
-  protocolProfile     String    @default("north-socketio-jsonrpc") @map("protocol_profile")
-  metadata            Json      @default("{}")
-  loadedAt            DateTime? @map("loaded_at") @db.Timestamptz(6)
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session             Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  agent               Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, agentId])
-  @@index([sessionId, agentId], map: "idx_downstream_sessions_session_agent")
-  @@map("downstream_sessions")
 }
 
 model AgentEvent {
@@ -331,64 +267,31 @@ model AgentEvent {
 }
 
 model Artifact {
-  id               String         @id @default(uuid()) @db.Uuid
-  sessionId        String         @map("session_id") @db.Uuid
-  runId            String?        @map("run_id") @db.Uuid
-  producingEventId String?        @map("producing_event_id") @db.Uuid
-  artifactKey      String?        @map("artifact_key")
+  id               String        @id @default(uuid()) @db.Uuid
+  sessionId        String        @map("session_id") @db.Uuid
+  runId            String?       @map("run_id") @db.Uuid
+  producingEventId String?       @map("producing_event_id") @db.Uuid
+  artifactKey      String?       @map("artifact_key")
   kind             ArtifactKindDb
   title            String
-  mimeType         String         @default("application/octet-stream") @map("mime_type")
-  storageKind      StorageKindDb  @default(inline_text) @map("storage_kind")
-  storageUri       String?        @map("storage_uri")
-  textContent      String?        @map("text_content")
+  mimeType         String        @default("application/octet-stream") @map("mime_type")
+  storageKind      StorageKindDb @default(inline_text) @map("storage_kind")
+  storageUri       String?       @map("storage_uri")
+  textContent      String?       @map("text_content")
   sha256           String?
-  sizeBytes        BigInt?        @map("size_bytes")
-  version          Int            @default(1)
-  final            Boolean        @default(false)
-  metadata         Json           @default("{}")
-  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session          Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  run              AgentRun?      @relation(fields: [runId], references: [id], onDelete: SetNull)
-  chunks           ArtifactChunk[]
-  renders          ArtifactRender[]
+  sizeBytes        BigInt?       @map("size_bytes")
+  version          Int           @default(1)
+  final            Boolean       @default(false)
+  metadata         Json          @default("{}")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session          Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  run              AgentRun?     @relation(fields: [runId], references: [id], onDelete: SetNull)
   fileChanges      FileChange[]
 
   @@unique([runId, artifactKey])
   @@index([sessionId, updatedAt(sort: Desc)], map: "idx_artifacts_session_updated")
   @@map("artifacts")
-}
-
-model ArtifactChunk {
-  id         String   @id @default(uuid()) @db.Uuid
-  artifactId String   @map("artifact_id") @db.Uuid
-  chunkIndex Int      @map("chunk_index")
-  encoding   String   @default("base64")
-  data       String
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  artifact   Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
-
-  @@unique([artifactId, chunkIndex])
-  @@map("artifact_chunks")
-}
-
-model ArtifactRender {
-  id           String        @id @default(uuid()) @db.Uuid
-  artifactId   String        @map("artifact_id") @db.Uuid
-  renderKind   String        @map("render_kind")
-  storageKind  StorageKindDb @default(inline_text) @map("storage_kind")
-  storageUri   String?       @map("storage_uri")
-  htmlContent  String?       @map("html_content")
-  textContent  String?       @map("text_content")
-  status       String        @default("ready")
-  errorMessage String?       @map("error_message")
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  artifact     Artifact      @relation(fields: [artifactId], references: [id], onDelete: Cascade)
-
-  @@unique([artifactId, renderKind])
-  @@map("artifact_renders")
 }
 
 model FileChange {
@@ -419,33 +322,21 @@ model FileChange {
   @@map("file_changes")
 }
 
-model SessionContext {
-  sessionId      String   @id @map("session_id") @db.Uuid
-  summaryVersion Int      @default(0) @map("summary_version")
-  summaryText    String   @default("") @map("summary_text")
-  summaryJson    Json     @default("{}") @map("summary_json")
-  tokenCount     Int      @default(0) @map("token_count")
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@map("session_contexts")
-}
-
 model ContextItem {
-  id                 String             @id @default(uuid()) @db.Uuid
-  sessionId          String             @map("session_id") @db.Uuid
-  sourceType         String             @map("source_type")
-  sourceId           String?            @map("source_id") @db.Uuid
-  kind               ContextItemKindDb
-  text               String
-  tokenCount         Int                @default(0) @map("token_count")
-  importance         Int                @default(0)
-  pinned             Boolean            @default(false)
-  metadata           Json               @default("{}")
-  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  session            Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  contextEmbeddings  ContextEmbedding[]
+  id                String             @id @default(uuid()) @db.Uuid
+  sessionId         String             @map("session_id") @db.Uuid
+  sourceType        String             @map("source_type")
+  sourceId          String?            @map("source_id") @db.Uuid
+  kind              ContextItemKindDb
+  text              String
+  tokenCount        Int                @default(0) @map("token_count")
+  importance        Int                @default(0)
+  pinned            Boolean            @default(false)
+  metadata          Json               @default("{}")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  session           Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  contextEmbeddings ContextEmbedding[]
 
   @@index([sessionId, kind, createdAt(sort: Desc)], map: "idx_context_items_session_kind")
   @@index([sessionId, pinned], map: "idx_context_items_pinned")
@@ -480,4 +371,17 @@ model ContextUpdateJob {
   session      Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("context_update_jobs")
+}
+
+model LongTermSummary {
+  id         String   @id @default(uuid()) @db.Uuid
+  sessionId  String   @map("session_id") @db.Uuid
+  seq        Int
+  content    String   @default("")
+  tokenCount Int      @default(0) @map("token_count")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, seq], map: "idx_long_term_summaries_session_seq")
+  @@map("long_term_summaries")
 }
