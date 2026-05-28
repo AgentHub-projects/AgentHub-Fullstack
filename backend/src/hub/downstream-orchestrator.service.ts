@@ -12,6 +12,7 @@ type ConnectionRecord = {
   sessionId: string;
   idleTimer: NodeJS.Timeout | null;
   lastActivityAt: number;
+  needsBootstrap: boolean;
 };
 
 type DownstreamEnvelope = {
@@ -27,6 +28,7 @@ type DownstreamEnvelope = {
 };
 
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+const IDLE_RECHECK_MS = 60 * 1000;
 
 @Injectable()
 export class DownstreamOrchestratorService implements OnModuleDestroy {
@@ -79,22 +81,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     try {
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator);
-      this.resetIdleTimer(connection);
-
-      const promptInput: DownstreamPromptInput = {
-        agenthubSessionId: input.sessionId,
-        runId: input.runId,
-        messageId: input.userMessageId,
-        agentId: input.orchestrator.id,
-        mentionedAgentIds: input.mentionedAgents.map((agent) => agent.id),
-        mentionedAgentNames: input.mentionedAgents.map((agent) => agent.name),
-        prompt: [
-          { type: "text", text: input.promptText },
-          { type: "text", text: input.context.promptText },
-        ],
-        context: input.context,
-        metadata: { source: "agenthub" },
-      };
+      const promptInput = await this.buildPromptInput(input, connection.needsBootstrap);
 
       connection.socket.emit("acp:message", {
         jsonrpc: "2.0",
@@ -102,6 +89,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         method: "session/prompt",
         params: promptInput,
       });
+      connection.needsBootstrap = false;
+      this.markDownstreamActivity(connection);
 
       await this.prisma.agentRun.update({
         where: { id: input.runId },
@@ -139,6 +128,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       method: "session/cancel",
       params: { runId },
     });
+    if (record?.socket.connected) this.markDownstreamActivity(record);
     await this.events.append({
       sessionId,
       runId,
@@ -170,7 +160,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         ...payload,
       },
     });
-    this.resetIdleTimer(record);
+    this.markDownstreamActivity(record);
   }
 
   private async ensureConnection(
@@ -180,7 +170,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   ): Promise<ConnectionRecord> {
     const existing = this.connections.get(sessionId);
     if (existing?.socket.connected) {
-      this.resetIdleTimer(existing);
       return existing;
     }
 
@@ -191,8 +180,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const socket = io(downstreamUrl, {
       transports: ["websocket"],
-      reconnection: true,
-      reconnectionAttempts: 5,
+      reconnection: false,
     });
 
     const record: ConnectionRecord = {
@@ -201,10 +189,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       sessionId,
       idleTimer: null,
       lastActivityAt: Date.now(),
+      needsBootstrap: true,
     };
     this.connections.set(sessionId, record);
 
     socket.on("connect", () => {
+      record.needsBootstrap = true;
       socket.emit("acp:message", {
         jsonrpc: "2.0",
         id: `init-${sessionId}`,
@@ -224,17 +214,14 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           cwd: "/workspace",
         },
       });
+      this.markDownstreamActivity(record);
     });
 
-    socket.on("disconnect", (reason) => {
+    socket.on("disconnect", () => {
       this.clearIdleTimer(record);
-      if (reason !== "io client disconnect") {
-        // Reconnect will be handled by socket.io reconnection; remove after timeout
-        setTimeout(() => {
-          if (!socket.connected) {
-            this.connections.delete(sessionId);
-          }
-        }, 5000);
+      record.needsBootstrap = true;
+      if (this.connections.get(sessionId) === record) {
+        this.connections.delete(sessionId);
       }
     });
 
@@ -248,16 +235,37 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     socket.on("message", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
 
     await waitForSocket(socket);
+    this.scheduleIdleDisconnectCheck(record);
     return record;
   }
 
-  private resetIdleTimer(record: ConnectionRecord) {
+  private markDownstreamActivity(record: ConnectionRecord) {
     record.lastActivityAt = Date.now();
+    this.scheduleIdleDisconnectCheck(record);
+  }
+
+  private scheduleIdleDisconnectCheck(record: ConnectionRecord) {
     this.clearIdleTimer(record);
+    const idleFor = Date.now() - record.lastActivityAt;
+    const delay = Math.max(0, IDLE_TIMEOUT_MS - idleFor);
     record.idleTimer = setTimeout(() => {
+      this.closeIfIdle(record);
+    }, delay);
+  }
+
+  private closeIfIdle(record: ConnectionRecord) {
+    if (this.connections.get(record.key) !== record) return;
+    const idleFor = Date.now() - record.lastActivityAt;
+    if (idleFor >= IDLE_TIMEOUT_MS && !this.gateway.hasSessionSubscribers(record.sessionId)) {
       record.socket.disconnect();
       this.connections.delete(record.key);
-    }, IDLE_TIMEOUT_MS);
+      return;
+    }
+    this.clearIdleTimer(record);
+    const delay = idleFor >= IDLE_TIMEOUT_MS ? IDLE_RECHECK_MS : Math.max(0, IDLE_TIMEOUT_MS - idleFor);
+    record.idleTimer = setTimeout(() => {
+      this.closeIfIdle(record);
+    }, delay);
   }
 
   private clearIdleTimer(record: ConnectionRecord) {
@@ -268,7 +276,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 
   private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
-    this.resetIdleTimer(record);
+    this.markDownstreamActivity(record);
 
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
     if (envelope.method && envelope.method !== "session/event") return;
@@ -409,6 +417,64 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       payload: { text: "本轮 mock 执行完成。接入真实下游后，该链路会复用同一套持久化与前端实时展示。" },
     });
     await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
+  }
+
+  private async buildPromptInput(
+    input: {
+      sessionId: string;
+      runId: string;
+      userMessageId: string;
+      promptText: string;
+      orchestrator: AgentInstanceDto;
+      context: HubContextSnapshotDto;
+    },
+    bootstrap: boolean,
+  ): Promise<DownstreamPromptInput> {
+    const snapshot = input.context.snapshotJson;
+    const base: DownstreamPromptInput = {
+      agenthubSessionId: input.sessionId,
+      runId: input.runId,
+      messageId: input.userMessageId,
+      agentId: input.orchestrator.id,
+      mode: bootstrap ? "bootstrap" : "incremental",
+      prompt: input.promptText,
+      pins: snapshot.pins,
+      metadata: {
+        source: "agenthub",
+        contextSnapshotId: input.context.id,
+      },
+    };
+
+    if (!bootstrap) return base;
+
+    return {
+      ...base,
+      orchestratorSystemPrompt: input.orchestrator.template?.systemPrompt ?? "",
+      agents: await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id),
+      memory: {
+        summary: snapshot.summary ?? "",
+        retrieved: snapshot.retrieved,
+      },
+    };
+  }
+
+  private async loadSessionAgentBriefs(sessionId: string, orchestratorAgentId: string) {
+    const participants = await this.prisma.sessionAgent.findMany({
+      where: {
+        sessionId,
+        agentId: { not: orchestratorAgentId },
+        participantRole: { not: "orchestrator" },
+      },
+      include: {
+        agent: { include: { template: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return participants.map((participant) => ({
+      agentId: participant.agent.id,
+      description: participant.agent.description || participant.agent.template?.description || "",
+    }));
   }
 
   private async completeRun(sessionId: string, runId: string, speakerAgentId: string, payload: Record<string, unknown>) {
