@@ -886,6 +886,7 @@ pre {
   padding: 20px;
 }
 
+.agentDialog,
 .groupDialog {
   display: grid;
   width: min(460px, 100%);
@@ -897,6 +898,8 @@ pre {
   box-shadow: 0 24px 64px rgba(31, 35, 40, 0.18);
 }
 
+.agentDialog header,
+.agentDialog footer,
 .groupDialog header,
 .groupDialog footer {
   display: flex;
@@ -906,14 +909,17 @@ pre {
   padding: 14px;
 }
 
+.agentDialog header,
 .groupDialog header {
   border-bottom: 1px solid var(--line);
 }
 
+.agentDialog footer,
 .groupDialog footer {
   border-top: 1px solid var(--line);
 }
 
+.agentDialog strong,
 .groupDialog strong {
   display: block;
 }
@@ -1276,4 +1282,184 @@ pre {
   .artifactTabs {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- Group Members ---- */
+
+.groupSummaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: inherit;
+}
+
+.groupSummaryHeader:hover {
+  color: var(--brand);
+}
+
+.groupSummaryHeader strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.groupSummaryHeader span {
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+/* ---- Members Panel ---- */
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.memberRow:hover {
+  background: var(--surface-strong);
+}
+
+.memberRow .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.memberName {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberOrchTag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.addMemberRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-top: 1px solid var(--line);
+}
+
+.addMemberRow:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+/* ---- Context Menu ---- */
+
+.contextMenuOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: 101;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.contextMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.contextMenuItem:hover {
+  background: var(--surface-strong);
+}
+
+.contextMenuItem.danger {
+  color: var(--red);
+}
+
+.contextMenuItem.danger:hover {
+  background: var(--red-soft);
+}
+
+/* ---- Invite Dialog ---- */
+
+.agentChoiceMain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agentChoiceConfig {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.agentChoiceConfig input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.agentChoiceConfig select {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--surface);
 }

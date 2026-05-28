@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
+  BuildMessageDto,
+  CreateSessionAgentRequest,
   HubArtifactDto,
   HubContextSnapshotDto,
   HubEventDto,
@@ -12,6 +14,7 @@ import type {
   HubRunDto,
   HubSessionDto,
   SessionDetailDto,
+  UpdateAgentRequest,
 } from "@agenthub/shared";
 import {
   ApiOutlined,
@@ -20,6 +23,8 @@ import {
   CloseCircleOutlined,
   CodeOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
   LinkOutlined,
@@ -36,14 +41,21 @@ import {
 import {
   artifactContentUrl,
   cancelRun,
+  confirmBuild,
   connectHubSocket,
+  createAgentTemplate,
   createSession,
+  createSessionAgent,
+  deleteAgent,
   getSessionDetail,
   listAgents,
   listAgentTemplates,
   listSessions,
   pinSessionMessage,
+  sendBuildMessage,
   sendSessionMessage,
+  startBuild,
+  updateAgent,
   upsertById,
   type SocketState,
 } from "../lib/agenthub-api";
@@ -100,7 +112,29 @@ export default function WorkbenchPage() {
   const [sending, setSending] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
-  const [draftGroupAgentIds, setDraftGroupAgentIds] = useState<string[]>([]);
+  const [groupTitle, setGroupTitle] = useState("");
+  const [orchTemplateId, setOrchTemplateId] = useState<string>("");
+  const [orchProvider, setOrchProvider] = useState(0);
+  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: string; provider: number }>>([]);
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const [agentDialogTab, setAgentDialogTab] = useState<"quick" | "builder">("quick");
+  const [quickName, setQuickName] = useState("");
+  const [quickDesc, setQuickDesc] = useState("");
+  const [quickProvider, setQuickProvider] = useState(0);
+  const [quickPrompt, setQuickPrompt] = useState("");
+  const [buildId, setBuildId] = useState<string | null>(null);
+  const [buildMessages, setBuildMessages] = useState<BuildMessageDto[]>([]);
+  const [buildInput, setBuildInput] = useState("");
+  const [buildBusy, setBuildBusy] = useState(false);
+  const [buildConfirm, setBuildConfirm] = useState<{ name: string; description: string; systemPrompt: string; defaultProvider: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: string; provider: number; name: string }>>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AgentInstanceDto | null>(null);
+  const [groupMembersExpanded, setGroupMembersExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -171,7 +205,7 @@ export default function WorkbenchPage() {
   async function bootstrap() {
     const [agentRes, templateRes, sessionRes] = await Promise.all([listAgents(), listAgentTemplates(), listSessions()]);
     if (agentRes.ok) setAgents(agentRes.data.items);
-    if (templateRes.ok) setTemplates(templateRes.data.items);
+    if (templateRes.ok) setTemplates(templateRes.data);
 
     if (!sessionRes.ok) {
       setNotice(`后端不可用：${sessionRes.error}`);
@@ -187,7 +221,6 @@ export default function WorkbenchPage() {
     const selected = items[0]?.id ?? null;
     setActiveSessionId(selected);
     if (selected) await loadSession(selected);
-    setNotice("AgentHub 已就绪");
   }
 
   async function loadSession(sessionId: string) {
@@ -202,15 +235,19 @@ export default function WorkbenchPage() {
   }
 
   function openCreateGroupDialog() {
-    setDraftGroupAgentIds(workerAgents.map((agent) => agent.id));
+    setGroupTitle("");
+    setOrchTemplateId("");
+    setOrchProvider(0);
+    setMemberTemplates([]);
     setGroupDialogOpen(true);
   }
 
   async function handleCreateGroup() {
-    const selectedIds = draftGroupAgentIds.filter((id) => workerAgents.some((agent) => agent.id === id));
     const result = await createSession({
-      title: buildGroupTitle(selectedIds, agents),
-      metadata: { memberAgentIds: selectedIds },
+      title: groupTitle.trim() || buildGroupTitle(memberTemplates.map((m) => m.templateId), templates),
+      orchestratorTemplateId: orchTemplateId || undefined,
+      orchestratorProvider: orchProvider,
+      memberTemplates: memberTemplates.length > 0 ? memberTemplates : undefined,
     });
     if (!result.ok) {
       setNotice(`创建失败：${result.error}`);
@@ -275,6 +312,58 @@ export default function WorkbenchPage() {
     setNotice(result.ok ? "已请求取消当前 run" : `取消失败：${result.error}`);
   }
 
+  async function handleEditAgent(body: UpdateAgentRequest) {
+    if (!editTarget) return;
+    const result = await updateAgent(editTarget.id, body);
+    if (!result.ok) {
+      setNotice(`编辑失败：${result.error}`);
+      return;
+    }
+    setAgents((current) => upsertById(current, result.data));
+    setEditDialogOpen(false);
+    setEditTarget(null);
+    setNotice(`Agent "${result.data.name}" 已更新`);
+  }
+
+  async function handleDeleteAgent() {
+    if (!deleteTarget) return;
+    const result = await deleteAgent(deleteTarget.id);
+    if (!result.ok) {
+      setNotice(`删除失败：${result.error}`);
+      return;
+    }
+    setAgents((current) => current.filter((agent) => agent.id !== deleteTarget.id));
+    setDeleteConfirmOpen(false);
+    setDeleteTarget(null);
+    setNotice(`Agent "${deleteTarget.name}" 已移除`);
+  }
+
+  async function handleInviteAgent() {
+    if (!activeSessionId) return;
+    const selected = inviteSelection.filter((item) => item.templateId);
+    if (selected.length === 0) {
+      setNotice("请至少选择一个模板");
+      return;
+    }
+    let errorCount = 0;
+    for (const item of selected) {
+      const body: CreateSessionAgentRequest = {
+        sessionId: activeSessionId,
+        templateId: item.templateId,
+        provider: item.provider,
+        name: item.name.trim() || templates.find((tpl) => tpl.id === item.templateId)?.name || "Agent",
+      };
+      const result = await createSessionAgent(body);
+      if (result.ok) {
+        setAgents((current) => upsertById(current, result.data));
+      } else {
+        errorCount++;
+      }
+    }
+    setInviteDialogOpen(false);
+    setNotice(errorCount > 0 ? `${selected.length - errorCount} 个 Agent 已加入，${errorCount} 个失败` : `${selected.length} 个 Agent 已加入`);
+  }
+
   function closeMentionMenu() {
     setMentionMatch(null);
     setActiveMentionIndex(0);
@@ -307,8 +396,11 @@ export default function WorkbenchPage() {
             <strong>AgentHub</strong>
             <span>多 Agent 群聊</span>
           </div>
-          <button className="iconButton" type="button" title="新建群聊" onClick={openCreateGroupDialog}>
+          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={() => { setAgentDialogTab("quick"); setBuildId(null); setBuildMessages([]); setBuildConfirm(null); setQuickName(""); setQuickDesc(""); setQuickProvider(0); setQuickPrompt(""); setAgentDialogOpen(true); }}>
             <PlusOutlined />
+          </button>
+          <button className="iconButton" type="button" title="新建群聊" onClick={openCreateGroupDialog}>
+            <TeamOutlined />
           </button>
         </div>
 
@@ -319,18 +411,46 @@ export default function WorkbenchPage() {
             <span>默认协调者：{orchestrator?.name ?? "Orchestrator"}</span>
           </div>
           <section className="groupSummary">
-            <div>
+            <button
+              className="groupSummaryHeader"
+              type="button"
+              onClick={() => setGroupMembersExpanded((v) => !v)}
+            >
               <strong>群聊成员</strong>
               <span>{composerAgents.length ? `${composerAgents.length} 个 Agent` : "未选择成员"}</span>
-            </div>
-            {composerAgents.length > 0 ? (
+            </button>
+            {groupMembersExpanded && (
               <div className="memberList">
-                {composerAgents.map((agent) => (
-                  <span key={agent.id}>{agent.name}</span>
+                {(orchestrator ? [orchestrator] : []).concat(
+                  activeGroupMemberIds.length > 0 ? activeGroupMembers : workerAgents
+                ).map((agent) => (
+                  <div
+                    key={agent.id}
+                    className="memberRow"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
+                    }}
+                  >
+                    <span className="avatar" style={{ background: agentColor(agent.id) }}>
+                      {initials(agent.name)}
+                    </span>
+                    <span className="memberName">{agent.name}</span>
+                    {agent.isDefaultOrchestrator && <span className="memberOrchTag">协调者</span>}
+                  </div>
                 ))}
+                <button
+                  className="addMemberRow"
+                  type="button"
+                  onClick={() => {
+                    setInviteSelection(templates.map((tpl) => ({ templateId: tpl.id, provider: 0, name: tpl.name })));
+                    setInviteDialogOpen(true);
+                  }}
+                >
+                  <PlusOutlined />
+                  <span>添加成员</span>
+                </button>
               </div>
-            ) : (
-              <p>点击 + 选择要加入群聊的 Agent</p>
             )}
           </section>
         </div>
@@ -380,12 +500,6 @@ export default function WorkbenchPage() {
               />
             ),
           )}
-          {conversationItems.length === 0 && (
-            <div className="emptyState">
-              <TeamOutlined />
-              <span>等待第一条任务</span>
-            </div>
-          )}
           <div ref={endRef} />
         </div>
 
@@ -412,7 +526,7 @@ export default function WorkbenchPage() {
                       </span>
                       <span>
                         <strong>@{agent.name}</strong>
-                        <small>{agent.template?.agentKind ?? "worker"}</small>
+                        <small>{agent.template?.name ?? "worker"}</small>
                       </span>
                       {index === activeMentionIndex && <CheckCircleOutlined />}
                     </button>
@@ -540,32 +654,77 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="create-group-title">新建群聊</strong>
-                <span>选择要加入这个群聊的 Agent</span>
+                <span>填写群聊信息并选择模板</span>
               </div>
             </header>
+            <div className="buildForm">
+              <label>
+                群聊名称
+                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
+              </label>
+              <label>
+                Orchestrator 模板
+                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(e.target.value)}>
+                  <option value="">默认 Orchestrator</option>
+                  {templates.map((tpl) => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                  ))}
+                </select>
+              </label>
+              {orchTemplateId && (
+                <label>
+                  Orchestrator Provider
+                  <select value={orchProvider} onChange={(e) => setOrchProvider(Number(e.target.value))}>
+                    <option value={0}>claude-code</option>
+                    <option value={1}>codex</option>
+                    <option value={2}>opencode</option>
+                  </select>
+                </label>
+              )}
+              <label>群成员模板（多选）</label>
+            </div>
             <div className="agentChoiceList">
-              {workerAgents.length === 0 && <p className="dialogHint">暂无可加入的 worker Agent。</p>}
-              {workerAgents.map((agent) => {
-                const selected = draftGroupAgentIds.includes(agent.id);
+              {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板，请先创建模板。</p>}
+              {templates.map((tpl) => {
+                const selected = memberTemplates.some((m) => m.templateId === tpl.id);
                 return (
                   <button
-                    key={agent.id}
+                    key={tpl.id}
                     className={`agentChoice ${selected ? "selected" : ""}`}
                     type="button"
                     onClick={() =>
-                      setDraftGroupAgentIds((current) =>
-                        current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id],
+                      setMemberTemplates((current) =>
+                        selected
+                          ? current.filter((m) => m.templateId !== tpl.id)
+                          : [...current, { templateId: tpl.id, provider: tpl.defaultProvider }],
                       )
                     }
                   >
-                    <span className="avatar" style={{ background: agentColor(agent.id) }}>
-                      {initials(agent.name)}
+                    <span className="avatar" style={{ background: agentColor(tpl.id) }}>
+                      {initials(tpl.name)}
                     </span>
                     <span>
-                      <strong>{agent.name}</strong>
-                      <small>{agent.template?.agentKind ?? "worker"}</small>
+                      <strong>{tpl.name}</strong>
+                      <small>{tpl.description.slice(0, 40)}</small>
                     </span>
-                    {selected && <CheckCircleOutlined />}
+                    {selected && (
+                      <select
+                        value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? 0}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setMemberTemplates((current) =>
+                            current.map((m) =>
+                              m.templateId === tpl.id ? { ...m, provider: Number(e.target.value) } : m,
+                            ),
+                          );
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value={0}>claude-code</option>
+                        <option value={1}>codex</option>
+                        <option value={2}>opencode</option>
+                      </select>
+                    )}
                   </button>
                 );
               })}
@@ -574,14 +733,356 @@ export default function WorkbenchPage() {
               <button className="ghostButton" type="button" onClick={() => setGroupDialogOpen(false)}>
                 取消
               </button>
+              <button className="primaryButton" type="button" onClick={() => void handleCreateGroup()}>
+                创建群聊
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div
+          className="contextMenuOverlay"
+          role="presentation"
+          onClick={() => setContextMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+        >
+          <div
+            className="contextMenu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="contextMenuItem"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const agent = agents.find((a) => a.id === contextMenu.agentId);
+                if (agent) {
+                  setEditTarget(agent);
+                  setEditDialogOpen(true);
+                }
+                setContextMenu(null);
+              }}
+            >
+              <EditOutlined /> 编辑
+            </button>
+            <button
+              className="contextMenuItem danger"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const agent = agents.find((a) => a.id === contextMenu.agentId);
+                if (agent) {
+                  setDeleteTarget(agent);
+                  setDeleteConfirmOpen(true);
+                }
+                setContextMenu(null);
+              }}
+            >
+              <DeleteOutlined /> 从群聊中移除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editDialogOpen && editTarget && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => { setEditDialogOpen(false); setEditTarget(null); }}>
+          <section
+            className="agentDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-agent-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="edit-agent-title">编辑 Agent</strong>
+                <span>修改 {editTarget.name} 的配置</span>
+              </div>
+            </header>
+            <div className="buildForm">
+              <label>名称
+                <input
+                  value={editTarget.name}
+                  onChange={(e) => setEditTarget({ ...editTarget, name: e.target.value })}
+                />
+              </label>
+              <label>描述
+                <textarea
+                  value={editTarget.description}
+                  onChange={(e) => setEditTarget({ ...editTarget, description: e.target.value })}
+                  rows={2}
+                />
+              </label>
+              <label>Provider
+                <select
+                  value={editTarget.provider}
+                  onChange={(e) => setEditTarget({ ...editTarget, provider: Number(e.target.value) })}
+                >
+                  <option value={0}>claude-code</option>
+                  <option value={1}>codex</option>
+                  <option value={2}>opencode</option>
+                </select>
+              </label>
+            </div>
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => { setEditDialogOpen(false); setEditTarget(null); }}>
+                取消
+              </button>
               <button
                 className="primaryButton"
                 type="button"
-                disabled={draftGroupAgentIds.length === 0}
-                onClick={() => void handleCreateGroup()}
+                disabled={!editTarget.name.trim()}
+                onClick={() => handleEditAgent({
+                  name: editTarget.name,
+                  description: editTarget.description,
+                  provider: editTarget.provider,
+                })}
               >
-                创建群聊
+                保存
               </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {inviteDialogOpen && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => setInviteDialogOpen(false)}>
+          <section
+            className="agentDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invite-agent-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="invite-agent-title">邀请 Agent 加入群聊</strong>
+                <span>选择模板并设置名称和 Provider</span>
+              </div>
+            </header>
+            <div className="agentChoiceList">
+              {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板</p>}
+              {templates.map((tpl) => {
+                const idx = inviteSelection.findIndex((item) => item.templateId === tpl.id);
+                const selected = idx >= 0;
+                return (
+                  <div
+                    key={tpl.id}
+                    className={`agentChoice ${selected ? "selected" : ""}`}
+                  >
+                    <button
+                      className="agentChoiceMain"
+                      type="button"
+                      onClick={() =>
+                        setInviteSelection((current) =>
+                          selected
+                            ? current.filter((item) => item.templateId !== tpl.id)
+                            : [...current, { templateId: tpl.id, provider: 0, name: tpl.name }],
+                        )
+                      }
+                    >
+                      <span className="avatar" style={{ background: agentColor(tpl.id) }}>
+                        {initials(tpl.name)}
+                      </span>
+                      <span>
+                        <strong>{tpl.name}</strong>
+                        <small>{tpl.description.slice(0, 40)}</small>
+                      </span>
+                    </button>
+                    {selected && (
+                      <div className="agentChoiceConfig">
+                        <input
+                          value={inviteSelection[idx].name}
+                          onChange={(e) =>
+                            setInviteSelection((current) =>
+                              current.map((item, i) => (i === idx ? { ...item, name: e.target.value } : item)),
+                            )
+                          }
+                          placeholder="Agent 名称"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <select
+                          value={inviteSelection[idx].provider}
+                          onChange={(e) =>
+                            setInviteSelection((current) =>
+                              current.map((item, i) =>
+                                i === idx ? { ...item, provider: Number(e.target.value) } : item,
+                              ),
+                            )
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <option value={0}>claude-code</option>
+                          <option value={1}>codex</option>
+                          <option value={2}>opencode</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => setInviteDialogOpen(false)}>取消</button>
+              <button className="primaryButton" type="button" onClick={() => void handleInviteAgent()}>
+                邀请加入
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {deleteConfirmOpen && deleteTarget && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
+          <section
+            className="agentDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-agent-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="delete-agent-title">确认移除</strong>
+              </div>
+            </header>
+            <p style={{ padding: "16px 0" }}>
+              确定要从群聊中移除 <strong>{deleteTarget.name}</strong> 吗？此操作不可撤销。
+            </p>
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
+                取消
+              </button>
+              <button className="primaryButton" type="button" style={{ background: "var(--red)", borderColor: "var(--red)" }} onClick={() => void handleDeleteAgent()}>
+                确认移除
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {agentDialogOpen && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => setAgentDialogOpen(false)}>
+          <section
+            className="agentDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-agent-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="create-agent-title">新建 Agent 模板</strong>
+              </div>
+              <div className="dialogTabs">
+                <button className={agentDialogTab === "quick" ? "active" : ""} type="button" onClick={() => setAgentDialogTab("quick")}>
+                  快速创建
+                </button>
+                <button className={agentDialogTab === "builder" ? "active" : ""} type="button" onClick={() => setAgentDialogTab("builder")}>
+                  对话创建
+                </button>
+              </div>
+            </header>
+            {agentDialogTab === "quick" ? (
+              <div className="buildForm">
+                <label>名称 <input value={quickName} onChange={(e) => setQuickName(e.target.value)} placeholder="如：Python 数据分析 Agent" /></label>
+                <label>描述 <textarea value={quickDesc} onChange={(e) => setQuickDesc(e.target.value)} placeholder="简要描述用途和能力" /></label>
+                <label>Provider
+                  <select value={quickProvider} onChange={(e) => setQuickProvider(Number(e.target.value))}>
+                    <option value={0}>claude-code</option>
+                    <option value={1}>codex</option>
+                    <option value={2}>opencode</option>
+                  </select>
+                </label>
+                <label>System Prompt <textarea value={quickPrompt} onChange={(e) => setQuickPrompt(e.target.value)} placeholder="定义 Agent 的行为和回答风格" rows={4} /></label>
+              </div>
+            ) : (
+              <div className="builderPane">
+                <div className="buildMessages">
+                  {buildMessages.map((msg) => (
+                    <div key={msg.id} className={`buildMsg ${msg.role}`}>
+                      <RichText text={msg.content} />
+                    </div>
+                  ))}
+                </div>
+                {buildConfirm && (
+                  <div className="buildConfirmCard">
+                    <strong>确认模板</strong>
+                    <label>名称 <input value={buildConfirm.name} onChange={(e) => setBuildConfirm({ ...buildConfirm, name: e.target.value })} /></label>
+                    <label>描述 <input value={buildConfirm.description} onChange={(e) => setBuildConfirm({ ...buildConfirm, description: e.target.value })} /></label>
+                    <label>Provider
+                      <select value={buildConfirm.defaultProvider} onChange={(e) => setBuildConfirm({ ...buildConfirm, defaultProvider: Number(e.target.value) })}>
+                        <option value={0}>claude-code</option>
+                        <option value={1}>codex</option>
+                        <option value={2}>opencode</option>
+                      </select>
+                    </label>
+                    <label>System Prompt <textarea value={buildConfirm.systemPrompt} onChange={(e) => setBuildConfirm({ ...buildConfirm, systemPrompt: e.target.value })} rows={4} /></label>
+                    <button className="primaryButton" type="button" disabled={buildBusy} onClick={() => void confirmBuild(buildId!, buildConfirm).then(async (res) => {
+                      if (res.ok) { setNotice(`模板 "${res.data.template.name}" 创建成功`); setTemplates((c) => [...c, res.data.template]); setAgentDialogOpen(false); }
+                      else setNotice(`创建失败：${res.error}`);
+                    })}>
+                      确认创建
+                    </button>
+                  </div>
+                )}
+                <div className="builderInput">
+                  <input
+                    value={buildInput}
+                    onChange={(e) => setBuildInput(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter" && buildInput.trim() && !buildBusy) {
+                        const text = buildInput.trim();
+                        setBuildInput("");
+                        setBuildBusy(true);
+                        try {
+                          if (!buildId) {
+                            const res = await startBuild({ description: text });
+                            if (res.ok) {
+                              setBuildId(res.data.buildId);
+                              setBuildMessages([res.data.message]);
+                            } else setNotice(`Builder 错误：${res.error}`);
+                          } else {
+                            const res = await sendBuildMessage(buildId, { message: text });
+                            if (res.ok) {
+                              setBuildMessages((c) => [...c, res.data.message]);
+                              const ctx = res.data.context as Record<string, unknown>;
+                              if (ctx.name || ctx.description || ctx.systemPrompt) {
+                                setBuildConfirm({
+                                  name: (ctx.name as string) ?? "",
+                                  description: (ctx.description as string) ?? "",
+                                  systemPrompt: (ctx.systemPrompt as string) ?? "",
+                                  defaultProvider: (ctx.defaultProvider as number) ?? 0,
+                                });
+                              }
+                            } else setNotice(`Builder 错误：${res.error}`);
+                          }
+                        } finally { setBuildBusy(false); }
+                      }
+                    }}
+                    placeholder="描述你想要的 Agent..."
+                    disabled={buildBusy}
+                  />
+                  {buildBusy && <LoadingOutlined />}
+                </div>
+              </div>
+            )}
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => {
+                setAgentDialogOpen(false); setBuildId(null); setBuildMessages([]); setBuildConfirm(null);
+                setQuickName(""); setQuickDesc(""); setQuickProvider(0); setQuickPrompt("");
+              }}>取消</button>
+              {agentDialogTab === "quick" && (
+                <button className="primaryButton" type="button" disabled={!quickName.trim()} onClick={async () => {
+                  const res = await createAgentTemplate({ name: quickName, description: quickDesc, defaultProvider: quickProvider, systemPrompt: quickPrompt });
+                  if (res.ok) { setNotice(`模板 "${res.data.name}" 创建成功`); setTemplates((c) => [...c, res.data]); setAgentDialogOpen(false); }
+                  else setNotice(`创建失败：${res.error}`);
+                }}>创建模板</button>
+              )}
             </footer>
           </section>
         </div>
@@ -966,14 +1467,14 @@ function ContextPanel({
         {agents.map((agent) => (
           <div key={agent.id}>
             <span>{agent.name}</span>
-            <code>{agent.template?.agentKind ?? "worker"}</code>
+            <code>{agent.template?.name ?? "worker"}</code>
           </div>
         ))}
         <strong>模板</strong>
         {templates.map((template) => (
           <div key={template.id}>
             <span>{template.name}</span>
-            <code>{template.agentKind}</code>
+            <code>provider: {template.defaultProvider}</code>
           </div>
         ))}
       </section>
@@ -1113,9 +1614,9 @@ function readMemberAgentIds(session: HubSessionDto | null | undefined) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function buildGroupTitle(agentIds: string[], agents: AgentInstanceDto[]) {
-  const names = agentIds
-    .map((id) => agents.find((agent) => agent.id === id)?.name)
+function buildGroupTitle(templateIds: string[], templates: AgentTemplateDto[]) {
+  const names = templateIds
+    .map((id) => templates.find((tpl) => tpl.id === id)?.name)
     .filter((name): name is string => Boolean(name));
   if (names.length === 0) return "新 Agent 群聊";
   return `Agent 群聊 · ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个` : ""}`;

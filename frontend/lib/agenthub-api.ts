@@ -1,7 +1,13 @@
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
+  BuildMessageDto,
+  BuildSessionDto,
+  ConfirmBuildRequest,
+  ConfirmBuildResponse,
+  CreateAgentTemplateRequest,
   CreateHubSessionRequest,
+  CreateSessionAgentRequest,
   FrontendRealtimeEnvelope,
   HubArtifactDto,
   HubContextSnapshotDto,
@@ -11,9 +17,15 @@ import type {
   HubRunDto,
   HubSessionDto,
   PinHubMessageRequest,
+  SendBuildMessageRequest,
+  SendBuildMessageResponse,
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
+  StartBuildRequest,
+  StartBuildResponse,
+  UpdateAgentRequest,
+  UpdateAgentTemplateRequest,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
 
@@ -91,8 +103,85 @@ export function listAgents() {
   return requestJson<{ items: AgentInstanceDto[] }>("/agents");
 }
 
+export function createSessionAgent(body: CreateSessionAgentRequest) {
+  return requestJson<AgentInstanceDto>("/agents", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAgent(id: string, body: UpdateAgentRequest) {
+  return requestJson<AgentInstanceDto>(`/agents/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteAgent(id: string) {
+  return requestJson<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export function listAgentTemplates() {
-  return requestJson<{ items: AgentTemplateDto[] }>("/agents/templates");
+  return requestJson<AgentTemplateDto[]>("/agent-templates");
+}
+
+// ---- Agent Template CRUD ----
+
+export function createAgentTemplate(body: CreateAgentTemplateRequest) {
+  return requestJson<AgentTemplateDto>("/agent-templates", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAgentTemplate(id: string, body: UpdateAgentTemplateRequest) {
+  return requestJson<AgentTemplateDto>(`/agent-templates/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteAgentTemplate(id: string) {
+  return requestJson<{ ok: boolean }>(`/agent-templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// ---- Builder ----
+
+export function startBuild(body: StartBuildRequest) {
+  return requestJson<StartBuildResponse>("/agent-templates/build/start", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function sendBuildMessage(buildId: string, body: SendBuildMessageRequest) {
+  return requestJson<SendBuildMessageResponse>(
+    `/agent-templates/build/${encodeURIComponent(buildId)}/messages`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function confirmBuild(buildId: string, body: ConfirmBuildRequest) {
+  return requestJson<ConfirmBuildResponse>(
+    `/agent-templates/build/${encodeURIComponent(buildId)}/confirm`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export function getBuildSession(buildId: string) {
+  return requestJson<BuildSessionDto>(
+    `/agent-templates/build/${encodeURIComponent(buildId)}`,
+  );
+}
+
+export function getBuildMessages(buildId: string) {
+  return requestJson<BuildMessageDto[]>(
+    `/agent-templates/build/${encodeURIComponent(buildId)}/messages`,
+  );
 }
 
 export function connectHubSocket(
