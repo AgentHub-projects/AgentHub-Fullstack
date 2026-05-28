@@ -2,8 +2,8 @@ import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
 import type { AgentInstanceDto, DownstreamPromptInput, HubContextSnapshotDto } from "@agenthub/shared";
 import { io, Socket } from "socket.io-client";
 import { HubEventService } from "./event.service";
-import { HubRealtimeGateway } from "./hub-realtime.gateway";
-import { mapSession } from "./hub.mappers";
+import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
+import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 
 type ConnectionRecord = {

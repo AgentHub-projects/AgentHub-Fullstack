@@ -5,7 +5,7 @@ import type {
   UpdateAgentTemplateRequest,
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapTemplate } from "./hub.mappers";
+import { mapTemplate } from "../mappers/hub.mappers";
 
 @Injectable()
 export class AgentTemplateService {

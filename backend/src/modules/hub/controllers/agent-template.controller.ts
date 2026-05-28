@@ -4,7 +4,7 @@ import type {
   CreateAgentTemplateRequest,
   UpdateAgentTemplateRequest,
 } from "@agenthub/shared";
-import { AgentTemplateService } from "./agent-template.service";
+import { AgentTemplateService } from "../services/agent-template.service";
 
 @Controller("agent-templates")
 export class AgentTemplateController {

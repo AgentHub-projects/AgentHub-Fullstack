@@ -8,7 +8,7 @@ import type {
   LongTermSummaryDto,
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapContextSnapshot, mapLongTermSummary } from "./hub.mappers";
+import { mapContextSnapshot, mapLongTermSummary } from "../mappers/hub.mappers";
 
 type ContextRow = {
   id: string;

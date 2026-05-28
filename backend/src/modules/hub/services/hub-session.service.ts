@@ -19,8 +19,8 @@ import {
   mapMessage,
   mapRun,
   mapSession,
-} from "./hub.mappers";
-import { HubRealtimeGateway } from "./hub-realtime.gateway";
+} from "../mappers/hub.mappers";
+import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
 
 @Injectable()

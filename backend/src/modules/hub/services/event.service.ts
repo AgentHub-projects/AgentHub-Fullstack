@@ -2,8 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { HubEventDto, HubEventType } from "@agenthub/shared";
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubContextService } from "./context.service";
-import { HubRealtimeGateway } from "./hub-realtime.gateway";
-import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage } from "./hub.mappers";
+import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
+import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 
 // In-memory buffer for streaming messages (dual-track: real-time push + buffer for persistence)

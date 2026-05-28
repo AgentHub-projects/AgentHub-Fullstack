@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HubRealtimeGateway } from "../src/hub/hub-realtime.gateway";
+import { HubRealtimeGateway } from "../src/modules/hub/gateways/hub-realtime.gateway";
 
 function client(id: string) {
   return {

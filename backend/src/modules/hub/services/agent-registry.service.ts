@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import type { AgentInstanceDto, AgentTemplateDto, UpdateAgentRequest } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapAgent, mapTemplate } from "./hub.mappers";
+import { mapAgent, mapTemplate } from "../mappers/hub.mappers";
 
 const IDS = {
   tplOrchestrator: "00000000-0000-4000-8000-000000000001",

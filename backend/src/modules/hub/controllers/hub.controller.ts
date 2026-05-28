@@ -8,12 +8,12 @@ import type {
   SendHubMessageRequest,
   UpdateAgentRequest,
 } from "@agenthub/shared";
-import { AgentRegistryService } from "./agent-registry.service";
-import { ArtifactStorageService } from "./artifact-storage.service";
-import { HubSessionService } from "./hub-session.service";
-import { HubRealtimeGateway } from "./hub-realtime.gateway";
-import { PrismaService } from "./prisma.service";
-import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapSession } from "./hub.mappers";
+import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
+import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapSession } from "../mappers/hub.mappers";
+import { AgentRegistryService } from "../services/agent-registry.service";
+import { ArtifactStorageService } from "../services/artifact-storage.service";
+import { HubSessionService } from "../services/hub-session.service";
+import { PrismaService } from "../services/prisma.service";
 
 @Controller("sessions")
 export class HubSessionController {

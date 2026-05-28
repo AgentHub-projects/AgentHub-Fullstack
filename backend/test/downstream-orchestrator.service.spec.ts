@@ -60,7 +60,7 @@ vi.mock("socket.io-client", () => ({
   io: socketMock.io,
 }));
 
-import { DownstreamOrchestratorService } from "../src/hub/downstream-orchestrator.service";
+import { DownstreamOrchestratorService } from "../src/modules/hub/services/downstream-orchestrator.service";
 
 const now = new Date("2026-05-28T08:00:00.000Z");
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000;

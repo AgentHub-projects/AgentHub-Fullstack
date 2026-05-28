@@ -9,7 +9,7 @@ import type {
   BuildSessionDto,
   BuildMessageDto,
 } from "@agenthub/shared";
-import { BuilderService } from "./builder.service";
+import { BuilderService } from "../services/builder.service";
 
 @Controller("agent-templates/build")
 export class BuilderController {

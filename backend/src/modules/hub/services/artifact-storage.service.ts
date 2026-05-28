@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { Inject, Injectable } from "@nestjs/common";
 import type { HubArtifactDto, HubArtifactKind } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { asObject, mapArtifact } from "./hub.mappers";
+import { asObject, mapArtifact } from "../mappers/hub.mappers";
 
 type ArtifactPayload = Record<string, unknown>;
 type OssClient = {
