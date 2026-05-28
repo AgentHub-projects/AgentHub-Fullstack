@@ -37,7 +37,7 @@ PORT=3001
 DATABASE_URL=postgresql://agenthub:agenthub@localhost:5432/agenthub?schema=public
 
 # Optional. If omitted, the built-in mock Orchestrator is used.
-DOWNSTREAM_ORCHESTRATOR_WS_URL=http://127.0.0.1:8080/acp
+DOWNSTREAM_ORCHESTRATOR_WS_URL=http://115.33.108.104:31056/acp
 
 # Optional context retrieval.
 OPENAI_API_KEY=sk-...
