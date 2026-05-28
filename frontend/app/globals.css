@@ -42,6 +42,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -748,6 +749,20 @@ pre {
   color: var(--brand);
 }
 
+.composerTools {
+  margin-bottom: 9px;
+}
+
+.modePill.group {
+  border-color: rgba(124, 58, 237, 0.28);
+  color: var(--violet);
+}
+
+.modePill.direct {
+  border-color: rgba(37, 99, 235, 0.28);
+  color: var(--blue);
+}
+
 .composer textarea {
   width: 100%;
   min-height: 84px;
@@ -1112,6 +1127,7 @@ pre {
   color: #37404c;
   line-height: 1.52;
   overflow-wrap: anywhere;
+  font-weight: 780;
 }
 
 .contextSection code,
@@ -1219,6 +1235,45 @@ pre {
   }
 
   .splitDiff {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .workspaceShell {
+    grid-template-columns: 1fr;
+  }
+
+  .iconRail {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    flex-direction: row;
+    grid-row: auto;
+    min-height: 58px;
+  }
+
+  .railSocket {
+    margin-top: 0;
+    margin-left: auto;
+  }
+
+  .sessionColumn,
+  .chatWorkbench,
+  .inspectorPanel {
+    grid-column: 1;
+  }
+
+  .chatHeader {
+    padding: 13px;
+  }
+
+  .chatHeader h1 {
+    font-size: 19px;
+  }
+
+  .runStatusBar,
+  .artifactTabs {
     grid-template-columns: 1fr;
   }
 }
