@@ -41,7 +41,7 @@ export interface AgentTemplateDto {
   id: string;
   name: string;
   description: string;
-  agentKind: "orchestrator" | "worker" | "reviewer" | "utility" | string;
+  defaultProvider: number; // 0=claude-code, 1=codex, 2=opencode
   systemPrompt: string;
   promptConfig: Record<string, unknown>;
   defaultCapabilities: unknown[];
@@ -50,6 +50,20 @@ export interface AgentTemplateDto {
   status: HubAgentStatus;
   createdAt: ISODateString;
   updatedAt: ISODateString;
+}
+
+export interface CreateAgentTemplateRequest {
+  name: string;
+  description: string;
+  defaultProvider: number;
+  systemPrompt: string;
+}
+
+export interface UpdateAgentTemplateRequest {
+  name?: string;
+  description?: string;
+  defaultProvider?: number;
+  systemPrompt?: string;
 }
 
 export interface AgentInstanceDto {
@@ -258,6 +272,9 @@ export interface SessionDetailDto {
 export interface CreateHubSessionRequest {
   title?: string;
   metadata?: Record<string, unknown>;
+  orchestratorTemplateId?: string;
+  orchestratorProvider?: number; // 0=claude-code, 1=codex, 2=opencode
+  memberTemplates?: Array<{ templateId: string; provider: number }>;
 }
 
 export interface SendHubMessageRequest {
@@ -280,6 +297,19 @@ export interface PinHubMessageRequest {
 
 export interface AddParticipantRequest {
   agentId: string;
+}
+
+export interface CreateSessionAgentRequest {
+  templateId: string;
+  provider: number; // 0=claude-code, 1=codex, 2=opencode
+  name: string;
+  sessionId: string;
+}
+
+export interface UpdateAgentRequest {
+  name?: string;
+  description?: string;
+  provider?: number;
 }
 
 export interface AgentDetailResponse {
@@ -324,51 +354,51 @@ export interface FrontendRealtimeEnvelope {
     | HubContextSnapshotDto;
 }
 
-// --- Downstream Orchestrator (North) protocol DTOs ---
+// ---- Agent Template Builder ----
 
-export type DownstreamConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "ready"
-  | "failed";
-
-export interface DownstreamSessionDto {
-  /** AgentHub-side session id (== conversationId) */
-  agentHubSessionId: string;
-  /** Downstream (orchestrator) session id, assigned by initialize/session/new */
-  downstreamSessionId: string;
-  /** Downstream agent identifier (e.g. "claude-code") */
-  downstreamAgentId: string;
-  state: DownstreamConnectionState;
-  lastError?: string;
-  createdAt: string;
-  updatedAt: string;
+export interface StartBuildRequest {
+  description: string; // 用户对想要创建的 Agent 的简短描述
 }
 
-export interface DownstreamMention {
-  agentId: string;
-  displayName?: string;
+export interface StartBuildResponse {
+  buildId: string;
+  message: BuildMessageDto; // Builder 的第一条回复
 }
 
-export interface DownstreamPinnedContextItem {
+export interface BuildSessionDto {
   id: string;
-  kind: "text" | "file";
-  title?: string;
-  body: string;
+  status: string; // active | completed | cancelled
+  context: Record<string, unknown>;
+  agentTemplateId?: string | null;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
 }
 
-export interface DownstreamPromptPayload {
-  text: string;
-  mentions?: DownstreamMention[];
-  context?: DownstreamPinnedContextItem[];
+export interface BuildMessageDto {
+  id: string;
+  buildSessionId: string;
+  role: string; // user | assistant
+  content: string;
+  createdAt: ISODateString;
 }
 
-export interface DownstreamSessionEventDto {
-  /** Globally unique downstream event id; used for ack and idempotency */
-  eventId: string;
-  runId: string;
-  seq: number;
-  ts: number;
-  type: AgentEventType | string;
-  payload: unknown;
+export interface SendBuildMessageRequest {
+  message: string;
 }
+
+export interface SendBuildMessageResponse {
+  message: BuildMessageDto;
+  context: Record<string, unknown>; // 当前收集到的字段
+}
+
+export interface ConfirmBuildRequest {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  defaultProvider: number;
+}
+
+export interface ConfirmBuildResponse {
+  template: AgentTemplateDto;
+}
+

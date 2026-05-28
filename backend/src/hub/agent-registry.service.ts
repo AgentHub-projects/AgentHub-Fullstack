@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
-import type { AgentInstanceDto, AgentTemplateDto } from "@agenthub/shared";
+import type { AgentInstanceDto, AgentTemplateDto, UpdateAgentRequest } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { mapAgent, mapTemplate } from "./hub.mappers";
 
@@ -24,7 +24,7 @@ export class AgentRegistryService implements OnModuleInit {
 
   async listTemplates(): Promise<AgentTemplateDto[]> {
     const items = await this.prisma.agentTemplate.findMany({
-      orderBy: [{ agentKind: "asc" }, { createdAt: "asc" }],
+      orderBy: { createdAt: "asc" },
     });
     return items.map(mapTemplate);
   }
@@ -54,6 +54,67 @@ export class AgentRegistryService implements OnModuleInit {
     return items.map(mapAgent);
   }
 
+  async createAgentFromTemplate(
+    sessionId: string,
+    templateId: string,
+    provider: number,
+    name: string,
+  ): Promise<AgentInstanceDto> {
+    const tpl = await this.prisma.agentTemplate.findUnique({
+      where: { id: templateId },
+    });
+    if (!tpl) throw new Error("Template not found");
+
+    const agent = await this.prisma.agent.create({
+      data: {
+        templateId: tpl.id,
+        name,
+        description: tpl.description,
+        provider,
+        status: "enabled",
+      },
+      include: { template: true },
+    });
+
+    await this.prisma.sessionAgent.create({
+      data: {
+        sessionId,
+        agentId: agent.id,
+        participantRole: "member",
+        source: "manual_add",
+        firstMentionedAt: new Date(),
+        lastActiveAt: new Date(),
+      },
+    });
+
+    return mapAgent(agent);
+  }
+
+  async updateAgent(id: string, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
+    const agent = await this.prisma.agent.findUnique({ where: { id } });
+    if (!agent) throw new Error("Agent not found");
+
+    const updated = await this.prisma.agent.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.provider !== undefined ? { provider: input.provider } : {}),
+      },
+      include: { template: true },
+    });
+
+    return mapAgent(updated);
+  }
+
+  async deleteAgent(id: string): Promise<void> {
+    const agent = await this.prisma.agent.findUnique({ where: { id } });
+    if (!agent) throw new Error("Agent not found");
+
+    // Cascade delete handles SessionAgent cleanup
+    await this.prisma.agent.delete({ where: { id } });
+  }
+
   async getDefaultOrchestrator(): Promise<AgentInstanceDto> {
     let agent = await this.prisma.agent.findFirst({
       where: { isDefaultOrchestrator: true },
@@ -79,14 +140,13 @@ export class AgentRegistryService implements OnModuleInit {
         id: IDS.tplOrchestrator,
         name: "主 Orchestrator 模板",
         description: "负责理解用户目标、协调被 @ 的 Agent，并按群聊方式回传产出。",
-        agentKind: "orchestrator",
+        defaultProvider: 0,
         systemPrompt: "你是 AgentHub 的主协调 Agent。你只需要调度下游 worker，并持续上报 speaker、artifact 与文件变更事件。",
         defaultCapabilities: ["orchestrate", "stream", "file_change", "artifact"],
         defaultModelConfig: { provider: "openai-compatible" },
         status: "enabled",
       },
       update: {
-        agentKind: "orchestrator",
         status: "enabled",
       },
     });
@@ -97,7 +157,7 @@ export class AgentRegistryService implements OnModuleInit {
         id: IDS.tplFrontend,
         name: "Frontend Agent 模板",
         description: "负责前端 UI、状态管理、实时渲染和用户体验。",
-        agentKind: "worker",
+        defaultProvider: 0,
         systemPrompt: "你负责前端实现，输出需要携带 speaker=frontend agentId。",
         defaultCapabilities: ["frontend", "react", "diff", "artifact"],
         defaultModelConfig: { provider: "openai-compatible" },
@@ -112,7 +172,7 @@ export class AgentRegistryService implements OnModuleInit {
         id: IDS.tplBackend,
         name: "Backend Agent 模板",
         description: "负责后端 API、数据库、WebSocket、OSS 与上下文维护。",
-        agentKind: "worker",
+        defaultProvider: 1,
         systemPrompt: "你负责后端实现，输出需要携带 speaker=backend agentId。",
         defaultCapabilities: ["backend", "postgresql", "websocket", "oss"],
         defaultModelConfig: { provider: "openai-compatible" },
@@ -127,7 +187,7 @@ export class AgentRegistryService implements OnModuleInit {
         id: IDS.tplReviewer,
         name: "Review Agent 模板",
         description: "负责验收、回归风险、文档一致性和质量反馈。",
-        agentKind: "reviewer",
+        defaultProvider: 1,
         systemPrompt: "你负责审查实现是否满足 AgentHub 设计文档。",
         defaultCapabilities: ["review", "test", "acceptance"],
         defaultModelConfig: { provider: "openai-compatible" },

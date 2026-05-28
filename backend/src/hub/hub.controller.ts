@@ -1,16 +1,19 @@
-import { Body, Controller, Get, Inject, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import type {
   AddParticipantRequest,
   CreateHubSessionRequest,
+  CreateSessionAgentRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
+  UpdateAgentRequest,
 } from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubSessionService } from "./hub-session.service";
+import { HubRealtimeGateway } from "./hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
-import { mapAgent, mapArtifact, mapEvent, mapFileChange } from "./hub.mappers";
+import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapSession } from "./hub.mappers";
 
 @Controller("sessions")
 export class HubSessionController {
@@ -94,16 +97,15 @@ export class HubSessionController {
 
 @Controller("agents")
 export class HubAgentController {
-  constructor(@Inject(AgentRegistryService) private readonly agents: AgentRegistryService) {}
+  constructor(
+    @Inject(AgentRegistryService) private readonly agents: AgentRegistryService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(HubRealtimeGateway) private readonly gateway: HubRealtimeGateway,
+  ) {}
 
   @Get()
   listAgents() {
     return this.agents.listAgents().then((items) => ({ items }));
-  }
-
-  @Get("templates")
-  listTemplates() {
-    return this.agents.listTemplates().then((items) => ({ items }));
   }
 
   @Get(":id/detail")
@@ -113,6 +115,40 @@ export class HubAgentController {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
     return { agent, template: agent.template ?? null };
+  }
+
+  @Post()
+  async createAgent(@Body() body: CreateSessionAgentRequest) {
+    const agent = await this.agents.createAgentFromTemplate(
+      body.sessionId,
+      body.templateId,
+      body.provider,
+      body.name,
+    );
+    // Push updated session via WebSocket
+    const session = await this.prisma.session.findUnique({
+      where: { id: body.sessionId },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    if (session) {
+      this.gateway.emitSession(mapSession(session));
+    }
+    return agent;
+  }
+
+  @Patch(":id")
+  async updateAgent(@Param("id") id: string, @Body() body: UpdateAgentRequest) {
+    return this.agents.updateAgent(id, body);
+  }
+
+  @Delete(":id")
+  async deleteAgent(@Param("id") id: string) {
+    const agent = await this.agents.getAgent(id);
+    if (!agent) {
+      throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
+    }
+    await this.agents.deleteAgent(id);
+    return { ok: true };
   }
 }
 
