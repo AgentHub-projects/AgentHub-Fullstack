@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentHub 当前数据库表结构</title>
+  <style>
+    :root {
+      --ink: #202124;
+      --muted: #667085;
+      --line: #d7dde8;
+      --paper: #f7f4ee;
+      --panel: #ffffff;
+      --soft: #eef5f2;
+      --accent: #1e6f68;
+      --accent-2: #9a542c;
+      --code-bg: #141f1e;
+      --code-fg: #e8f3ef;
+      --shadow: 0 18px 40px rgba(32, 33, 36, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(30,111,104,.07) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(154,84,44,.05) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+    .page { max-width: 1280px; margin: 0 auto; padding: 40px 24px 72px; }
+    header, nav, section { border: 1px solid var(--line); background: rgba(255,255,255,.94); }
+    header { padding: 34px; box-shadow: var(--shadow); }
+    .eyebrow { color: var(--accent); font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 8px 0 10px; font-size: clamp(2rem, 5vw, 4rem); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 34px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--line); font-size: 1.5rem; }
+    h3 { margin: 24px 0 10px; color: #344054; font-size: 1.08rem; }
+    p { margin: 0 0 12px; }
+    .summary { max-width: 920px; color: #475467; font-size: 1.04rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .pill { display: inline-flex; align-items: center; min-height: 30px; padding: 3px 10px; border: 1px solid var(--line); background: var(--soft); color: #344054; font-size: .9rem; font-weight: 650; }
+    nav { margin: 22px 0; padding: 18px 20px; }
+    nav strong { display: block; margin-bottom: 8px; }
+    nav a { display: inline-block; margin: 4px 14px 4px 0; color: #344054; text-decoration: none; font-weight: 650; }
+    nav a:hover { color: var(--accent); }
+    section { margin-top: 22px; padding: 24px; box-shadow: 0 10px 24px rgba(32,33,36,.04); }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 4px; background: var(--panel); }
+    th, td { border: 1px solid var(--line); padding: 9px 11px; text-align: left; vertical-align: top; }
+    th { background: #e9efed; color: #344054; }
+    code, pre { font-family: "Cascadia Code", "Consolas", monospace; }
+    code { background: #edf2f0; border: 1px solid #dce4e1; padding: 1px 5px; }
+    pre { overflow: auto; margin: 12px 0; padding: 16px; background: var(--code-bg); color: var(--code-fg); border: 1px solid #263b38; }
+    pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+    .note, .warn { padding: 14px 16px; border-left: 5px solid var(--accent); background: #eef7f4; }
+    .warn { border-left-color: var(--accent-2); background: #fff1e8; }
+    .rel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 6px; }
+    @media (max-width: 900px) {
+      .page { padding: 20px 12px 48px; }
+      header, section { padding: 20px; }
+      .rel-grid { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="eyebrow">AgentHub Database</div>
+      <h1>当前数据库表结构</h1>
+      <p class="summary">
+        本文档按当前 <code>backend/prisma/schema.prisma</code> 描述数据库 schema：每张表的字段、取值、用途和表之间的关联。旧设计稿中的若干表尚未存在，文末单独列出。
+      </p>
+      <div class="meta">
+        <span class="pill">数据库：PostgreSQL</span>
+        <span class="pill">ORM：Prisma</span>
+        <span class="pill">向量：pgvector vector(1536)</span>
+      </div>
+    </header>
+
+    <nav>
+      <strong>目录</strong>
+      <a href="#enums">1. 枚举</a>
+      <a href="#agents">2. Agent 与模板</a>
+      <a href="#sessions">3. 会话与消息</a>
+      <a href="#runs">4. Run 与事件</a>
+      <a href="#artifacts">5. Artifact 与文件变更</a>
+      <a href="#memory">6. 记忆与上下文</a>
+      <a href="#builder">7. 模板 Builder</a>
+      <a href="#relations">8. 表关联</a>
+      <a href="#missing">9. 当前不存在的旧设计表</a>
+    </nav>
+
+    <section id="enums">
+      <h2>1. 枚举与约定值</h2>
+      <table>
+        <thead>
+          <tr><th>枚举/约定</th><th>取值</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>SessionStatusDb</code></td><td><code>active</code>、<code>archived</code>、<code>deleted</code></td><td><code>sessions.status</code>。</td></tr>
+          <tr><td><code>MessageRoleDb</code></td><td><code>user</code>、<code>assistant</code>、<code>agent</code>、<code>system</code>、<code>tool</code></td><td><code>messages.role</code>。</td></tr>
+          <tr><td><code>RunStatusDb</code></td><td><code>queued</code>、<code>context_building</code>、<code>connecting</code>、<code>running</code>、<code>completed</code>、<code>failed</code>、<code>cancelled</code></td><td><code>agent_runs.status</code>。</td></tr>
+          <tr><td><code>AgentStatusDb</code></td><td><code>enabled</code>、<code>disabled</code>、<code>offline</code>、<code>error</code></td><td><code>agent_templates.status</code>、<code>agents.status</code>。</td></tr>
+          <tr><td><code>MessageStatusDb</code></td><td><code>queued</code>、<code>thinking</code>、<code>streaming</code>、<code>completed</code>、<code>failed</code>、<code>cancelled</code></td><td><code>messages.status</code>。</td></tr>
+          <tr><td><code>ArtifactKindDb</code></td><td><code>markdown</code>、<code>text</code>、<code>html</code>、<code>pdf</code>、<code>docx</code>、<code>image</code>、<code>archive</code>、<code>log</code>、<code>other</code></td><td><code>artifacts.kind</code>。</td></tr>
+          <tr><td><code>StorageKindDb</code></td><td><code>inline_text</code>、<code>oss_object</code>、<code>remote_url</code></td><td><code>artifacts.storage_kind</code>。</td></tr>
+          <tr><td><code>FileChangeTypeDb</code></td><td><code>added</code>、<code>modified</code>、<code>deleted</code>、<code>renamed</code></td><td><code>file_changes.change_type</code>。</td></tr>
+          <tr><td><code>ContextItemKindDb</code></td><td><code>message</code>、<code>artifact</code>、<code>file_change</code>、<code>run_summary</code>、<code>manual_pin</code></td><td><code>context_items.kind</code>。</td></tr>
+          <tr><td>provider</td><td><code>0=claude-code</code>、<code>1=codex</code>、<code>2=opencode</code></td><td><code>agent_templates.default_provider</code>、<code>agents.provider</code>。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="agents">
+      <h2>2. Agent 与模板</h2>
+      <h3>agent_templates</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>模板 id。</td></tr>
+          <tr><td><code>name</code></td><td>String</td><td>模板名称。</td></tr>
+          <tr><td><code>description</code></td><td>String, 默认 ""</td><td>模板说明。</td></tr>
+          <tr><td><code>default_provider</code></td><td>Int, 默认 0</td><td>默认 provider：0、1、2。</td></tr>
+          <tr><td><code>system_prompt</code></td><td>String, 默认 ""</td><td>模板系统提示词。</td></tr>
+          <tr><td><code>prompt_config</code></td><td>Json, 默认 {}</td><td>提示词配置扩展。</td></tr>
+          <tr><td><code>default_capabilities</code></td><td>Json, 默认 []</td><td>模板默认能力列表。</td></tr>
+          <tr><td><code>default_model_config</code></td><td>Json, 默认 {}</td><td>默认模型配置。</td></tr>
+          <tr><td><code>metadata</code></td><td>Json, 默认 {}</td><td>扩展元数据。</td></tr>
+          <tr><td><code>status</code></td><td>AgentStatusDb, 默认 enabled</td><td>enabled、disabled、offline、error。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz, 默认 now()</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz, @updatedAt</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>agents</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>Agent 实例 id；下游事件 speaker 使用这个 id。</td></tr>
+          <tr><td><code>template_id</code></td><td>uuid, FK -> agent_templates.id</td><td>实例所属模板。</td></tr>
+          <tr><td><code>name</code></td><td>String, unique</td><td>实例名称，用于 @mention 和展示。</td></tr>
+          <tr><td><code>description</code></td><td>String, 默认 ""</td><td>实例说明。</td></tr>
+          <tr><td><code>provider</code></td><td>Int, 默认 0</td><td>0、1、2。</td></tr>
+          <tr><td><code>is_default_orchestrator</code></td><td>Boolean, 默认 false</td><td>是否默认主 Orchestrator。</td></tr>
+          <tr><td><code>status</code></td><td>AgentStatusDb, 默认 offline</td><td>enabled、disabled、offline、error。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sessions">
+      <h2>3. 会话与消息</h2>
+      <h3>sessions</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>会话 id。</td></tr>
+          <tr><td><code>title</code></td><td>String, 默认 "Untitled Session"</td><td>会话标题；发送首条消息时可能派生。</td></tr>
+          <tr><td><code>status</code></td><td>SessionStatusDb, 默认 active</td><td>active、archived、deleted。</td></tr>
+          <tr><td><code>metadata</code></td><td>Json, 默认 {}</td><td>扩展元数据，前端也读取 <code>memberAgentIds</code>。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间，用于列表排序。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>session_agents</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>session_id</code></td><td>uuid, PK part, FK -> sessions.id</td><td>会话 id。</td></tr>
+          <tr><td><code>agent_id</code></td><td>uuid, PK part, FK -> agents.id</td><td>Agent 实例 id。</td></tr>
+          <tr><td><code>participant_role</code></td><td>String, 默认 "member"</td><td>当前代码使用 <code>orchestrator</code> 或 <code>member</code>。</td></tr>
+          <tr><td><code>source</code></td><td>String, 默认 "mention"</td><td>如 <code>manual_add</code>、<code>mention</code>、<code>default_orchestrator</code>。</td></tr>
+          <tr><td><code>first_mentioned_at</code></td><td>timestamptz?</td><td>首次加入或提及时间。</td></tr>
+          <tr><td><code>last_active_at</code></td><td>timestamptz?</td><td>最后活跃时间。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>messages</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>消息 id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>run_id</code></td><td>uuid?</td><td>关联 run；schema 未声明 Prisma relation 字段，但保存 uuid。</td></tr>
+          <tr><td><code>role</code></td><td>MessageRoleDb</td><td>user、assistant、agent、system、tool。</td></tr>
+          <tr><td><code>agent_id</code></td><td>uuid?, FK -> agents.id, onDelete SetNull</td><td>assistant 消息的 speaker Agent。</td></tr>
+          <tr><td><code>parent_message_id</code></td><td>uuid?</td><td>父消息 id。</td></tr>
+          <tr><td><code>content_text</code></td><td>String, 默认 ""</td><td>消息正文。</td></tr>
+          <tr><td><code>content_json</code></td><td>Json, 默认 {}</td><td>结构化内容；用户消息保存 mentionedAgentIds。</td></tr>
+          <tr><td><code>token_count</code></td><td>Int, 默认 0</td><td>粗略 token 估算。</td></tr>
+          <tr><td><code>status</code></td><td>MessageStatusDb, 默认 completed</td><td>queued、thinking、streaming、completed、failed、cancelled。</td></tr>
+          <tr><td><code>is_pinned</code></td><td>Boolean, 默认 false</td><td>是否 pin。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="runs">
+      <h2>4. Run 与事件</h2>
+      <h3>agent_runs</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>run id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>orchestrator_agent_id</code></td><td>uuid, FK -> agents.id</td><td>主 Orchestrator。</td></tr>
+          <tr><td><code>user_message_id</code></td><td>uuid?</td><td>触发 run 的用户消息 id。</td></tr>
+          <tr><td><code>assistant_message_id</code></td><td>uuid?</td><td>最终 assistant 消息 id。</td></tr>
+          <tr><td><code>context_snapshot_id</code></td><td>uuid?</td><td>本 run 使用的 context snapshot。</td></tr>
+          <tr><td><code>status</code></td><td>RunStatusDb, 默认 queued</td><td>queued、context_building、connecting、running、completed、failed、cancelled。</td></tr>
+          <tr><td><code>downstream_session_id</code></td><td>String?</td><td>mock 路径会写 <code>mock-&lt;sessionId&gt;</code>；真实路径当前未更新。</td></tr>
+          <tr><td><code>downstream_run_id</code></td><td>String?</td><td>预留给下游 run id。</td></tr>
+          <tr><td><code>error_code</code></td><td>String?</td><td>失败错误码，如 <code>DOWNSTREAM_PROMPT_FAILED</code>。</td></tr>
+          <tr><td><code>error_message</code></td><td>String?</td><td>失败错误信息。</td></tr>
+          <tr><td><code>usage_json</code></td><td>Json, 默认 {}</td><td>token 或计费统计扩展。</td></tr>
+          <tr><td><code>started_at</code></td><td>timestamptz?</td><td>开始时间。</td></tr>
+          <tr><td><code>completed_at</code></td><td>timestamptz?</td><td>完成、失败或取消时间。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>agent_events</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>事件 id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>run_id</code></td><td>uuid, FK -> agent_runs.id</td><td>所属 run。</td></tr>
+          <tr><td><code>seq</code></td><td>BigInt</td><td>run 内序号；唯一键 <code>(run_id, seq)</code>。</td></tr>
+          <tr><td><code>source</code></td><td>String, 默认 "downstream_agent"</td><td>如 <code>agenthub_backend</code>、<code>downstream_agent</code>、<code>mock_orchestrator</code>。</td></tr>
+          <tr><td><code>event_type</code></td><td>String</td><td>message.delta、file.change、artifact.upsert、run.completed 等。</td></tr>
+          <tr><td><code>visibility</code></td><td>String, 默认 "public"</td><td>public、private 等。</td></tr>
+          <tr><td><code>speaker_agent_id</code></td><td>uuid?, FK -> agents.id</td><td>说话 Agent。</td></tr>
+          <tr><td><code>speaker_name</code></td><td>String?</td><td>落库时从 agents.name 补全。</td></tr>
+          <tr><td><code>payload</code></td><td>Json</td><td>事件原始业务载荷。</td></tr>
+          <tr><td><code>occurred_at</code></td><td>timestamptz?</td><td>下游发生时间或后端当前时间。</td></tr>
+          <tr><td><code>persisted_at</code></td><td>timestamptz, 默认 now()</td><td>后端落库时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="artifacts">
+      <h2>5. Artifact 与文件变更</h2>
+      <h3>artifacts</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>artifact id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>run_id</code></td><td>uuid?, FK -> agent_runs.id</td><td>所属 run。</td></tr>
+          <tr><td><code>producing_event_id</code></td><td>uuid?</td><td>产生该 artifact 的 event id。</td></tr>
+          <tr><td><code>artifact_key</code></td><td>String?</td><td>同一 run 内 artifact 业务 key；唯一键 <code>(run_id, artifact_key)</code>。</td></tr>
+          <tr><td><code>kind</code></td><td>ArtifactKindDb</td><td>markdown、text、html、pdf、docx、image、archive、log、other。</td></tr>
+          <tr><td><code>title</code></td><td>String</td><td>展示标题。</td></tr>
+          <tr><td><code>mime_type</code></td><td>String, 默认 application/octet-stream</td><td>内容 MIME。</td></tr>
+          <tr><td><code>storage_kind</code></td><td>StorageKindDb, 默认 inline_text</td><td>inline_text、oss_object、remote_url。</td></tr>
+          <tr><td><code>storage_uri</code></td><td>String?</td><td>OSS URI 或远程 URL。</td></tr>
+          <tr><td><code>text_content</code></td><td>String?</td><td>内联文本内容。</td></tr>
+          <tr><td><code>sha256</code></td><td>String?</td><td>内容哈希。</td></tr>
+          <tr><td><code>size_bytes</code></td><td>BigInt?</td><td>大小。</td></tr>
+          <tr><td><code>version</code></td><td>Int, 默认 1</td><td>upsert 更新时递增。</td></tr>
+          <tr><td><code>final</code></td><td>Boolean, 默认 false</td><td>是否完成。</td></tr>
+          <tr><td><code>metadata</code></td><td>Json, 默认 {}</td><td>扩展元数据。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>file_changes</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>文件变更 id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>run_id</code></td><td>uuid, FK -> agent_runs.id</td><td>所属 run。</td></tr>
+          <tr><td><code>artifact_id</code></td><td>uuid?, FK -> artifacts.id</td><td>关联 artifact。</td></tr>
+          <tr><td><code>producing_event_id</code></td><td>uuid?</td><td>产生该变更的 event id。</td></tr>
+          <tr><td><code>path</code></td><td>String</td><td>新路径或当前路径。</td></tr>
+          <tr><td><code>old_path</code></td><td>String?</td><td>重命名前路径。</td></tr>
+          <tr><td><code>change_type</code></td><td>FileChangeTypeDb</td><td>added、modified、deleted、renamed。</td></tr>
+          <tr><td><code>language</code></td><td>String?</td><td>语言标识，如 tsx、ts、md。</td></tr>
+          <tr><td><code>before_content</code></td><td>String?</td><td>变更前内容快照。</td></tr>
+          <tr><td><code>before_sha256</code></td><td>String?</td><td>变更前完整内容哈希。</td></tr>
+          <tr><td><code>before_truncated</code></td><td>Boolean, 默认 false</td><td>变更前内容是否截断。</td></tr>
+          <tr><td><code>after_content</code></td><td>String?</td><td>变更后内容快照。</td></tr>
+          <tr><td><code>after_sha256</code></td><td>String?</td><td>变更后完整内容哈希。</td></tr>
+          <tr><td><code>after_truncated</code></td><td>Boolean, 默认 false</td><td>变更后内容是否截断。</td></tr>
+          <tr><td><code>patch</code></td><td>String?</td><td>统一 diff patch。</td></tr>
+          <tr><td><code>stats</code></td><td>Json, 默认 {}</td><td>如 additions、deletions。</td></tr>
+          <tr><td><code>metadata</code></td><td>Json, 默认 {}</td><td>扩展元数据。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="memory">
+      <h2>6. 记忆与上下文</h2>
+      <h3>context_snapshots</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>snapshot id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>run_id</code></td><td>uuid?</td><td>关联 run id。</td></tr>
+          <tr><td><code>version</code></td><td>Int, 默认 1</td><td>快照版本。</td></tr>
+          <tr><td><code>token_budget</code></td><td>Int</td><td>生成时上下文 token 预算。</td></tr>
+          <tr><td><code>token_count</code></td><td>Int, 默认 0</td><td>选中项估算 token 总数。</td></tr>
+          <tr><td><code>selected_item_ids</code></td><td>String[], 默认 []</td><td>选中的 context item 或 message id。</td></tr>
+          <tr><td><code>snapshot_json</code></td><td>Json</td><td>{pins, recent, retrieved, summary, mentionedAgents}。</td></tr>
+          <tr><td><code>prompt_text</code></td><td>String, 默认 ""</td><td>渲染后的上下文文本。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>context_items</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>上下文条目 id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>source_type</code></td><td>String</td><td>如 message、file_change、artifact。</td></tr>
+          <tr><td><code>source_id</code></td><td>uuid?</td><td>来源表记录 id。</td></tr>
+          <tr><td><code>kind</code></td><td>ContextItemKindDb</td><td>message、artifact、file_change、run_summary、manual_pin。</td></tr>
+          <tr><td><code>text</code></td><td>String</td><td>用于摘要和召回的文本。</td></tr>
+          <tr><td><code>token_count</code></td><td>Int, 默认 0</td><td>粗略 token 估算。</td></tr>
+          <tr><td><code>importance</code></td><td>Int, 默认 0</td><td>重要性排序，pin 可为 100。</td></tr>
+          <tr><td><code>pinned</code></td><td>Boolean, 默认 false</td><td>是否固定进入上下文候选。</td></tr>
+          <tr><td><code>metadata</code></td><td>Json, 默认 {}</td><td>扩展元数据。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>context_embeddings</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>embedding id。</td></tr>
+          <tr><td><code>context_item_id</code></td><td>uuid, FK -> context_items.id</td><td>所属 context item。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属 session，便于按会话召回。</td></tr>
+          <tr><td><code>model</code></td><td>String</td><td>embedding 模型名。</td></tr>
+          <tr><td><code>dims</code></td><td>Int, 默认 1536</td><td>向量维度。</td></tr>
+          <tr><td><code>embedding</code></td><td>vector(1536)</td><td>pgvector 向量。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>context_update_jobs</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>job id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>reason</code></td><td>String</td><td>当前 buildSnapshot 使用 <code>build_snapshot</code>。</td></tr>
+          <tr><td><code>status</code></td><td>String, 默认 pending</td><td>pending、running、completed 等字符串约定。</td></tr>
+          <tr><td><code>error_message</code></td><td>String?</td><td>错误信息。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>started_at</code></td><td>timestamptz?</td><td>开始时间。</td></tr>
+          <tr><td><code>completed_at</code></td><td>timestamptz?</td><td>完成时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>long_term_summaries</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>摘要 id。</td></tr>
+          <tr><td><code>session_id</code></td><td>uuid, FK -> sessions.id</td><td>所属会话。</td></tr>
+          <tr><td><code>seq</code></td><td>Int</td><td>摘要链顺序。</td></tr>
+          <tr><td><code>content</code></td><td>String, 默认 ""</td><td>摘要内容。</td></tr>
+          <tr><td><code>token_count</code></td><td>Int, 默认 0</td><td>摘要 token 估算。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="builder">
+      <h2>7. 模板 Builder 表</h2>
+      <h3>build_sessions</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>模板构建会话 id。</td></tr>
+          <tr><td><code>status</code></td><td>String, 默认 active</td><td>约定值：active、completed、cancelled。</td></tr>
+          <tr><td><code>context</code></td><td>Json, 默认 {}</td><td>已收集的 name、description、systemPrompt、defaultProvider。</td></tr>
+          <tr><td><code>agent_template_id</code></td><td>uuid?</td><td>确认后创建的模板 id。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+          <tr><td><code>updated_at</code></td><td>timestamptz</td><td>更新时间。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>build_messages</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型/默认值</th><th>用途/取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>uuid, PK</td><td>builder 消息 id。</td></tr>
+          <tr><td><code>build_session_id</code></td><td>uuid, FK -> build_sessions.id</td><td>所属构建会话。</td></tr>
+          <tr><td><code>role</code></td><td>String</td><td>约定值：user、assistant。</td></tr>
+          <tr><td><code>content</code></td><td>String, 默认 ""</td><td>消息正文。</td></tr>
+          <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="relations">
+      <h2>8. 不同表之间的关联</h2>
+      <div class="rel-grid">
+        <div class="note">
+          <strong>Agent 模板与实例</strong>
+          <p><code>agent_templates.id -> agents.template_id</code>。模板保存默认提示词和能力，Agent 是可参与会话的实例。</p>
+        </div>
+        <div class="note">
+          <strong>会话成员</strong>
+          <p><code>sessions</code> 与 <code>agents</code> 通过 <code>session_agents</code> 多对多关联，复合主键是 <code>(session_id, agent_id)</code>。</p>
+        </div>
+        <div class="note">
+          <strong>会话主数据</strong>
+          <p><code>sessions</code> 一对多关联 <code>messages</code>、<code>agent_runs</code>、<code>agent_events</code>、<code>artifacts</code>、<code>file_changes</code>、<code>context_items</code>、<code>context_snapshots</code>。</p>
+        </div>
+        <div class="note">
+          <strong>Run 过程</strong>
+          <p><code>agent_runs.id -> agent_events.run_id</code>、<code>artifacts.run_id</code>、<code>file_changes.run_id</code>。事件以 <code>(run_id, seq)</code> 保证幂等。</p>
+        </div>
+        <div class="note">
+          <strong>Artifact 与文件变更</strong>
+          <p><code>artifacts.id -> file_changes.artifact_id</code> 是可选关联；文件变更也能只关联 run。</p>
+        </div>
+        <div class="note">
+          <strong>上下文索引</strong>
+          <p><code>context_items.id -> context_embeddings.context_item_id</code>。同一个 context item 对同一个 model 只能有一个 embedding。</p>
+        </div>
+      </div>
+
+      <h3>简化关系图</h3>
+      <pre><code>agent_templates 1 ── * agents
+sessions 1 ── * messages
+sessions 1 ── * agent_runs
+sessions * ── * agents        via session_agents
+agent_runs 1 ── * agent_events
+agent_runs 1 ── * artifacts
+agent_runs 1 ── * file_changes
+sessions 1 ── * context_items
+context_items 1 ── * context_embeddings
+sessions 1 ── * context_snapshots
+sessions 1 ── * long_term_summaries
+build_sessions 1 ── * build_messages</code></pre>
+    </section>
+
+    <section id="missing">
+      <h2>9. 当前不存在的旧设计表</h2>
+      <div class="warn">
+        <strong>以当前 schema.prisma 为准</strong>
+        <p>旧设计文档里提到的以下表当前没有出现在 Prisma schema 中，写文档和开发时不要按它们假定已经存在。</p>
+      </div>
+      <table>
+        <thead>
+          <tr><th>旧设计表</th><th>当前状态</th><th>当前替代实现</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>downstream_sessions</code></td><td>不存在</td><td>真实下游连接保存在后端内存 Map；<code>agent_runs.downstream_session_id</code> 仅作为字段存在。</td></tr>
+          <tr><td><code>downstream_connections</code></td><td>不存在</td><td>连接状态不落库。</td></tr>
+          <tr><td><code>artifact_chunks</code></td><td>不存在</td><td><code>artifact.chunk</code> 当前简化为累加 <code>artifacts.text_content</code>。</td></tr>
+          <tr><td><code>artifact_renders</code></td><td>不存在</td><td>当前没有独立渲染表；前端直接按 artifact kind 预览或打开内容接口。</td></tr>
+          <tr><td><code>session_contexts</code></td><td>不存在</td><td>长期摘要使用 <code>long_term_summaries</code>，运行快照使用 <code>context_snapshots</code>。</td></tr>
+          <tr><td><code>run_agent_mentions</code></td><td>不存在</td><td>用户消息的 mentions 保存在 <code>messages.content_json.mentionedAgentIds</code>，会话参与者保存在 <code>session_agents</code>。</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

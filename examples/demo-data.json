@@ -1,5 +1,4 @@
 {
-  "$schema": "./demo-data.schema.json",
   "description": "Mock orchestrator demo data for direct-agent and multi-agent/group flows. Load this into the frontend workbench or pass as context to the mock orchestrator for reproducible demo runs.",
   "version": "1.0.0",
 
