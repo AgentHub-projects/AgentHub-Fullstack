@@ -20,26 +20,29 @@
 
 ```
 AgentHub-Fullstack/
-├── shared/          # 前后端共享 TypeScript 类型契约
-├── backend/         # NestJS 后端（上下文注入 + 消息路由层）
-│   ├── prisma/      # 数据库 Schema + 迁移
-│   └── src/hub/     # 核心服务
-│       ├── hub-session.service.ts          # 会话与消息管理
-│       ├── hub.controller.ts               # REST API 控制器
-│       ├── hub-realtime.gateway.ts         # WebSocket 实时推送
-│       ├── downstream-orchestrator.service.ts  # 下游 WS 连接管理
-│       ├── context.service.ts              # 上下文构建（摘要链 + 向量召回）
-│       ├── event.service.ts                # 事件持久化 + 副作用
-│       ├── agent-registry.service.ts       # Agent 注册中心
-│       ├── artifact-storage.service.ts     # 产物存储
-│       └── prisma.service.ts               # Prisma 客户端
-└── frontend/        # Next.js 前端
-    ├── app/
-    │   ├── page.tsx      # 主页面（群聊列表 + 对话 + Inspector）
-    │   ├── layout.tsx    # 根布局
-    │   └── globals.css   # 全局样式
-    └── lib/
-        └── agenthub-api.ts  # REST + WebSocket API 客户端
+├── backend/             # NestJS 后端
+│   ├── prisma/          # 数据库 Schema、迁移和 seed
+│   └── src/modules/hub/ # 核心 Hub 模块（REST、WebSocket、上下文、下游连接）
+│       ├── controllers/ # HTTP API 控制器
+│       ├── gateways/    # Socket.IO 实时推送
+│       ├── mappers/     # Prisma 模型到 DTO 的映射
+│       ├── services/    # 会话、事件、上下文、Agent、artifact 等业务服务
+│       ├── types/       # 模块内共享类型
+│       └── utils/       # 模块内纯工具函数
+├── frontend/            # Next.js 前端
+│   ├── app/
+│   │   ├── page.tsx        # 工作台入口和状态编排
+│   │   ├── globals.css     # 全局变量和基础元素样式
+│   │   └── workbench/      # 工作台展示组件和工作台样式
+│   └── lib/
+│       ├── agenthub-api.ts # REST + WebSocket API 客户端
+│       └── workbench/      # diff、Markdown、mention、排序格式化等纯函数
+├── shared/              # 前后端共享 TypeScript 类型契约
+│   └── src/             # hub、downstream、builder 契约分文件导出
+├── docs/
+│   ├── design/          # 设计文档
+│   └── reference/       # 协议、数据库等参考文档
+└── examples/            # demo/mock 数据
 ```
 
 ## 快速开始

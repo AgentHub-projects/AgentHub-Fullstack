@@ -1,9 +1,12 @@
 node_modules/
 dist/
+.next/
 coverage/
 .turbo/
 .vite/
 .claude/
+.codex-dev/
+*.tsbuildinfo
 
 .env
 .env.*
