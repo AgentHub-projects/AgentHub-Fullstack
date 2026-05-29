@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
-import type { AgentInstanceDto, DownstreamPromptInput, HubContextSnapshotDto } from "@agenthub/shared";
+import type { AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
 import { io } from "socket.io-client";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -7,7 +7,6 @@ import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
-
 
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
@@ -63,8 +62,10 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     try {
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator);
-      const promptInput = await this.buildPromptInput(input, connection.needsBootstrap);
+      const downstreamSessionId = await connection.downstreamReady;
+      const promptInput = await this.buildPromptInput(input, downstreamSessionId!, connection.needsBootstrap);
 
+      connection.activeRunId = input.runId;
       connection.socket.emit("acp:message", {
         jsonrpc: "2.0",
         id: `prompt-${input.runId}`,
@@ -99,6 +100,15 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 
   async cancelRun(sessionId: string, runId: string, orchestratorAgentId: string) {
+    // Skip if the run is already in a terminal state
+    const existing = await this.prisma.agentRun.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+    if (!existing || existing.status === "cancelled" || existing.status === "completed" || existing.status === "failed") {
+      return;
+    }
+
     await this.prisma.agentRun.update({
       where: { id: runId },
       data: { status: "cancelled", completedAt: new Date() },
@@ -116,6 +126,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       runId,
       eventType: "run.cancelled",
       speakerAgentId: orchestratorAgentId,
+      source: "agenthub_backend",
       payload: { status: "cancelled" },
     });
   }
@@ -165,10 +176,17 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       reconnection: false,
     });
 
+    let resolveReady!: (id: string) => void;
+    const downstreamReady = new Promise<string>((resolve) => {
+      resolveReady = resolve;
+    });
+
     const record: ConnectionRecord = {
       key: sessionId,
       socket,
       sessionId,
+      downstreamReady,
+      resolveDownstreamReady: resolveReady,
       idleTimer: null,
       lastActivityAt: Date.now(),
       needsBootstrap: true,
@@ -177,26 +195,39 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     socket.on("connect", () => {
       record.needsBootstrap = true;
+      // ACP v1 initialize
       socket.emit("acp:message", {
         jsonrpc: "2.0",
-        id: `init-${sessionId}`,
+        id: 1,
         method: "initialize",
         params: {
-          protocolVersion: "2026-05-agenthub-v1",
-          clientInfo: { name: "AgentHub", version: "0.1.0" },
-          capabilities: { sessionResume: true, artifacts: true, fileChangeSnapshot: true },
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
         },
       });
+      // ACP v1 session/new
       socket.emit("acp:message", {
         jsonrpc: "2.0",
-        id: `load-${sessionId}`,
-        method: "session/load",
+        id: 2,
+        method: "session/new",
         params: {
-          agenthubSessionId: sessionId,
-          cwd: "/workspace",
+          _meta: { agentId: "orchestrator" },
+          mcpServers: [],
         },
       });
       this.markDownstreamActivity(record);
+    });
+
+    // Capture session/new response to get downstream session ID
+    socket.on("acp:message", (msg: DownstreamEnvelope) => {
+      if (msg.id === 2 && msg.result?.sessionId) {
+        record.downstreamSessionId = stringValue(msg.result.sessionId);
+        if (record.downstreamSessionId) {
+          record.resolveDownstreamReady?.(record.downstreamSessionId);
+        }
+        return;
+      }
+      void this.handleDownstreamEvent(record, msg);
     });
 
     socket.on("disconnect", () => {
@@ -213,7 +244,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     socket.on("session/event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
     socket.on("acp:event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
-    socket.on("acp:message", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
     socket.on("message", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
 
     await waitForSocket(socket);
@@ -261,9 +291,56 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
 
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
+
+    // Handle session/update (agent message chunks from downstream)
+    if (envelope.method === "session/update") {
+      const update = params.update;
+      const content = asRecord(typeof update === "object" ? update : {});
+      const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
+      const sessionUpdate = stringValue((content as any).sessionUpdate);
+      const runId = record.activeRunId;
+      if (text && runId) {
+        const meta = asRecord(params._meta ?? (content as any)._meta);
+        const speaker = stringValue(meta.agentId) ?? "agent";
+        await this.events.append({
+          sessionId: record.sessionId,
+          runId,
+          eventType: "message.delta",
+          speakerAgentId: speaker,
+          source: "downstream_agent",
+          payload: { text, speaker },
+        });
+        if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop") {
+          await this.events.append({
+            sessionId: record.sessionId,
+            runId,
+            eventType: "message.completed",
+            speakerAgentId: speaker,
+            source: "downstream_agent",
+            payload: { text },
+          });
+        }
+      }
+      return;
+    }
+
+    // Handle JSON-RPC result (e.g. prompt completion)
+    if (envelope.result) {
+      const runId = record.activeRunId;
+      const result = asRecord(envelope.result);
+      if (result.stopReason && runId) {
+        await this.completeRun(record.sessionId, runId, "orchestrator", { status: "completed", stopReason: result.stopReason });
+      }
+      return;
+    }
+
+    // Legacy session/event handling
     if (envelope.method && envelope.method !== "session/event") return;
     const runId = stringValue(params.runId) ?? stringValue(envelope.runId);
     if (!runId) return;
+
+    // Drop events for runs that have been cancelled
+    if (await this.isRunCancelled(runId)) return;
 
     const eventType = stringValue(params.type) ?? stringValue(params.eventType) ?? stringValue(envelope.type);
     if (!eventType) return;
@@ -314,6 +391,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       { id: "10000000-0000-4000-8000-000000000004", name: "review-agent" } as AgentInstanceDto,
     ];
 
+    // Check if already cancelled before starting
+    if (await this.isRunCancelled(input.runId)) return;
+
     await this.prisma.agentRun.update({
       where: { id: input.runId },
       data: { status: "running", startedAt: new Date(), downstreamSessionId: `mock-${input.sessionId}` },
@@ -328,6 +408,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
     await this.events.append({
       sessionId: input.sessionId,
       runId: input.runId,
@@ -341,6 +422,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     for (const agent of speakers.slice(0, 3)) {
       await sleep(250);
+      if (await this.isRunCancelled(input.runId)) return;
       await this.events.append({
         sessionId: input.sessionId,
         runId: input.runId,
@@ -355,6 +437,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
     await this.events.append({
       sessionId: input.sessionId,
       runId: input.runId,
@@ -373,6 +456,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
     await this.events.append({
       sessionId: input.sessionId,
       runId: input.runId,
@@ -390,6 +474,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
     await this.events.append({
       sessionId: input.sessionId,
       runId: input.runId,
@@ -401,6 +486,14 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
+  private async isRunCancelled(runId: string): Promise<boolean> {
+    const run = await this.prisma.agentRun.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+    return run?.status === "cancelled";
+  }
+
   private async buildPromptInput(
     input: {
       sessionId: string;
@@ -410,33 +503,41 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       orchestrator: AgentInstanceDto;
       context: HubContextSnapshotDto;
     },
+    downstreamSessionId: string,
     bootstrap: boolean,
-  ): Promise<DownstreamPromptInput> {
+  ) {
     const snapshot = input.context.snapshotJson;
-    const base: DownstreamPromptInput = {
-      agenthubSessionId: input.sessionId,
-      runId: input.runId,
-      messageId: input.userMessageId,
-      agentId: input.orchestrator.id,
-      mode: bootstrap ? "bootstrap" : "incremental",
-      prompt: input.promptText,
-      pins: snapshot.pins,
-      metadata: {
-        source: "agenthub",
-        contextSnapshotId: input.context.id,
-      },
-    };
 
-    if (!bootstrap) return base;
+    // Build a comprehensive prompt that embeds all context
+    const sections: string[] = [];
+
+    if (bootstrap) {
+      const systemPrompt = input.orchestrator.template?.systemPrompt;
+      if (systemPrompt) {
+        sections.push(`## System\n${systemPrompt}`);
+      }
+
+      const agents = await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id);
+      if (agents.length > 0) {
+        sections.push(`## Available Agents\n${agents.map((a) => `- ${a.agentId}: ${a.description}`).join("\n")}`);
+      }
+
+      if (snapshot.summary) {
+        sections.push(`## Context Summary\n${snapshot.summary}`);
+      }
+
+      if (snapshot.pins?.length) {
+        sections.push(`## Pinned\n${snapshot.pins.map((p) => `- [${p.kind}] ${p.text}`).join("\n")}`);
+      }
+    }
+
+    sections.push(`## User Message\n${input.promptText}`);
+
+    const promptText = sections.join("\n\n");
 
     return {
-      ...base,
-      orchestratorSystemPrompt: input.orchestrator.template?.systemPrompt ?? "",
-      agents: await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id),
-      memory: {
-        summary: snapshot.summary ?? "",
-        retrieved: snapshot.retrieved,
-      },
+      sessionId: downstreamSessionId,
+      prompt: [{ text: promptText, type: "text" }],
     };
   }
 
@@ -493,4 +594,3 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 }
-

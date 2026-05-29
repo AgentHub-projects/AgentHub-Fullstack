@@ -93,6 +93,7 @@ export default function WorkbenchPage() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("diff");
   const [notice, setNotice] = useState("正在连接 AgentHub 后端");
   const [sending, setSending] = useState(false);
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
@@ -295,9 +296,25 @@ export default function WorkbenchPage() {
   }
 
   async function handleCancel(run: HubRunDto) {
-    if (!activeSessionId) return;
-    const result = await cancelRun(activeSessionId, run.id);
-    setNotice(result.ok ? "已请求取消当前 run" : `取消失败：${result.error}`);
+    if (!activeSessionId || cancellingRunId) return;
+    setCancellingRunId(run.id);
+    try {
+      const result = await cancelRun(activeSessionId, run.id);
+      setNotice(result.ok ? "已请求取消当前 run" : `取消失败：${result.error}`);
+      if (result.ok) {
+        setDetail((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            runs: current.runs.map((r) =>
+              r.id === run.id ? { ...r, status: "cancelled" as const, completedAt: new Date().toISOString() } : r,
+            ),
+          };
+        });
+      }
+    } finally {
+      setCancellingRunId(null);
+    }
   }
 
   async function handleEditAgent(body: UpdateAgentRequest) {
@@ -464,8 +481,13 @@ export default function WorkbenchPage() {
           <div className="headerActions">
             {latestRun && <RunBadge run={latestRun} />}
             {latestRun && isRunning(latestRun.status) && (
-              <button className="ghostButton" type="button" onClick={() => void handleCancel(latestRun)}>
-                取消
+              <button
+                className="ghostButton"
+                type="button"
+                disabled={cancellingRunId === latestRun.id}
+                onClick={() => void handleCancel(latestRun)}
+              >
+                {cancellingRunId === latestRun.id ? "取消中..." : "取消"}
               </button>
             )}
           </div>

@@ -83,25 +83,21 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
   it("sends bootstrap payload on the first downstream prompt", async () => {
     const service = createService();
 
-    await service.startRun(createRunInput("run-1", "请实现登录页"));
+    await startRunWithDownstreamSession(service, createRunInput("run-1", "请实现登录页"), "downstream-session-1");
 
     expect(socketMock.io).toHaveBeenCalledWith("http://downstream.test/acp", {
       transports: ["websocket"],
       reconnection: false,
     });
     const params = lastPromptParams();
-    expect(params.mode).toBe("bootstrap");
-    expect(params.prompt).toBe("请实现登录页");
-    expect(params.pins).toEqual(context.snapshotJson.pins);
-    expect(params.orchestratorSystemPrompt).toBe("orchestrator system prompt");
-    expect(params.agents).toEqual([
-      { agentId: "frontend-agent-id", description: "前端成员描述" },
-      { agentId: "backend-agent-id", description: "后端模板描述" },
-    ]);
-    expect(params.memory).toEqual({
-      summary: "摘要记忆",
-      retrieved: context.snapshotJson.retrieved,
-    });
+    expect(params.sessionId).toBe("downstream-session-1");
+    const promptText = params.prompt[0].text;
+    expect(promptText).toContain("## System\norchestrator system prompt");
+    expect(promptText).toContain("- frontend-agent-id: 前端成员描述");
+    expect(promptText).toContain("- backend-agent-id: 后端模板描述");
+    expect(promptText).toContain("## Context Summary\n摘要记忆");
+    expect(promptText).toContain("## Pinned\n- [message] 本轮 pin");
+    expect(promptText).toContain("## User Message\n请实现登录页");
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("rendered context prompt should not be sent");
   });
@@ -109,34 +105,29 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
   it("sends only prompt and pins while the downstream connection is alive", async () => {
     const service = createService();
 
-    await service.startRun(createRunInput("run-1", "第一次需求"));
+    await startRunWithDownstreamSession(service, createRunInput("run-1", "第一次需求"), "downstream-session-1");
     await service.startRun(createRunInput("run-2", "第二次需求"));
 
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(1);
-    expect(params.mode).toBe("incremental");
-    expect(params.prompt).toBe("第二次需求");
-    expect(params.pins).toEqual(context.snapshotJson.pins);
-    expect(params.memory).toBeUndefined();
-    expect(params.orchestratorSystemPrompt).toBeUndefined();
-    expect(params.agents).toBeUndefined();
+    expect(params.sessionId).toBe("downstream-session-1");
+    expect(params.prompt).toEqual([{ text: "## User Message\n第二次需求", type: "text" }]);
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
+    expect(JSON.stringify(params)).not.toContain("摘要记忆");
   });
 
   it("returns to bootstrap mode after the downstream socket disconnects", async () => {
     const service = createService();
 
-    await service.startRun(createRunInput("run-1", "第一次需求"));
+    await startRunWithDownstreamSession(service, createRunInput("run-1", "第一次需求"), "downstream-session-1");
     socketMock.sockets[0].trigger("disconnect", "transport close");
-    await service.startRun(createRunInput("run-2", "断线后的需求"));
+    await startRunWithDownstreamSession(service, createRunInput("run-2", "断线后的需求"), "downstream-session-2");
 
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(2);
-    expect(params.mode).toBe("bootstrap");
-    expect(params.memory).toEqual({
-      summary: "摘要记忆",
-      retrieved: context.snapshotJson.retrieved,
-    });
+    expect(params.sessionId).toBe("downstream-session-2");
+    expect(params.prompt[0].text).toContain("## Context Summary\n摘要记忆");
+    expect(params.prompt[0].text).toContain("## User Message\n断线后的需求");
   });
 
   it("keeps idle downstream connections while frontend subscribers exist", async () => {
@@ -145,7 +136,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const service = createService({ gateway });
 
     gateway.hasSessionSubscribers.mockReturnValue(true);
-    await service.startRun(createRunInput("run-1", "保持连接"));
+    await startRunWithDownstreamSession(service, createRunInput("run-1", "保持连接"), "downstream-session-1");
 
     await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS);
     expect(socketMock.sockets[0].disconnect).not.toHaveBeenCalled();
@@ -293,6 +284,26 @@ function createGateway() {
     emitSession: vi.fn(),
     hasSessionSubscribers: vi.fn().mockReturnValue(false),
   };
+}
+
+async function startRunWithDownstreamSession(
+  service: DownstreamOrchestratorService,
+  input: ReturnType<typeof createRunInput>,
+  downstreamSessionId: string,
+) {
+  const pending = service.startRun(input);
+  await flushMicrotasks();
+  const socket = socketMock.sockets.at(-1);
+  expect(socket).toBeDefined();
+  socket!.trigger("acp:message", { jsonrpc: "2.0", id: 2, result: { sessionId: downstreamSessionId } });
+  await pending;
+  return socket!;
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function lastPromptParams() {
