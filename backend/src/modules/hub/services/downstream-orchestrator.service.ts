@@ -1,31 +1,13 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
 import type { AgentInstanceDto, DownstreamPromptInput, HubContextSnapshotDto } from "@agenthub/shared";
-import { io, Socket } from "socket.io-client";
+import { io } from "socket.io-client";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
+import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
+import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
-type ConnectionRecord = {
-  key: string;
-  socket: Socket;
-  sessionId: string;
-  idleTimer: NodeJS.Timeout | null;
-  lastActivityAt: number;
-  needsBootstrap: boolean;
-};
-
-type DownstreamEnvelope = {
-  jsonrpc?: string;
-  id?: string | number;
-  method?: string;
-  params?: Record<string, unknown>;
-  type?: string;
-  runId?: string;
-  seq?: number;
-  payload?: Record<string, unknown>;
-  speaker?: string;
-};
 
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
@@ -512,43 +494,3 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 }
 
-function waitForSocket(socket: Socket): Promise<void> {
-  if (socket.connected) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("downstream websocket connect timeout"));
-    }, 15000);
-    const cleanup = () => {
-      clearTimeout(timer);
-      socket.off("connect", onConnect);
-      socket.off("connect_error", onError);
-    };
-    const onConnect = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-    socket.once("connect", onConnect);
-    socket.once("connect_error", onError);
-  });
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
