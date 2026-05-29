@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./workbench/workbench.css";
 
 export const metadata: Metadata = {
   title: "AgentHub Workbench",
