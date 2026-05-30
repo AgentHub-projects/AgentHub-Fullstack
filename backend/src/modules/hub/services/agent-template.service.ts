@@ -18,7 +18,7 @@ export class AgentTemplateService {
     return items.map(mapTemplate);
   }
 
-  async get(id: string): Promise<AgentTemplateDto> {
+  async get(id: number): Promise<AgentTemplateDto> {
     const item = await this.prisma.agentTemplate.findUnique({ where: { id } });
     if (!item) throw new Error("AgentTemplate not found");
     return mapTemplate(item);
@@ -37,7 +37,7 @@ export class AgentTemplateService {
     return mapTemplate(item);
   }
 
-  async update(id: string, input: UpdateAgentTemplateRequest): Promise<AgentTemplateDto> {
+  async update(id: number, input: UpdateAgentTemplateRequest): Promise<AgentTemplateDto> {
     const existing = await this.prisma.agentTemplate.findUnique({ where: { id } });
     if (!existing) throw new Error("AgentTemplate not found");
 
@@ -53,7 +53,7 @@ export class AgentTemplateService {
     return mapTemplate(item);
   }
 
-  async delete(id: string): Promise<{ ok: boolean }> {
+  async delete(id: number): Promise<{ ok: boolean }> {
     const existing = await this.prisma.agentTemplate.findUnique({ where: { id } });
     if (!existing) throw new Error("AgentTemplate not found");
     await this.prisma.agentTemplate.delete({ where: { id } });

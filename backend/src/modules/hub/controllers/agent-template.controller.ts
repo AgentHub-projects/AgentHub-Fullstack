@@ -19,7 +19,7 @@ export class AgentTemplateController {
 
   @Get(":id")
   getTemplate(@Param("id") id: string): Promise<AgentTemplateDto> {
-    return this.templates.get(id);
+    return this.templates.get(Number(id));
   }
 
   @Post()
@@ -32,11 +32,11 @@ export class AgentTemplateController {
     @Param("id") id: string,
     @Body() body: UpdateAgentTemplateRequest,
   ): Promise<AgentTemplateDto> {
-    return this.templates.update(id, body);
+    return this.templates.update(Number(id), body);
   }
 
   @Delete(":id")
   deleteTemplate(@Param("id") id: string): Promise<{ ok: boolean }> {
-    return this.templates.delete(id);
+    return this.templates.delete(Number(id));
   }
 }
