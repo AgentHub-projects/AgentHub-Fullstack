@@ -136,14 +136,14 @@ export function createAgentTemplate(body: CreateAgentTemplateRequest) {
   });
 }
 
-export function updateAgentTemplate(id: string, body: UpdateAgentTemplateRequest) {
+export function updateAgentTemplate(id: number, body: UpdateAgentTemplateRequest) {
   return requestJson<AgentTemplateDto>(`/agent-templates/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
-export function deleteAgentTemplate(id: string) {
+export function deleteAgentTemplate(id: number) {
   return requestJson<{ ok: boolean }>(`/agent-templates/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });

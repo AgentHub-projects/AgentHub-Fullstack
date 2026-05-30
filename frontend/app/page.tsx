@@ -97,9 +97,9 @@ export default function WorkbenchPage() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
-  const [orchTemplateId, setOrchTemplateId] = useState<string>("");
+  const [orchTemplateId, setOrchTemplateId] = useState<number>(0);
   const [orchProvider, setOrchProvider] = useState(0);
-  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: string; provider: number }>>([]);
+  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: number }>>([]);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [agentDialogTab, setAgentDialogTab] = useState<"quick" | "builder">("quick");
   const [quickName, setQuickName] = useState("");
@@ -115,7 +115,7 @@ export default function WorkbenchPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: string; provider: number; name: string }>>([]);
+  const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: number; provider: number; name: string }>>([]);
   const [inviteQuery, setInviteQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgentInstanceDto | null>(null);
@@ -225,7 +225,7 @@ export default function WorkbenchPage() {
 
   function openCreateGroupDialog() {
     setGroupTitle("");
-    setOrchTemplateId("");
+    setOrchTemplateId(0);
     setOrchProvider(0);
     setMemberTemplates([]);
     setGroupDialogOpen(true);
@@ -671,7 +671,7 @@ export default function WorkbenchPage() {
               </label>
               <label>
                 Orchestrator 模板
-                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(e.target.value)}>
+                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
                   <option value="">默认 Orchestrator</option>
                   {templates.map((tpl) => (
                     <option key={tpl.id} value={tpl.id}>{tpl.name}</option>

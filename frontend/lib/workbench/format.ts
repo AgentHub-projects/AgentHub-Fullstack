@@ -49,7 +49,7 @@ export function readMemberAgentIds(session: HubSessionDto | null | undefined) {
     .filter((item): item is number => item !== null);
 }
 
-export function buildGroupTitle(templateIds: string[], templates: AgentTemplateDto[]) {
+export function buildGroupTitle(templateIds: number[], templates: AgentTemplateDto[]) {
   const names = templateIds
     .map((id) => templates.find((tpl) => tpl.id === id)?.name)
     .filter((name): name is string => Boolean(name));
