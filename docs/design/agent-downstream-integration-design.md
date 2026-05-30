@@ -530,16 +530,16 @@ AgentHub ack：
 
 ### 10.1 通用字段
 
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `sessionId` | 是 | 下游 session id |
-| `agenthubSessionId` | 是 | AgentHub session id |
-| `agenthubRunId` | 是 | AgentHub run id |
-| `seq` | 是 | run 内单调递增序号 |
-| `type` | 是 | 事件类型 |
-| `visibility` | 否 | `public`、`debug`、`internal` |
-| `occurredAt` | 否 | 下游发生时间 |
-| `payload` | 是 | 事件载荷 |
+| 字段                  | 必填  | 说明                          |
+| ------------------- | --- | --------------------------- |
+| `sessionId`         | 是   | 下游 session id               |
+| `agenthubSessionId` | 是   | AgentHub session id         |
+| `agenthubRunId`     | 是   | AgentHub run id             |
+| `seq`               | 是   | run 内单调递增序号                 |
+| `type`              | 是   | 事件类型                        |
+| `visibility`        | 否   | `public`、`debug`、`internal` |
+| `occurredAt`        | 否   | 下游发生时间                      |
+| `payload`           | 是   | 事件载荷                        |
 
 `payload.speaker` 用于多 Agent 群聊展示。只要事件代表某个 Agent 的产出，就必须携带该 Agent 实例 id：
 
@@ -551,18 +551,18 @@ AgentHub ack：
 
 ### 10.2 事件类型
 
-| type | 说明 | 是否关键事件 |
-| --- | --- | --- |
-| `run.started` | Agent 开始执行 | 是 |
-| `message.delta` | 文本流式输出 | 是 |
-| `tool.call` | 工具调用开始 | 否 |
-| `tool.result` | 工具调用结果 | 否 |
-| `file.change` | 文件变更快照 | 是 |
-| `artifact.upsert` | 创建或更新 artifact | 是 |
-| `artifact.chunk` | artifact 分片 | 是 |
-| `artifact.complete` | artifact 完成 | 是 |
-| `run.completed` | run 成功完成 | 是 |
-| `run.failed` | run 失败 | 是 |
+| type                | 说明             | 是否关键事件 |
+| ------------------- | -------------- | ------ |
+| `run.started`       | Agent 开始执行     | 是      |
+| `message.delta`     | 文本流式输出         | 是      |
+| `tool.call`         | 工具调用开始         | 否      |
+| `tool.result`       | 工具调用结果         | 否      |
+| `file.change`       | 文件变更快照         | 是      |
+| `artifact.upsert`   | 创建或更新 artifact | 是      |
+| `artifact.chunk`    | artifact 分片    | 是      |
+| `artifact.complete` | artifact 完成    | 是      |
+| `run.completed`     | run 成功完成       | 是      |
+| `run.failed`        | run 失败         | 是      |
 
 关键事件必须使用 JSON-RPC request，等待 AgentHub ack 后再认为发送成功。
 
@@ -813,30 +813,30 @@ receive event -> normalize -> transaction insert -> derived writes -> commit -> 
 
 AgentHub 映射：
 
-| 场景 | run error_code |
-| --- | --- |
-| initialize 失败 | `DOWNSTREAM_INITIALIZE_FAILED` |
-| session/new 失败 | `DOWNSTREAM_SESSION_CREATE_FAILED` |
-| session/load 失败 | `DOWNSTREAM_SESSION_LOAD_FAILED` |
-| session/prompt 失败 | `DOWNSTREAM_PROMPT_FAILED` |
-| Socket 断开 | `DOWNSTREAM_DISCONNECTED` |
-| 协议字段缺失 | `DOWNSTREAM_PROTOCOL_ERROR` |
-| 事件落库失败 | `EVENT_PERSIST_FAILED` |
+| 场景                | run error_code                     |
+| ----------------- | ---------------------------------- |
+| initialize 失败     | `DOWNSTREAM_INITIALIZE_FAILED`     |
+| session/new 失败    | `DOWNSTREAM_SESSION_CREATE_FAILED` |
+| session/load 失败   | `DOWNSTREAM_SESSION_LOAD_FAILED`   |
+| session/prompt 失败 | `DOWNSTREAM_PROMPT_FAILED`         |
+| Socket 断开         | `DOWNSTREAM_DISCONNECTED`          |
+| 协议字段缺失            | `DOWNSTREAM_PROTOCOL_ERROR`        |
+| 事件落库失败            | `EVENT_PERSIST_FAILED`             |
 
 ## 13. 后端落库映射
 
-| 下游事件 | 主表 | 派生表 |
-| --- | --- | --- |
-| `run.started` | `agent_events` | `agent_runs` |
-| `message.delta` | `agent_events` | `messages` |
-| `tool.call` | `agent_events` | 无，前端从事件渲染 |
-| `tool.result` | `agent_events` | 无，前端从事件渲染 |
-| `file.change` | `agent_events` | `file_changes`、`context_items` |
-| `artifact.upsert` | `agent_events` | `artifacts` |
-| `artifact.chunk` | `agent_events` | `artifact_chunks` |
-| `artifact.complete` | `agent_events` | `artifacts`、OSS object、`artifact_renders`、`context_items` |
-| `run.completed` | `agent_events` | `agent_runs`、`messages`、`context_items`、`session_contexts` |
-| `run.failed` | `agent_events` | `agent_runs` |
+| 下游事件                | 主表             | 派生表                                                        |
+| ------------------- | -------------- | ---------------------------------------------------------- |
+| `run.started`       | `agent_events` | `agent_runs`                                               |
+| `message.delta`     | `agent_events` | `messages`                                                 |
+| `tool.call`         | `agent_events` | 无，前端从事件渲染                                                  |
+| `tool.result`       | `agent_events` | 无，前端从事件渲染                                                  |
+| `file.change`       | `agent_events` | `file_changes`、`context_items`                             |
+| `artifact.upsert`   | `agent_events` | `artifacts`                                                |
+| `artifact.chunk`    | `agent_events` | `artifact_chunks`                                          |
+| `artifact.complete` | `agent_events` | `artifacts`、OSS object、`artifact_renders`、`context_items`  |
+| `run.completed`     | `agent_events` | `agent_runs`、`messages`、`context_items`、`session_contexts` |
+| `run.failed`        | `agent_events` | `agent_runs`                                               |
 
 ## 14. 最小可跑 Mock Agent 流程
 
