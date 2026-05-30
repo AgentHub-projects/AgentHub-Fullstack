@@ -33,7 +33,7 @@ export type HubContextItemKind =
   | "manual_pin";
 
 export interface AgentTemplateDto {
-  id: string;
+  id: number;
   name: string;
   description: string;
   defaultProvider: number; // 0=claude-code, 1=codex, 2=opencode
@@ -63,7 +63,7 @@ export interface UpdateAgentTemplateRequest {
 
 export interface AgentInstanceDto {
   id: AgentId;
-  templateId: string;
+  templateId: number;
   name: string;
   description: string;
   provider: number; // 0=claude-code, 1=codex, 2=opencode
@@ -247,9 +247,9 @@ export interface SessionDetailDto {
 export interface CreateHubSessionRequest {
   title?: string;
   metadata?: Record<string, unknown>;
-  orchestratorTemplateId?: string;
+  orchestratorTemplateId?: number;
   orchestratorProvider?: number; // 0=claude-code, 1=codex, 2=opencode
-  memberTemplates?: Array<{ templateId: string; provider: number }>;
+  memberTemplates?: Array<{ templateId: number; provider: number }>;
 }
 
 export interface SendHubMessageRequest {
@@ -275,7 +275,7 @@ export interface AddParticipantRequest {
 }
 
 export interface CreateSessionAgentRequest {
-  templateId: string;
+  templateId: number;
   provider: number; // 0=claude-code, 1=codex, 2=opencode
   name: string;
   sessionId: string;

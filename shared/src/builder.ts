@@ -13,7 +13,7 @@ export interface BuildSessionDto {
   id: string;
   status: string; // active | completed | cancelled
   context: Record<string, unknown>;
-  agentTemplateId?: string | null;
+  agentTemplateId?: number | null;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
