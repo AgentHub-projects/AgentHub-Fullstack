@@ -99,7 +99,7 @@ enum ContextItemKindDb {
 }
 
 model AgentTemplate {
-  id                  String        @id @default(uuid()) @db.Uuid
+  id                  Int           @id @default(autoincrement())
   name                String
   description         String        @default("")
   defaultProvider     Int           @default(0) @map("default_provider") // 0=claude-code, 1=codex, 2=opencode
@@ -120,7 +120,7 @@ model BuildSession {
   id              String         @id @default(uuid()) @db.Uuid
   status          String         @default("active") // active | completed | cancelled
   context         Json           @default("{}")
-  agentTemplateId String?        @map("agent_template_id") @db.Uuid
+  agentTemplateId Int?           @map("agent_template_id")
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   messages        BuildMessage[]
@@ -142,7 +142,7 @@ model BuildMessage {
 
 model Agent {
   id                    Int           @id @default(autoincrement())
-  templateId            String        @map("template_id") @db.Uuid
+  templateId            Int           @map("template_id")
   name                  String        @unique
   description           String        @default("")
   provider              Int           @default(0) // 0=claude-code, 1=codex, 2=opencode
