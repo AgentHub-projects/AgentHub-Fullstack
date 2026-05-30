@@ -149,17 +149,17 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 
 const orchestrator: AgentInstanceDto = {
   id: 1,
-  templateId: "orchestrator-template-id",
+  templateId: 1,
   name: "main-orchestrator",
   description: "主协调者",
-  provider: 0,
+  provider: "claude-code",
   isDefaultOrchestrator: true,
   status: "enabled",
   template: {
-    id: "orchestrator-template-id",
+    id: 1,
     name: "Orchestrator",
     description: "模板描述",
-    defaultProvider: 0,
+    defaultProvider: "claude-code",
     systemPrompt: "orchestrator system prompt",
     promptConfig: {},
     defaultCapabilities: [],

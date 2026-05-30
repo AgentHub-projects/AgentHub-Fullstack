@@ -64,13 +64,15 @@ export class HubSessionService {
         where: { id: input.orchestratorTemplateId },
       });
       if (tpl) {
-        const provider = input.orchestratorProvider ?? tpl.defaultProvider;
+        const providerId = input.orchestratorProvider
+          ? await this.agents.resolveProviderId(input.orchestratorProvider)
+          : tpl.defaultProviderId;
         const agent = await this.prisma.agent.create({
           data: {
             templateId: tpl.id,
             name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
             description: tpl.description,
-            provider,
+            providerId,
             isDefaultOrchestrator: false,
             status: "enabled",
           },
@@ -94,13 +96,15 @@ export class HubSessionService {
           where: { id: mt.templateId },
         });
         if (tpl) {
-          const provider = mt.provider ?? tpl.defaultProvider;
+          const providerId = mt.provider
+            ? await this.agents.resolveProviderId(mt.provider)
+            : tpl.defaultProviderId;
           const agent = await this.prisma.agent.create({
             data: {
               templateId: tpl.id,
               name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
               description: tpl.description,
-              provider,
+              providerId,
               isDefaultOrchestrator: false,
               status: "enabled",
             },

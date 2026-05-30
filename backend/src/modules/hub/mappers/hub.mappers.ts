@@ -32,12 +32,12 @@ export function maybeIso(value: Date | string | null | undefined): string | null
   return value ? iso(value) : null;
 }
 
-export function mapTemplate(row: Row): AgentTemplateDto {
+export function mapTemplate(row: Row, providerNames?: Map<number, string>): AgentTemplateDto {
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? "",
-    defaultProvider: row.defaultProvider ?? 0,
+    defaultProvider: providerNames?.get(row.defaultProviderId) ?? "claude-code",
     systemPrompt: row.systemPrompt ?? "",
     promptConfig: asObject(row.promptConfig),
     defaultCapabilities: asArray(row.defaultCapabilities),
@@ -49,16 +49,16 @@ export function mapTemplate(row: Row): AgentTemplateDto {
   };
 }
 
-export function mapAgent(row: Row): AgentInstanceDto {
+export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentInstanceDto {
   return {
     id: row.id,
     templateId: row.templateId,
     name: row.name,
     description: row.description ?? "",
-    provider: row.provider ?? 0,
+    provider: providerNames?.get(row.providerId) ?? "claude-code",
     isDefaultOrchestrator: Boolean(row.isDefaultOrchestrator),
     status: row.status,
-    template: row.template ? mapTemplate(row.template) : undefined,
+    template: row.template ? mapTemplate(row.template, providerNames) : undefined,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };

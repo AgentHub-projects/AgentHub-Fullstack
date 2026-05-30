@@ -11,46 +11,78 @@ import { mapTemplate } from "../mappers/hub.mappers";
 export class AgentTemplateService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async list(): Promise<AgentTemplateDto[]> {
-    const items = await this.prisma.agentTemplate.findMany({
-      orderBy: { createdAt: "asc" },
+  private async loadProviderNames(): Promise<Map<number, string>> {
+    const providers = await this.prisma.provider.findMany();
+    const map = new Map<number, string>();
+    for (const p of providers) {
+      map.set(p.id, p.name);
+    }
+    return map;
+  }
+
+  private async resolveProviderId(name: string): Promise<number> {
+    const provider = await this.prisma.provider.upsert({
+      where: { name },
+      create: { name },
+      update: {},
     });
-    return items.map(mapTemplate);
+    return provider.id;
+  }
+
+  async list(): Promise<AgentTemplateDto[]> {
+    const [items, providerNames] = await Promise.all([
+      this.prisma.agentTemplate.findMany({
+        orderBy: { createdAt: "asc" },
+      }),
+      this.loadProviderNames(),
+    ]);
+    return items.map((row) => mapTemplate(row, providerNames));
   }
 
   async get(id: number): Promise<AgentTemplateDto> {
-    const item = await this.prisma.agentTemplate.findUnique({ where: { id } });
+    const [item, providerNames] = await Promise.all([
+      this.prisma.agentTemplate.findUnique({ where: { id } }),
+      this.loadProviderNames(),
+    ]);
     if (!item) throw new Error("AgentTemplate not found");
-    return mapTemplate(item);
+    return mapTemplate(item, providerNames);
   }
 
   async create(input: CreateAgentTemplateRequest): Promise<AgentTemplateDto> {
+    const providerId = await this.resolveProviderId(input.defaultProvider);
     const item = await this.prisma.agentTemplate.create({
       data: {
         name: input.name,
         description: input.description,
-        defaultProvider: input.defaultProvider,
+        defaultProviderId: providerId,
         systemPrompt: input.systemPrompt,
         status: "enabled",
       },
     });
-    return mapTemplate(item);
+    const providerNames = await this.loadProviderNames();
+    return mapTemplate(item, providerNames);
   }
 
   async update(id: number, input: UpdateAgentTemplateRequest): Promise<AgentTemplateDto> {
     const existing = await this.prisma.agentTemplate.findUnique({ where: { id } });
     if (!existing) throw new Error("AgentTemplate not found");
 
+    let providerId: number | undefined;
+    if (input.defaultProvider !== undefined) {
+      providerId = await this.resolveProviderId(input.defaultProvider);
+    }
+
     const item = await this.prisma.agentTemplate.update({
       where: { id },
       data: {
         ...(input.name !== undefined && { name: input.name }),
         ...(input.description !== undefined && { description: input.description }),
-        ...(input.defaultProvider !== undefined && { defaultProvider: input.defaultProvider }),
+        ...(providerId !== undefined && { defaultProviderId: providerId }),
         ...(input.systemPrompt !== undefined && { systemPrompt: input.systemPrompt }),
       },
     });
-    return mapTemplate(item);
+    const providerNames = await this.loadProviderNames();
+    return mapTemplate(item, providerNames);
   }
 
   async delete(id: number): Promise<{ ok: boolean }> {

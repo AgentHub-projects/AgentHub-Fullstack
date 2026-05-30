@@ -98,11 +98,18 @@ enum ContextItemKindDb {
   @@map("context_item_kind")
 }
 
+model Provider {
+  id             Int    @id @default(autoincrement())
+  name           String @unique
+
+  @@map("providers")
+}
+
 model AgentTemplate {
   id                  Int           @id @default(autoincrement())
   name                String
   description         String        @default("")
-  defaultProvider     Int           @default(0) @map("default_provider") // 0=claude-code, 1=codex, 2=opencode
+  defaultProviderId   Int           @map("default_provider_id")
   systemPrompt        String        @default("") @map("system_prompt")
   promptConfig        Json          @default("{}") @map("prompt_config")
   defaultCapabilities Json          @default("[]") @map("default_capabilities")
@@ -145,7 +152,7 @@ model Agent {
   templateId            Int           @map("template_id")
   name                  String        @unique
   description           String        @default("")
-  provider              Int           @default(0) // 0=claude-code, 1=codex, 2=opencode
+  providerId            Int           @map("provider_id")
   isDefaultOrchestrator Boolean       @default(false) @map("is_default_orchestrator")
   status                AgentStatusDb @default(offline)
   createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
