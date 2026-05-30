@@ -136,6 +136,11 @@ export class HubAgentController {
     return agent;
   }
 
+  @Get(":id/prompt")
+  async getAgentPrompt(@Param("id") id: string) {
+    return this.agents.getAgentPrompt(Number(id));
+  }
+
   @Patch(":id")
   async updateAgent(@Param("id") id: string, @Body() body: UpdateAgentRequest) {
     return this.agents.updateAgent(Number(id), body);
