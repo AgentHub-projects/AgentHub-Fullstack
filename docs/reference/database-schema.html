@@ -111,7 +111,7 @@
           <tr><td><code>StorageKindDb</code></td><td><code>inline_text</code>、<code>oss_object</code>、<code>remote_url</code></td><td><code>artifacts.storage_kind</code>。</td></tr>
           <tr><td><code>FileChangeTypeDb</code></td><td><code>added</code>、<code>modified</code>、<code>deleted</code>、<code>renamed</code></td><td><code>file_changes.change_type</code>。</td></tr>
           <tr><td><code>ContextItemKindDb</code></td><td><code>message</code>、<code>artifact</code>、<code>file_change</code>、<code>run_summary</code>、<code>manual_pin</code></td><td><code>context_items.kind</code>。</td></tr>
-          <tr><td>provider</td><td><code>0=claude-code</code>、<code>1=codex</code>、<code>2=opencode</code></td><td><code>agent_templates.default_provider</code>、<code>agents.provider</code>。</td></tr>
+          <tr><td>provider</td><td><code>"claude-code"</code>、<code>"open-code"</code></td><td><code>agent_templates.default_provider</code>、<code>agents.provider</code>。</td></tr>
         </tbody>
       </table>
     </section>
@@ -125,7 +125,7 @@
           <tr><td><code>id</code></td><td>uuid, PK</td><td>模板 id。</td></tr>
           <tr><td><code>name</code></td><td>String</td><td>模板名称。</td></tr>
           <tr><td><code>description</code></td><td>String, 默认 ""</td><td>模板说明。</td></tr>
-          <tr><td><code>default_provider</code></td><td>Int, 默认 0</td><td>默认 provider：0、1、2。</td></tr>
+          <tr><td><code>default_provider</code></td><td>String, 默认 "claude-code"</td><td>默认 provider："claude-code"、"open-code"。</td></tr>
           <tr><td><code>system_prompt</code></td><td>String, 默认 ""</td><td>模板系统提示词。</td></tr>
           <tr><td><code>prompt_config</code></td><td>Json, 默认 {}</td><td>提示词配置扩展。</td></tr>
           <tr><td><code>default_capabilities</code></td><td>Json, 默认 []</td><td>模板默认能力列表。</td></tr>
@@ -145,7 +145,7 @@
           <tr><td><code>template_id</code></td><td>uuid, FK -> agent_templates.id</td><td>实例所属模板。</td></tr>
           <tr><td><code>name</code></td><td>String, unique</td><td>实例名称，用于 @mention 和展示。</td></tr>
           <tr><td><code>description</code></td><td>String, 默认 ""</td><td>实例说明。</td></tr>
-          <tr><td><code>provider</code></td><td>Int, 默认 0</td><td>0、1、2。</td></tr>
+          <tr><td><code>provider</code></td><td>String, 默认 "claude-code"</td><td>"claude-code"、"open-code"。</td></tr>
           <tr><td><code>is_default_orchestrator</code></td><td>Boolean, 默认 false</td><td>是否默认主 Orchestrator。</td></tr>
           <tr><td><code>status</code></td><td>AgentStatusDb, 默认 offline</td><td>enabled、disabled、offline、error。</td></tr>
           <tr><td><code>created_at</code></td><td>timestamptz</td><td>创建时间。</td></tr>

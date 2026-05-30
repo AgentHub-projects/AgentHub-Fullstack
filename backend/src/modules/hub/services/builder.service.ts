@@ -19,7 +19,7 @@ const BUILDER_SYSTEM_PROMPT = [
   "1. Agent 名称（name）— 简洁明了，如 'Python 数据分析 Agent'",
   "2. Agent 描述（description）— 简明描述它的用途和能力",
   "3. System Prompt（systemPrompt）— 定义 Agent 的行为和回答风格",
-  "4. 底层 Provider（defaultProvider）— 0=claude-code, 1=codex, 2=opencode",
+  "4. 底层 Provider（defaultProvider）— \"claude-code\" 或 \"open-code\"",
   "",
   "规则：",
   "- 每次只问一个问题，逐步收集",
@@ -27,7 +27,7 @@ const BUILDER_SYSTEM_PROMPT = [
   "- 当所有 4 个字段都收集完毕后，生成一个确认预览：",
   "  用以下 JSON 格式输出最后一条消息：",
   "  ---TEMPLATE_DRAFT---",
-  "  { \"name\": \"...\", \"description\": \"...\", \"systemPrompt\": \"...\", \"defaultProvider\": 0 }",
+  "  { \"name\": \"...\", \"description\": \"...\", \"systemPrompt\": \"...\", \"defaultProvider\": \"claude-code\" }",
   "  ---END_TEMPLATE_DRAFT---",
   "- 在 JSON 前用友好文字总结用户配置的 Agent",
   "- 确保用户明确确认后再结束",
@@ -37,7 +37,7 @@ type CollectedContext = {
   name?: string;
   description?: string;
   systemPrompt?: string;
-  defaultProvider?: number;
+  defaultProvider?: string;
 };
 
 @Injectable()
@@ -221,7 +221,7 @@ export class BuilderService {
         if (parsed.name) ctx.name = parsed.name;
         if (parsed.description) ctx.description = parsed.description;
         if (parsed.systemPrompt) ctx.systemPrompt = parsed.systemPrompt;
-        if (typeof parsed.defaultProvider === "number") ctx.defaultProvider = parsed.defaultProvider;
+        if (typeof parsed.defaultProvider === "string") ctx.defaultProvider = parsed.defaultProvider;
         return ctx;
       } catch {
         // fall through to heuristic extraction
@@ -235,9 +235,8 @@ export class BuilderService {
     if (descMatch) ctx.description = descMatch[1].trim();
     const promptMatch = fullText.match(/(?:system[_ ]?prompt|提示词|行为)\S{0,3}[:：]\s*(.+)/i);
     if (promptMatch) ctx.systemPrompt = promptMatch[1].trim();
-    if (fullText.includes("claude-code") || fullText.includes("claude code")) ctx.defaultProvider = 0;
-    if (fullText.includes("codex")) ctx.defaultProvider = 1;
-    if (fullText.includes("opencode")) ctx.defaultProvider = 2;
+    if (fullText.includes("claude-code") || fullText.includes("claude code")) ctx.defaultProvider = "claude-code";
+    if (fullText.includes("open-code") || fullText.includes("opencode")) ctx.defaultProvider = "open-code";
 
     return ctx;
   }
@@ -301,7 +300,7 @@ export class BuilderService {
     }
 
     if (messages.length <= 8) {
-      return `最后，请选择底层 Provider：0 = claude-code, 1 = codex, 2 = opencode。你想用哪个？`;
+      return `最后，请选择底层 Provider：claude-code 或 open-code。你想用哪个？`;
     }
 
     return `---TEMPLATE_DRAFT---
@@ -309,7 +308,7 @@ export class BuilderService {
   "name": "${userText.slice(0, 30) || "新 Agent"}",
   "description": "用户创建的 Agent 模板",
   "systemPrompt": "你是一个有帮助的 AI 助手。",
-  "defaultProvider": 0
+  "defaultProvider": "claude-code"
 }
 ---END_TEMPLATE_DRAFT---
 

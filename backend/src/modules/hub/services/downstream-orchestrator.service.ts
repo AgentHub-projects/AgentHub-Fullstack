@@ -136,7 +136,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   async pushContext(
     sessionId: string,
     payload: {
-      agents: Array<{ agentId: AgentId; name: string; description: string; provider: number }>;
+      agents: Array<{ agentId: AgentId; name: string; description: string; provider: string }>;
       summaryChain: Array<{ seq: number; content: string }>;
       message: string;
       recentMessages: Array<{ role: string; content: string }>;

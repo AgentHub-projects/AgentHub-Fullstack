@@ -36,7 +36,7 @@ export interface AgentTemplateDto {
   id: number;
   name: string;
   description: string;
-  defaultProvider: number; // 0=claude-code, 1=codex, 2=opencode
+  defaultProvider: string; // "claude-code" | "open-code"
   systemPrompt: string;
   promptConfig: Record<string, unknown>;
   defaultCapabilities: unknown[];
@@ -50,14 +50,14 @@ export interface AgentTemplateDto {
 export interface CreateAgentTemplateRequest {
   name: string;
   description: string;
-  defaultProvider: number;
+  defaultProvider: string;
   systemPrompt: string;
 }
 
 export interface UpdateAgentTemplateRequest {
   name?: string;
   description?: string;
-  defaultProvider?: number;
+  defaultProvider?: string;
   systemPrompt?: string;
 }
 
@@ -66,7 +66,7 @@ export interface AgentInstanceDto {
   templateId: number;
   name: string;
   description: string;
-  provider: number; // 0=claude-code, 1=codex, 2=opencode
+  provider: string; // "claude-code" | "open-code"
   isDefaultOrchestrator: boolean;
   status: HubAgentStatus;
   template?: AgentTemplateDto;
@@ -248,8 +248,8 @@ export interface CreateHubSessionRequest {
   title?: string;
   metadata?: Record<string, unknown>;
   orchestratorTemplateId?: number;
-  orchestratorProvider?: number; // 0=claude-code, 1=codex, 2=opencode
-  memberTemplates?: Array<{ templateId: number; provider: number }>;
+  orchestratorProvider?: string; // "claude-code" | "open-code"
+  memberTemplates?: Array<{ templateId: number; provider: string }>;
 }
 
 export interface SendHubMessageRequest {
@@ -276,7 +276,7 @@ export interface AddParticipantRequest {
 
 export interface CreateSessionAgentRequest {
   templateId: number;
-  provider: number; // 0=claude-code, 1=codex, 2=opencode
+  provider: string; // "claude-code" | "open-code"
   name: string;
   sessionId: string;
 }
@@ -284,7 +284,7 @@ export interface CreateSessionAgentRequest {
 export interface UpdateAgentRequest {
   name?: string;
   description?: string;
-  provider?: number;
+  provider?: string;
 }
 
 export interface AgentDetailResponse {

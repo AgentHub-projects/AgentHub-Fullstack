@@ -39,7 +39,7 @@ export interface ConfirmBuildRequest {
   name: string;
   description: string;
   systemPrompt: string;
-  defaultProvider: number;
+  defaultProvider: string;
 }
 
 export interface ConfirmBuildResponse {

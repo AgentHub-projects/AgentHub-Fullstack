@@ -129,7 +129,7 @@ pnpm dev
 
 ### Agent 管理
 
-- `provider` 字段标识底层实例类型：0 = claude-code, 1 = codex, 2 = opencode
+- `provider` 字段标识底层实例类型：字符串，`"claude-code"` 或 `"open-code"`
 - 下游可调用 `GET /api/agents/:id/detail` 获取 Agent 的 systemPrompt 和 provider
 - 群聊参与者通过 `POST /api/sessions/:id/participants` 动态添加
 

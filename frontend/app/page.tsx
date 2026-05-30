@@ -98,24 +98,24 @@ export default function WorkbenchPage() {
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
   const [orchTemplateId, setOrchTemplateId] = useState<number>(0);
-  const [orchProvider, setOrchProvider] = useState(0);
-  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: number }>>([]);
+  const [orchProvider, setOrchProvider] = useState("claude-code");
+  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: string }>>([]);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [agentDialogTab, setAgentDialogTab] = useState<"quick" | "builder">("quick");
   const [quickName, setQuickName] = useState("");
   const [quickDesc, setQuickDesc] = useState("");
-  const [quickProvider, setQuickProvider] = useState(0);
+  const [quickProvider, setQuickProvider] = useState("claude-code");
   const [quickPrompt, setQuickPrompt] = useState("");
   const [buildId, setBuildId] = useState<string | null>(null);
   const [buildMessages, setBuildMessages] = useState<BuildMessageDto[]>([]);
   const [buildInput, setBuildInput] = useState("");
   const [buildBusy, setBuildBusy] = useState(false);
-  const [buildConfirm, setBuildConfirm] = useState<{ name: string; description: string; systemPrompt: string; defaultProvider: number } | null>(null);
+  const [buildConfirm, setBuildConfirm] = useState<{ name: string; description: string; systemPrompt: string; defaultProvider: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ agentId: number; x: number; y: number } | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: number; provider: number; name: string }>>([]);
+  const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: number; provider: string; name: string }>>([]);
   const [inviteQuery, setInviteQuery] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgentInstanceDto | null>(null);
@@ -226,7 +226,7 @@ export default function WorkbenchPage() {
   function openCreateGroupDialog() {
     setGroupTitle("");
     setOrchTemplateId(0);
-    setOrchProvider(0);
+    setOrchProvider("claude-code");
     setMemberTemplates([]);
     setGroupDialogOpen(true);
   }
@@ -402,7 +402,7 @@ export default function WorkbenchPage() {
             <strong>AgentHub</strong>
             <span>多 Agent 群聊</span>
           </div>
-          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={() => { setAgentDialogTab("quick"); setBuildId(null); setBuildMessages([]); setBuildConfirm(null); setQuickName(""); setQuickDesc(""); setQuickProvider(0); setQuickPrompt(""); setAgentDialogOpen(true); }}>
+          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={() => { setAgentDialogTab("quick"); setBuildId(null); setBuildMessages([]); setBuildConfirm(null); setQuickName(""); setQuickDesc(""); setQuickProvider("claude-code"); setQuickPrompt(""); setAgentDialogOpen(true); }}>
             <PlusOutlined />
           </button>
           <button className="iconButton" type="button" title="新建群聊" onClick={openCreateGroupDialog}>
@@ -681,10 +681,9 @@ export default function WorkbenchPage() {
               {orchTemplateId && (
                 <label>
                   Orchestrator Provider
-                  <select value={orchProvider} onChange={(e) => setOrchProvider(Number(e.target.value))}>
-                    <option value={0}>claude-code</option>
-                    <option value={1}>codex</option>
-                    <option value={2}>opencode</option>
+                  <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                    <option value="claude-code">claude-code</option>
+                    <option value="open-code">open-code</option>
                   </select>
                 </label>
               )}
@@ -716,20 +715,19 @@ export default function WorkbenchPage() {
                     </span>
                     {selected && (
                       <select
-                        value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? 0}
+                        value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? "claude-code"}
                         onChange={(e) => {
                           e.stopPropagation();
                           setMemberTemplates((current) =>
                             current.map((m) =>
-                              m.templateId === tpl.id ? { ...m, provider: Number(e.target.value) } : m,
+                              m.templateId === tpl.id ? { ...m, provider: e.target.value } : m,
                             ),
                           );
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <option value={0}>claude-code</option>
-                        <option value={1}>codex</option>
-                        <option value={2}>opencode</option>
+                        <option value="claude-code">claude-code</option>
+                        <option value="open-code">open-code</option>
                       </select>
                     )}
                   </button>
@@ -827,11 +825,10 @@ export default function WorkbenchPage() {
               <label>Provider
                 <select
                   value={editTarget.provider}
-                  onChange={(e) => setEditTarget({ ...editTarget, provider: Number(e.target.value) })}
+                  onChange={(e) => setEditTarget({ ...editTarget, provider: e.target.value })}
                 >
-                  <option value={0}>claude-code</option>
-                  <option value={1}>codex</option>
-                  <option value={2}>opencode</option>
+                  <option value="claude-code">claude-code</option>
+                  <option value="open-code">open-code</option>
                 </select>
               </label>
             </div>
@@ -900,7 +897,7 @@ export default function WorkbenchPage() {
                         setInviteSelection((current) =>
                           selected
                             ? current.filter((item) => item.templateId !== tpl.id)
-                            : [...current, { templateId: tpl.id, provider: 0, name: tpl.name }],
+                            : [...current, { templateId: tpl.id, provider: "claude-code", name: tpl.name }],
                         )
                       }
                     >
@@ -929,15 +926,14 @@ export default function WorkbenchPage() {
                           onChange={(e) =>
                             setInviteSelection((current) =>
                               current.map((item, i) =>
-                                i === idx ? { ...item, provider: Number(e.target.value) } : item,
+                                i === idx ? { ...item, provider: e.target.value } : item,
                               ),
                             )
                           }
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <option value={0}>claude-code</option>
-                          <option value={1}>codex</option>
-                          <option value={2}>opencode</option>
+                          <option value="claude-code">claude-code</option>
+                          <option value="open-code">open-code</option>
                         </select>
                       </div>
                     )}
@@ -1011,10 +1007,9 @@ export default function WorkbenchPage() {
                 <label>名称 <input value={quickName} onChange={(e) => setQuickName(e.target.value)} placeholder="如：Python 数据分析 Agent" /></label>
                 <label>描述 <textarea value={quickDesc} onChange={(e) => setQuickDesc(e.target.value)} placeholder="简要描述用途和能力" /></label>
                 <label>Provider
-                  <select value={quickProvider} onChange={(e) => setQuickProvider(Number(e.target.value))}>
-                    <option value={0}>claude-code</option>
-                    <option value={1}>codex</option>
-                    <option value={2}>opencode</option>
+                  <select value={quickProvider} onChange={(e) => setQuickProvider(e.target.value)}>
+                    <option value="claude-code">claude-code</option>
+                    <option value="open-code">open-code</option>
                   </select>
                 </label>
                 <label>System Prompt <textarea value={quickPrompt} onChange={(e) => setQuickPrompt(e.target.value)} placeholder="定义 Agent 的行为和回答风格" rows={4} /></label>
@@ -1034,10 +1029,9 @@ export default function WorkbenchPage() {
                     <label>名称 <input value={buildConfirm.name} onChange={(e) => setBuildConfirm({ ...buildConfirm, name: e.target.value })} /></label>
                     <label>描述 <input value={buildConfirm.description} onChange={(e) => setBuildConfirm({ ...buildConfirm, description: e.target.value })} /></label>
                     <label>Provider
-                      <select value={buildConfirm.defaultProvider} onChange={(e) => setBuildConfirm({ ...buildConfirm, defaultProvider: Number(e.target.value) })}>
-                        <option value={0}>claude-code</option>
-                        <option value={1}>codex</option>
-                        <option value={2}>opencode</option>
+                      <select value={buildConfirm.defaultProvider} onChange={(e) => setBuildConfirm({ ...buildConfirm, defaultProvider: e.target.value })}>
+                        <option value="claude-code">claude-code</option>
+                        <option value="open-code">open-code</option>
                       </select>
                     </label>
                     <label>System Prompt <textarea value={buildConfirm.systemPrompt} onChange={(e) => setBuildConfirm({ ...buildConfirm, systemPrompt: e.target.value })} rows={4} /></label>
@@ -1075,7 +1069,7 @@ export default function WorkbenchPage() {
                                   name: (ctx.name as string) ?? "",
                                   description: (ctx.description as string) ?? "",
                                   systemPrompt: (ctx.systemPrompt as string) ?? "",
-                                  defaultProvider: (ctx.defaultProvider as number) ?? 0,
+                                  defaultProvider: (ctx.defaultProvider as string) ?? "claude-code",
                                 });
                               }
                             } else setNotice(`Builder 错误：${res.error}`);
@@ -1093,7 +1087,7 @@ export default function WorkbenchPage() {
             <footer>
               <button className="ghostButton" type="button" onClick={() => {
                 setAgentDialogOpen(false); setBuildId(null); setBuildMessages([]); setBuildConfirm(null);
-                setQuickName(""); setQuickDesc(""); setQuickProvider(0); setQuickPrompt("");
+                setQuickName(""); setQuickDesc(""); setQuickProvider("claude-code"); setQuickPrompt("");
               }}>取消</button>
               {agentDialogTab === "quick" && (
                 <button className="primaryButton" type="button" disabled={!quickName.trim()} onClick={async () => {
