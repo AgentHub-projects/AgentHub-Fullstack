@@ -1,3 +1,6 @@
+-- EnableExtension
+CREATE EXTENSION IF NOT EXISTS "vector";
+
 -- CreateEnum
 CREATE TYPE "session_status" AS ENUM ('active', 'archived', 'deleted');
 
