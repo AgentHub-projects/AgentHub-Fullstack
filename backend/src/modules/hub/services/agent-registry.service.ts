@@ -8,10 +8,10 @@ const IDS = {
   tplFrontend: "00000000-0000-4000-8000-000000000002",
   tplBackend: "00000000-0000-4000-8000-000000000003",
   tplReviewer: "00000000-0000-4000-8000-000000000004",
-  orchestrator: "10000000-0000-4000-8000-000000000001",
-  frontend: "10000000-0000-4000-8000-000000000002",
-  backend: "10000000-0000-4000-8000-000000000003",
-  reviewer: "10000000-0000-4000-8000-000000000004",
+  orchestrator: 1,
+  frontend: 2,
+  backend: 3,
+  reviewer: 4,
 };
 
 @Injectable()
@@ -37,7 +37,7 @@ export class AgentRegistryService implements OnModuleInit {
     return items.map(mapAgent);
   }
 
-  async getAgent(id: string): Promise<AgentInstanceDto | null> {
+  async getAgent(id: number): Promise<AgentInstanceDto | null> {
     const item = await this.prisma.agent.findUnique({
       where: { id },
       include: { template: true },
@@ -45,7 +45,7 @@ export class AgentRegistryService implements OnModuleInit {
     return item ? mapAgent(item) : null;
   }
 
-  async getAgents(ids: string[]): Promise<AgentInstanceDto[]> {
+  async getAgents(ids: number[]): Promise<AgentInstanceDto[]> {
     if (ids.length === 0) return [];
     const items = await this.prisma.agent.findMany({
       where: { id: { in: ids } },
@@ -90,7 +90,7 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(agent);
   }
 
-  async updateAgent(id: string, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
+  async updateAgent(id: number, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
 
@@ -107,7 +107,7 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(updated);
   }
 
-  async deleteAgent(id: string): Promise<void> {
+  async deleteAgent(id: number): Promise<void> {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
 

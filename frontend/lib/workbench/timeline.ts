@@ -86,8 +86,9 @@ export function buildAgentReplyBlocks(events: HubEventDto[], agents: AgentInstan
 
 export function resolveSpeaker(event: HubEventDto, agents: AgentInstanceDto[]) {
   const payloadSpeaker = typeof event.payload.speaker === "string" ? event.payload.speaker : null;
-  const speakerId = event.speakerAgentId ?? payloadSpeaker;
-  const agent = speakerId ? agents.find((item) => item.id === speakerId) : undefined;
+  const payloadAgentId = payloadSpeaker && /^\d+$/.test(payloadSpeaker) ? Number(payloadSpeaker) : null;
+  const speakerId = event.speakerAgentId ?? payloadAgentId ?? payloadSpeaker;
+  const agent = typeof speakerId === "number" ? agents.find((item) => item.id === speakerId) : undefined;
   return {
     speakerId,
     name: event.speakerName ?? agent?.name ?? "Orchestrator",

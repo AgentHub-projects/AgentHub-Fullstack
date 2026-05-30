@@ -1,4 +1,4 @@
-import type { ContextSnapshotItem } from "./hub";
+import type { AgentId, ContextSnapshotItem } from "./hub";
 
 export interface DownstreamInitializeParams {
   protocolVersion: string;
@@ -9,7 +9,7 @@ export interface DownstreamInitializeParams {
 export type DownstreamPromptMode = "bootstrap" | "incremental";
 
 export interface DownstreamPromptAgentBrief {
-  agentId: string;
+  agentId: AgentId;
   description: string;
 }
 
@@ -22,7 +22,7 @@ export interface DownstreamPromptInput {
   agenthubSessionId: string;
   runId: string;
   messageId: string;
-  agentId: string;
+  agentId: AgentId;
   mode: DownstreamPromptMode;
   prompt: string;
   pins: ContextSnapshotItem[];

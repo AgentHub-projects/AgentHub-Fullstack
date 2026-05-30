@@ -337,7 +337,7 @@ export class HubSessionService {
     return { runId, status: "cancelled" };
   }
 
-  private async resolveMentions(sessionId: string, text: string, explicitIds: string[]) {
+  private async resolveMentions(sessionId: string, text: string, explicitIds: number[]) {
     const agents = await this.agents.listAgents();
     const ids = new Set(explicitIds);
 
@@ -368,7 +368,7 @@ export class HubSessionService {
     return agents.filter((agent) => !agent.isDefaultOrchestrator).slice(0, 2);
   }
 
-  private async upsertSessionAgent(sessionId: string, agentId: string, role: string, source: string) {
+  private async upsertSessionAgent(sessionId: string, agentId: number, role: string, source: string) {
     await this.prisma.sessionAgent.upsert({
       where: { sessionId_agentId: { sessionId, agentId } },
       create: {

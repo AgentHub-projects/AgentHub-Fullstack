@@ -111,7 +111,7 @@ export default function WorkbenchPage() {
   const [buildInput, setBuildInput] = useState("");
   const [buildBusy, setBuildBusy] = useState(false);
   const [buildConfirm, setBuildConfirm] = useState<{ name: string; description: string; systemPrompt: string; defaultProvider: number } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ agentId: number; x: number; y: number } | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);

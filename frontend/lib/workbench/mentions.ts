@@ -18,7 +18,7 @@ export function filterMentionCandidates(agents: AgentInstanceDto[], query: strin
   return agents.filter(
     (agent) =>
       agent.name.toLowerCase().startsWith(normalized) ||
-      agent.id.toLowerCase().startsWith(normalized),
+      String(agent.id).startsWith(normalized),
   );
 }
 
@@ -33,13 +33,13 @@ export function filterInviteTemplates(templates: AgentTemplateDto[], query: stri
 }
 
 export function parseMentionedAgentIds(text: string, agents: AgentInstanceDto[]) {
-  const byToken = new Map<string, string>();
+  const byToken = new Map<string, number>();
   for (const agent of agents) {
     byToken.set(agent.name.toLowerCase(), agent.id);
-    byToken.set(agent.id.toLowerCase(), agent.id);
+    byToken.set(String(agent.id), agent.id);
   }
 
-  const ids = new Set<string>();
+  const ids = new Set<number>();
   for (const match of text.matchAll(/@([a-zA-Z0-9_-]+)/g)) {
     const id = byToken.get(match[1].toLowerCase());
     if (id) ids.add(id);

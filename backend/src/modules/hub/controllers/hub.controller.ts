@@ -110,7 +110,7 @@ export class HubAgentController {
 
   @Get(":id/detail")
   async getAgentDetail(@Param("id") id: string) {
-    const agent = await this.agents.getAgent(id);
+    const agent = await this.agents.getAgent(Number(id));
     if (!agent) {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
@@ -138,16 +138,17 @@ export class HubAgentController {
 
   @Patch(":id")
   async updateAgent(@Param("id") id: string, @Body() body: UpdateAgentRequest) {
-    return this.agents.updateAgent(id, body);
+    return this.agents.updateAgent(Number(id), body);
   }
 
   @Delete(":id")
   async deleteAgent(@Param("id") id: string) {
-    const agent = await this.agents.getAgent(id);
+    const agentId = Number(id);
+    const agent = await this.agents.getAgent(agentId);
     if (!agent) {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
-    await this.agents.deleteAgent(id);
+    await this.agents.deleteAgent(agentId);
     return { ok: true };
   }
 }

@@ -24,10 +24,10 @@ export function initials(name: string) {
   return name.trim().slice(0, 2).toUpperCase() || "AI";
 }
 
-export function agentColor(seed: string) {
+export function agentColor(seed: string | number) {
   const colors = ["#2c6d67", "#365f91", "#8a5b2c", "#7d476d", "#56633f", "#8a3f3f"];
   let hash = 0;
-  for (const char of seed) hash = char.charCodeAt(0) + ((hash << 5) - hash);
+  for (const char of String(seed)) hash = char.charCodeAt(0) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
 }
 
@@ -43,7 +43,10 @@ export function isRunning(status: string) {
 
 export function readMemberAgentIds(session: HubSessionDto | null | undefined) {
   const value = session?.metadata.memberAgentIds;
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "number" ? item : typeof item === "string" && /^\d+$/.test(item) ? Number(item) : null))
+    .filter((item): item is number => item !== null);
 }
 
 export function buildGroupTitle(templateIds: string[], templates: AgentTemplateDto[]) {

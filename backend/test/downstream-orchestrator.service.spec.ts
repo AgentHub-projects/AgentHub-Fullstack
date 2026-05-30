@@ -93,8 +93,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.sessionId).toBe("downstream-session-1");
     const promptText = params.prompt[0].text;
     expect(promptText).toContain("## System\norchestrator system prompt");
-    expect(promptText).toContain("- frontend-agent-id: 前端成员描述");
-    expect(promptText).toContain("- backend-agent-id: 后端模板描述");
+    expect(promptText).toContain("- 2: 前端成员描述");
+    expect(promptText).toContain("- 3: 后端模板描述");
     expect(promptText).toContain("## Context Summary\n摘要记忆");
     expect(promptText).toContain("## Pinned\n- [message] 本轮 pin");
     expect(promptText).toContain("## User Message\n请实现登录页");
@@ -148,7 +148,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 });
 
 const orchestrator: AgentInstanceDto = {
-  id: "orchestrator-id",
+  id: 1,
   templateId: "orchestrator-template-id",
   name: "main-orchestrator",
   description: "主协调者",
@@ -262,14 +262,14 @@ function createPrisma() {
       findMany: vi.fn().mockResolvedValue([
         {
           agent: {
-            id: "frontend-agent-id",
+            id: 2,
             description: "前端成员描述",
             template: { description: "前端模板描述" },
           },
         },
         {
           agent: {
-            id: "backend-agent-id",
+            id: 3,
             description: "",
             template: { description: "后端模板描述" },
           },

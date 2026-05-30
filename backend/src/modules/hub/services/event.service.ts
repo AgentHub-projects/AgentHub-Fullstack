@@ -10,7 +10,7 @@ import { PrismaService } from "./prisma.service";
 type MessageBuffer = {
   messageId: string;
   contentText: string;
-  speakerAgentId: string;
+  speakerAgentId: number | null;
   speakerName: string;
   payload: Record<string, unknown>;
   startedAt: Date;
@@ -37,7 +37,7 @@ export class HubEventService {
     runId: string;
     eventType: HubEventType | string;
     payload?: Record<string, unknown>;
-    speakerAgentId?: string | null;
+    speakerAgentId?: number | null;
     source?: string;
     visibility?: string;
     seq?: number;
@@ -92,8 +92,7 @@ export class HubEventService {
     if (event.eventType === "message.delta") {
       const text = textFromPayload(payload);
       if (text.trim()) {
-        const speakerId = event.speakerAgentId ?? "orchestrator";
-        this.upsertMessageBuffer(event, speakerId, text);
+        this.upsertMessageBuffer(event, event.speakerAgentId ?? null, speakerBufferKey(event), text);
       }
     }
 
@@ -165,24 +164,24 @@ export class HubEventService {
 
   // ---- Message Buffer Management (dual-track) ----
 
-  private upsertMessageBuffer(event: HubEventDto, speakerId: string, delta: string) {
+  private upsertMessageBuffer(event: HubEventDto, speakerAgentId: number | null, speakerKey: string, delta: string) {
     let runBuffers = this.messageBuffers.get(event.runId);
     if (!runBuffers) {
       runBuffers = new Map();
       this.messageBuffers.set(event.runId, runBuffers);
     }
 
-    let buffer = runBuffers.get(speakerId);
+    let buffer = runBuffers.get(speakerKey);
     if (!buffer) {
       buffer = {
         messageId: "", // Will be set on first persist
         contentText: "",
-        speakerAgentId: speakerId,
-        speakerName: event.speakerName ?? speakerId,
+        speakerAgentId,
+        speakerName: event.speakerName ?? speakerKey,
         payload: {},
         startedAt: new Date(),
       };
-      runBuffers.set(speakerId, buffer);
+      runBuffers.set(speakerKey, buffer);
     }
 
     buffer.contentText += delta;
@@ -191,18 +190,19 @@ export class HubEventService {
 
   private async persistCompletedMessage(event: HubEventDto) {
     const text = textFromPayload(event.payload);
-    const speakerId = event.speakerAgentId ?? "orchestrator";
+    const speakerAgentId = event.speakerAgentId ?? null;
+    const speakerKey = speakerBufferKey(event);
 
     // Get buffered content or use event payload directly
     const runBuffers = this.messageBuffers.get(event.runId);
-    const buffer = runBuffers?.get(speakerId);
+    const buffer = runBuffers?.get(speakerKey);
     const fullText = buffer?.contentText || text;
 
     if (!fullText.trim()) return;
 
     // Clean up buffer
     if (buffer) {
-      runBuffers?.delete(speakerId);
+      runBuffers?.delete(speakerKey);
       if (runBuffers?.size === 0) this.messageBuffers.delete(event.runId);
     }
 
@@ -211,7 +211,7 @@ export class HubEventService {
         sessionId: event.sessionId,
         runId: event.runId,
         role: "assistant",
-        agentId: speakerId,
+        agentId: speakerAgentId,
         contentText: fullText,
         contentJson: (event.payload ?? {}) as any,
         tokenCount: this.context.estimateTokens(fullText),
@@ -231,7 +231,7 @@ export class HubEventService {
       kind: "message",
       text: fullText,
       importance: 10,
-      metadata: { runId: event.runId, agentId: speakerId },
+      metadata: { runId: event.runId, agentId: speakerAgentId },
     });
   }
 
@@ -286,6 +286,10 @@ function textFromPayload(payload: Record<string, unknown>): string {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function speakerBufferKey(event: HubEventDto): string {
+  return String(event.speakerAgentId ?? event.speakerName ?? stringValue(event.payload.speaker) ?? "orchestrator");
 }
 
 function normalizeChangeType(value: string) {

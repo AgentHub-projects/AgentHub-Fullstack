@@ -1,4 +1,5 @@
 import type { Socket } from "socket.io-client";
+import type { AgentId } from "@agenthub/shared";
 
 export type ConnectionRecord = {
   key: string;
@@ -8,6 +9,7 @@ export type ConnectionRecord = {
   downstreamReady?: Promise<string>;
   resolveDownstreamReady?: (id: string) => void;
   activeRunId?: string;
+  activeOrchestratorAgentId?: AgentId;
   idleTimer: NodeJS.Timeout | null;
   lastActivityAt: number;
   needsBootstrap: boolean;

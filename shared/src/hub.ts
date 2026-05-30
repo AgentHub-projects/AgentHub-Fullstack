@@ -1,4 +1,5 @@
 export type ISODateString = string;
+export type AgentId = number;
 
 export type HubSessionStatus = "active" | "archived" | "deleted";
 export type HubMessageRole = "user" | "assistant" | "agent" | "system" | "tool";
@@ -61,7 +62,7 @@ export interface UpdateAgentTemplateRequest {
 }
 
 export interface AgentInstanceDto {
-  id: string;
+  id: AgentId;
   templateId: string;
   name: string;
   description: string;
@@ -88,7 +89,7 @@ export interface HubMessageDto {
   sessionId: string;
   runId?: string | null;
   role: HubMessageRole;
-  agentId?: string | null;
+  agentId?: AgentId | null;
   agentName?: string | null;
   parentMessageId?: string | null;
   contentText: string;
@@ -103,7 +104,7 @@ export interface HubMessageDto {
 export interface HubRunDto {
   id: string;
   sessionId: string;
-  orchestratorAgentId: string;
+  orchestratorAgentId: AgentId;
   userMessageId?: string | null;
   assistantMessageId?: string | null;
   contextSnapshotId?: string | null;
@@ -143,7 +144,7 @@ export interface HubEventDto {
   source: string;
   eventType: HubEventType | string;
   visibility: "public" | "private" | string;
-  speakerAgentId?: string | null;
+  speakerAgentId?: AgentId | null;
   speakerName?: string | null;
   payload: Record<string, unknown>;
   occurredAt?: ISODateString | null;
@@ -211,7 +212,7 @@ export interface ContextSnapshotPayload {
   recent: ContextSnapshotItem[];
   retrieved: ContextSnapshotItem[];
   summary?: string;
-  mentionedAgents: Array<{ id: string; name: string }>;
+  mentionedAgents: Array<{ id: AgentId; name: string }>;
 }
 
 export interface ContextSnapshotItem {
@@ -253,8 +254,8 @@ export interface CreateHubSessionRequest {
 
 export interface SendHubMessageRequest {
   content: string;
-  mentionedAgentIds?: string[];
-  orchestratorAgentId?: string;
+  mentionedAgentIds?: AgentId[];
+  orchestratorAgentId?: AgentId;
   parentMessageId?: string;
 }
 
@@ -270,7 +271,7 @@ export interface PinHubMessageRequest {
 }
 
 export interface AddParticipantRequest {
-  agentId: string;
+  agentId: AgentId;
 }
 
 export interface CreateSessionAgentRequest {

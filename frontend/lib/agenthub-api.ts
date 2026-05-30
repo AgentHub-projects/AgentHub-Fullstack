@@ -110,15 +110,15 @@ export function createSessionAgent(body: CreateSessionAgentRequest) {
   });
 }
 
-export function updateAgent(id: string, body: UpdateAgentRequest) {
-  return requestJson<AgentInstanceDto>(`/agents/${encodeURIComponent(id)}`, {
+export function updateAgent(id: string | number, body: UpdateAgentRequest) {
+  return requestJson<AgentInstanceDto>(`/agents/${encodeURIComponent(String(id))}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
-export function deleteAgent(id: string) {
-  return requestJson<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}`, {
+export function deleteAgent(id: string | number) {
+  return requestJson<{ ok: boolean }>(`/agents/${encodeURIComponent(String(id))}`, {
     method: "DELETE",
   });
 }
@@ -250,7 +250,7 @@ export function buildTimeline(messages: HubMessageDto[], events: HubEventDto[]):
   ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 }
 
-export function upsertById<T extends { id: string }>(items: T[], item: T) {
+export function upsertById<T extends { id: string | number }>(items: T[], item: T) {
   const next = items.filter((current) => current.id !== item.id);
   next.push(item);
   return next;

@@ -141,7 +141,7 @@ model BuildMessage {
 }
 
 model Agent {
-  id                    String        @id @default(uuid()) @db.Uuid
+  id                    Int           @id @default(autoincrement())
   templateId            String        @map("template_id") @db.Uuid
   name                  String        @unique
   description           String        @default("")
@@ -186,7 +186,7 @@ model Session {
 
 model SessionAgent {
   sessionId        String    @map("session_id") @db.Uuid
-  agentId          String    @map("agent_id") @db.Uuid
+  agentId          Int       @map("agent_id")
   participantRole  String    @default("member") @map("participant_role")
   source           String    @default("mention")
   firstMentionedAt DateTime? @map("first_mentioned_at") @db.Timestamptz(6)
@@ -204,7 +204,7 @@ model Message {
   sessionId       String          @map("session_id") @db.Uuid
   runId           String?         @map("run_id") @db.Uuid
   role            MessageRoleDb
-  agentId         String?         @map("agent_id") @db.Uuid
+  agentId         Int?            @map("agent_id")
   parentMessageId String?         @map("parent_message_id") @db.Uuid
   contentText     String          @default("") @map("content_text")
   contentJson     Json            @default("{}") @map("content_json")
@@ -241,7 +241,7 @@ model ContextSnapshot {
 model AgentRun {
   id                  String      @id @default(uuid()) @db.Uuid
   sessionId           String      @map("session_id") @db.Uuid
-  orchestratorAgentId String      @map("orchestrator_agent_id") @db.Uuid
+  orchestratorAgentId Int         @map("orchestrator_agent_id")
   userMessageId       String?     @map("user_message_id") @db.Uuid
   assistantMessageId  String?     @map("assistant_message_id") @db.Uuid
   contextSnapshotId   String?     @map("context_snapshot_id") @db.Uuid
@@ -274,7 +274,7 @@ model AgentEvent {
   source         String    @default("downstream_agent")
   eventType      String    @map("event_type")
   visibility     String    @default("public")
-  speakerAgentId String?   @map("speaker_agent_id") @db.Uuid
+  speakerAgentId Int?      @map("speaker_agent_id")
   speakerName    String?   @map("speaker_name")
   payload        Json
   occurredAt     DateTime? @map("occurred_at") @db.Timestamptz(6)

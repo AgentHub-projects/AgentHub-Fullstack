@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
-import type { AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
+import type { AgentId, AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
 import { io } from "socket.io-client";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -66,6 +66,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       const promptInput = await this.buildPromptInput(input, downstreamSessionId!, connection.needsBootstrap);
 
       connection.activeRunId = input.runId;
+      connection.activeOrchestratorAgentId = input.orchestrator.id;
       connection.socket.emit("acp:message", {
         jsonrpc: "2.0",
         id: `prompt-${input.runId}`,
@@ -99,7 +100,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
-  async cancelRun(sessionId: string, runId: string, orchestratorAgentId: string) {
+  async cancelRun(sessionId: string, runId: string, orchestratorAgentId: AgentId) {
     // Skip if the run is already in a terminal state
     const existing = await this.prisma.agentRun.findUnique({
       where: { id: runId },
@@ -135,7 +136,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   async pushContext(
     sessionId: string,
     payload: {
-      agents: Array<{ agentId: string; name: string; description: string; provider: number }>;
+      agents: Array<{ agentId: AgentId; name: string; description: string; provider: number }>;
       summaryChain: Array<{ seq: number; content: string }>;
       message: string;
       recentMessages: Array<{ role: string; content: string }>;
@@ -302,11 +303,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       if (text && runId) {
         const meta = asRecord(params._meta ?? (content as any)._meta);
         const speaker = stringValue(meta.agentId) ?? "agent";
+        const speakerAgentId = agentIdValue(meta.agentId);
         await this.events.append({
           sessionId: record.sessionId,
           runId,
           eventType: "message.delta",
-          speakerAgentId: speaker,
+          speakerAgentId,
           source: "downstream_agent",
           payload: { text, speaker },
         });
@@ -315,9 +317,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             sessionId: record.sessionId,
             runId,
             eventType: "message.completed",
-            speakerAgentId: speaker,
+            speakerAgentId,
             source: "downstream_agent",
-            payload: { text },
+            payload: { text, speaker },
           });
         }
       }
@@ -329,7 +331,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       const runId = record.activeRunId;
       const result = asRecord(envelope.result);
       if (result.stopReason && runId) {
-        await this.completeRun(record.sessionId, runId, "orchestrator", { status: "completed", stopReason: result.stopReason });
+        await this.completeRun(record.sessionId, runId, record.activeOrchestratorAgentId ?? 1, { status: "completed", stopReason: result.stopReason });
       }
       return;
     }
@@ -346,17 +348,16 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (!eventType) return;
     const payload = asRecord(params.payload ?? params);
 
-    const speaker =
-      stringValue(params.speaker) ??
-      stringValue(payload.speaker) ??
-      stringValue(envelope.speaker) ??
-      "orchestrator";
+    const speakerAgentId =
+      agentIdValue(params.speaker) ??
+      agentIdValue(payload.speaker) ??
+      agentIdValue(envelope.speaker);
 
     await this.events.append({
       sessionId: record.sessionId,
       runId,
       eventType,
-      speakerAgentId: speaker,
+      speakerAgentId,
       seq: numberValue(params.seq),
       payload,
       source: "downstream_agent",
@@ -364,13 +365,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     if (eventType === "run.completed") {
-      await this.completeRun(record.sessionId, runId, speaker, payload);
+      await this.completeRun(record.sessionId, runId, speakerAgentId ?? record.activeOrchestratorAgentId ?? 1, payload);
     }
     if (eventType === "run.failed") {
       await this.failRun(
         record.sessionId,
         runId,
-        speaker,
+        speakerAgentId ?? record.activeOrchestratorAgentId ?? 1,
         "DOWNSTREAM_RUN_FAILED",
         stringValue(payload.message) ?? "run failed",
       );
@@ -386,9 +387,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }) {
     const speakers = input.mentionedAgents.length > 0 ? input.mentionedAgents : [
       // Default mock agents
-      { id: "10000000-0000-4000-8000-000000000002", name: "frontend-agent" } as AgentInstanceDto,
-      { id: "10000000-0000-4000-8000-000000000003", name: "backend-agent" } as AgentInstanceDto,
-      { id: "10000000-0000-4000-8000-000000000004", name: "review-agent" } as AgentInstanceDto,
+      { id: 2, name: "frontend-agent" } as AgentInstanceDto,
+      { id: 3, name: "backend-agent" } as AgentInstanceDto,
+      { id: 4, name: "review-agent" } as AgentInstanceDto,
     ];
 
     // Check if already cancelled before starting
@@ -541,7 +542,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     };
   }
 
-  private async loadSessionAgentBriefs(sessionId: string, orchestratorAgentId: string) {
+  private async loadSessionAgentBriefs(sessionId: string, orchestratorAgentId: AgentId) {
     const participants = await this.prisma.sessionAgent.findMany({
       where: {
         sessionId,
@@ -560,7 +561,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }));
   }
 
-  private async completeRun(sessionId: string, runId: string, speakerAgentId: string, payload: Record<string, unknown>) {
+  private async completeRun(sessionId: string, runId: string, speakerAgentId: AgentId, payload: Record<string, unknown>) {
     await this.prisma.agentRun.update({
       where: { id: runId },
       data: { status: "completed", completedAt: new Date() },
@@ -580,7 +581,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.gateway.emitSession(mapSession(session));
   }
 
-  private async failRun(sessionId: string, runId: string, speakerAgentId: string, code: string, message: string) {
+  private async failRun(sessionId: string, runId: string, speakerAgentId: AgentId, code: string, message: string) {
     await this.prisma.agentRun.update({
       where: { id: runId },
       data: { status: "failed", errorCode: code, errorMessage: message, completedAt: new Date() },
@@ -593,4 +594,10 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       payload: { code, message },
     });
   }
+}
+
+function agentIdValue(value: unknown): AgentId | undefined {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return undefined;
 }
