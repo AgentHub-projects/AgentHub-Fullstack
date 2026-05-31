@@ -1699,6 +1699,7 @@ div.agentChoice {
   display: grid;
   grid-template-columns: 1fr;
   padding: 0;
+  overflow: visible;
 }
 
 .agentChoice:hover,
@@ -1755,6 +1756,10 @@ div.agentChoice {
   color: var(--ink);
   padding: 10px;
   text-align: left;
+}
+
+.inviteAgentDialog .agentChoiceList {
+  max-height: calc(5 * 56px + 4 * 8px + 24px);
 }
 
 .agentChoiceConfig {
