@@ -8,12 +8,18 @@ import type {
   SendBuildMessageResponse,
   BuildSessionDto,
   BuildMessageDto,
+  ListBuildSessionsResponse,
 } from "@agenthub/shared";
 import { BuilderService } from "../services/builder.service";
 
 @Controller("agent-templates/build")
 export class BuilderController {
   constructor(@Inject(BuilderService) private readonly builder: BuilderService) {}
+
+  @Get()
+  listBuildSessions(): Promise<ListBuildSessionsResponse> {
+    return this.builder.listSessions();
+  }
 
   @Post("start")
   startBuild(@Body() body: StartBuildRequest): Promise<StartBuildResponse> {

@@ -24,8 +24,8 @@ import { PrismaService } from "./services/prisma.service";
     HubAgentController,
     HubArtifactController,
     HubSessionController,
-    AgentTemplateController,
     BuilderController,
+    AgentTemplateController,
   ],
   providers: [
     PrismaService,
