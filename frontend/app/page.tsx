@@ -83,7 +83,7 @@ export default function WorkbenchPage() {
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("diff");
-  const [notice, setNotice] = useState("正在连接 AgentHub 后端");
+  const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -457,7 +457,7 @@ export default function WorkbenchPage() {
         <header className="conversationHeader">
           <div>
             <strong>{activeSession?.title ?? "AgentHub 群聊"}</strong>
-            <span>{notice}</span>
+            {notice && <span>{notice}</span>}
           </div>
           <div className="headerActions">
             {latestRun && <RunBadge run={latestRun} />}
