@@ -86,7 +86,7 @@ export class BuilderService {
           session.messages,
         ),
         messageCount: session.messages.length,
-        agentTemplateId: session.agentTemplateId ?? null,
+        agentTemplateId: session.agentTemplateId != null ? Number(session.agentTemplateId) : null,
         createdAt: session.createdAt.toISOString(),
         updatedAt: session.updatedAt.toISOString(),
       })),
@@ -198,7 +198,7 @@ export class BuilderService {
       id: session.id,
       status: session.status,
       context: session.context as Record<string, unknown>,
-      agentTemplateId: session.agentTemplateId ?? null,
+      agentTemplateId: session.agentTemplateId != null ? Number(session.agentTemplateId) : null,
       createdAt: session.createdAt.toISOString(),
       updatedAt: session.updatedAt.toISOString(),
     };
