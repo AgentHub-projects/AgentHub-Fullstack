@@ -13,6 +13,7 @@ export type ConnectionRecord = {
   idleTimer: NodeJS.Timeout | null;
   lastActivityAt: number;
   needsBootstrap: boolean;
+  nextId: number;
 };
 
 export type DownstreamEnvelope = {

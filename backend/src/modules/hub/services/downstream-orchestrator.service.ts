@@ -69,7 +69,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       connection.activeOrchestratorAgentId = input.orchestrator.id;
       connection.socket.emit("acp:message", {
         jsonrpc: "2.0",
-        id: `prompt-${input.runId}`,
+        id: connection.nextId++,
         method: "session/prompt",
         params: promptInput,
       });
@@ -117,7 +117,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const record = this.connections.get(sessionId);
     record?.socket.emit("acp:message", {
       jsonrpc: "2.0",
-      id: `cancel-${runId}`,
+      id: record.nextId++,
       method: "session/cancel",
       params: { runId },
     });
@@ -146,7 +146,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (!record?.socket.connected) return;
     record.socket.emit("acp:message", {
       jsonrpc: "2.0",
-      id: `context-${sessionId}-${Date.now()}`,
+      id: record.nextId++,
       method: "session/context",
       params: {
         type: "init",
@@ -191,6 +191,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       idleTimer: null,
       lastActivityAt: Date.now(),
       needsBootstrap: true,
+      nextId: 1,
     };
     this.connections.set(sessionId, record);
 
@@ -199,7 +200,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       // ACP v1 initialize
       socket.emit("acp:message", {
         jsonrpc: "2.0",
-        id: 1,
+        id: record.nextId++,
         method: "initialize",
         params: {
           protocolVersion: 1,
@@ -209,7 +210,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       // ACP v1 session/new
       socket.emit("acp:message", {
         jsonrpc: "2.0",
-        id: 2,
+        id: record.nextId++,
         method: "session/new",
         params: {
           _meta: { agentId: "orchestrator" },
@@ -221,7 +222,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     // Capture session/new response to get downstream session ID
     socket.on("acp:message", (msg: DownstreamEnvelope) => {
-      if (msg.id === 2 && msg.result?.sessionId) {
+      if (msg.result?.sessionId) {
         record.downstreamSessionId = stringValue(msg.result.sessionId);
         if (record.downstreamSessionId) {
           record.resolveDownstreamReady?.(record.downstreamSessionId);
