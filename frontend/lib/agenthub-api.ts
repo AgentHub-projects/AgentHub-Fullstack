@@ -10,7 +10,6 @@ import type {
   CreateSessionAgentRequest,
   FrontendRealtimeEnvelope,
   HubArtifactDto,
-  HubContextSnapshotDto,
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -197,7 +196,6 @@ export function connectHubSocket(
     onSession: (session: HubSessionDto) => void;
     onArtifact: (artifact: HubArtifactDto) => void;
     onFileChange: (fileChange: HubFileChangeDto) => void;
-    onContext: (context: HubContextSnapshotDto) => void;
   },
 ) {
   let socket: Socket | null = null;
@@ -229,9 +227,6 @@ export function connectHubSocket(
   });
   socket.on("hub:file_change", (envelope: FrontendRealtimeEnvelope) => {
     if (envelope.type === "file_change") handlers.onFileChange(envelope.payload as HubFileChangeDto);
-  });
-  socket.on("hub:context", (envelope: FrontendRealtimeEnvelope) => {
-    if (envelope.type === "context") handlers.onContext(envelope.payload as HubContextSnapshotDto);
   });
 
   return () => {

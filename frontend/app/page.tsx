@@ -14,7 +14,6 @@ import type {
 import {
   BranchesOutlined,
   CheckCircleOutlined,
-  DatabaseOutlined,
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -41,7 +40,7 @@ import {
   updateAgent,
   upsertById,
 } from "../lib/agenthub-api";
-import { ArtifactPanel, ContextPanel, DiffPanel } from "./workbench/inspector";
+import { ArtifactPanel, DiffPanel } from "./workbench/inspector";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
@@ -72,7 +71,6 @@ const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
   events: [],
   artifacts: [],
   fileChanges: [],
-  context: null,
 };
 
 export default function WorkbenchPage() {
@@ -156,9 +154,6 @@ export default function WorkbenchPage() {
         setDetail((current) =>
           current ? { ...current, fileChanges: upsertById(current.fileChanges, fileChange).sort(sortFileChange) } : current,
         );
-      },
-      onContext: (context) => {
-        setDetail((current) => (current ? { ...current, context } : current));
       },
     });
     return disconnect;
@@ -256,7 +251,6 @@ export default function WorkbenchPage() {
           session: result.data.session,
           messages: upsertById(base.messages, result.data.message).sort(sortMessage),
           runs: upsertById(base.runs, result.data.run).sort(sortRun),
-          context: result.data.contextSnapshot,
         };
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
@@ -615,23 +609,12 @@ export default function WorkbenchPage() {
             <FileDoneOutlined />
             <span>Artifacts</span>
           </button>
-          <button
-            className={inspectorTab === "context" ? "active" : ""}
-            type="button"
-            onClick={() => setInspectorTab("context")}
-          >
-            <DatabaseOutlined />
-            <span>Context</span>
-          </button>
         </div>
 
         {!inspectorCollapsed && (
           <>
             {inspectorTab === "diff" && <DiffPanel changes={detail?.fileChanges ?? []} />}
             {inspectorTab === "artifacts" && <ArtifactPanel artifacts={detail?.artifacts ?? []} />}
-            {inspectorTab === "context" && (
-              <ContextPanel context={detail?.context ?? null} templates={templates} agents={agents} />
-            )}
           </>
         )}
       </aside>

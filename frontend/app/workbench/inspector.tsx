@@ -6,14 +6,12 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   HubArtifactDto,
-  HubContextSnapshotDto,
   HubEventDto,
   HubFileChangeDto,
 } from "@agenthub/shared";
 import {
   BranchesOutlined,
   CodeOutlined,
-  DatabaseOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
   LinkOutlined,
@@ -120,46 +118,6 @@ export function ArtifactPanel({ artifacts }: { artifacts: HubArtifactDto[] }) {
   );
 }
 
-export function ContextPanel({
-  context,
-  agents,
-  templates,
-}: {
-  context: HubContextSnapshotDto | null;
-  agents: AgentInstanceDto[];
-  templates: AgentTemplateDto[];
-}) {
-  if (!context) return <PanelEmpty icon={<DatabaseOutlined />} text="暂无上下文快照" />;
-  const payload = context.snapshotJson;
-  return (
-    <div className="panelScroll contextPanel">
-      <div className="contextSummary">
-        <strong>Snapshot v{context.version}</strong>
-        <span>{context.tokenCount}/{context.tokenBudget} tokens</span>
-      </div>
-      <ContextSection title="Pin" items={payload.pins} />
-      <ContextSection title="Recent" items={payload.recent} />
-      <ContextSection title="pgvector Recall" items={payload.retrieved} />
-      <section className="agentMatrix">
-        <strong>Agent 实例</strong>
-        {agents.map((agent) => (
-          <div key={agent.id}>
-            <span>{agent.name}</span>
-            <code>{agent.template?.name ?? "worker"}</code>
-          </div>
-        ))}
-        <strong>模板</strong>
-        {templates.map((template) => (
-          <div key={template.id}>
-            <span>{template.name}</span>
-            <code>provider: {template.defaultProvider}</code>
-          </div>
-        ))}
-      </section>
-    </div>
-  );
-}
-
 export function InlineDiff({ event }: { event: HubEventDto }) {
   const patch = typeof event.payload.patch === "string" ? event.payload.patch : "";
   const path = typeof event.payload.path === "string" ? event.payload.path : "changed file";
@@ -179,23 +137,6 @@ export function InlineArtifact({ event }: { event: HubEventDto }) {
       <strong><FileMarkdownOutlined /> {title}</strong>
       {content ? <RichText text={content} /> : <pre>{JSON.stringify(event.payload, null, 2)}</pre>}
     </div>
-  );
-}
-
-function ContextSection({ title, items }: { title: string; items: HubContextSnapshotDto["snapshotJson"]["pins"] }) {
-  return (
-    <section className="contextSection">
-      <div className="contextSectionTitle">
-        <strong>{title}</strong>
-        <span>{items.length}</span>
-      </div>
-      {items.map((item) => (
-        <p key={item.id}>
-          <code>{item.kind}</code>
-          {item.text}
-        </p>
-      ))}
-    </section>
   );
 }
 
