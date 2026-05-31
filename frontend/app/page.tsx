@@ -90,6 +90,15 @@ export default function WorkbenchPage() {
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
   const [orchTemplateId, setOrchTemplateId] = useState<number>(0);
+  const [orchSearch, setOrchSearch] = useState("");
+  const [orchDropdownOpen, setOrchDropdownOpen] = useState(false);
+  const selectedOrchTpl = templates.find((t) => t.id === orchTemplateId);
+
+  function closeGroupDialog() {
+    setGroupDialogOpen(false);
+    setOrchSearch("");
+    setOrchDropdownOpen(false);
+  }
   const [orchProvider, setOrchProvider] = useState("claude-code");
   const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: string }>>([]);
   const [contextMenu, setContextMenu] = useState<{ agentId: number; x: number; y: number } | null>(null);
@@ -224,7 +233,7 @@ export default function WorkbenchPage() {
     setDetail({ session: result.data, ...EMPTY_DETAIL });
     setActiveSessionId(result.data.id);
     closeMentionMenu();
-    setGroupDialogOpen(false);
+    closeGroupDialog();
   }
 
   async function handleSend() {
@@ -620,7 +629,7 @@ export default function WorkbenchPage() {
       </aside>
 
       {groupDialogOpen && (
-        <div className="dialogLayer" role="presentation" onMouseDown={() => setGroupDialogOpen(false)}>
+        <div className="dialogLayer" role="presentation" onMouseDown={closeGroupDialog}>
           <section
             className="groupDialog"
             role="dialog"
@@ -641,12 +650,31 @@ export default function WorkbenchPage() {
               </label>
               <label>
                 Orchestrator
-                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
-                  <option value="0">默认 Orchestrator</option>
-                  {templates.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                  ))}
-                </select>
+                <div className="searchableSelect">
+                  <input
+                    value={orchDropdownOpen ? orchSearch : (selectedOrchTpl?.name ?? "")}
+                    placeholder="搜索模板…"
+                    onFocus={() => { setOrchSearch(""); setOrchDropdownOpen(true); }}
+                    onChange={(e) => setOrchSearch(e.target.value)}
+                    onBlur={() => setTimeout(() => setOrchDropdownOpen(false), 150)}
+                  />
+                  {orchDropdownOpen && (
+                    <div className="searchableDropdown">
+                      {templates
+                        .filter((tpl) => !orchSearch || tpl.name.toLowerCase().includes(orchSearch.toLowerCase()))
+                        .map((tpl) => (
+                          <div
+                            key={tpl.id}
+                            className={`searchableOption ${orchTemplateId === tpl.id ? "active" : ""}`}
+                            onMouseDown={() => { setOrchTemplateId(tpl.id); setOrchDropdownOpen(false); }}
+                          >
+                            <strong>{tpl.name}</strong>
+                            <small>{tpl.description.slice(0, 50)}</small>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
               </label>
               {orchTemplateId !== 0 && (
                 <label>
@@ -712,7 +740,7 @@ export default function WorkbenchPage() {
               })}
             </div>
             <footer>
-              <button className="ghostButton" type="button" onClick={() => setGroupDialogOpen(false)}>
+              <button className="ghostButton" type="button" onClick={closeGroupDialog}>
                 取消
               </button>
               <button className="primaryButton" type="button" onClick={() => void handleCreateGroup()}>
