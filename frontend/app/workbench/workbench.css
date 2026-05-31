@@ -1546,13 +1546,7 @@ textarea:focus-visible {
 }
 
 .groupDialog {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.dialogBody {
-  overflow-y: auto;
-  min-height: 0;
-  padding: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .agentDialog header,
@@ -1764,7 +1758,8 @@ div.agentChoice {
   text-align: left;
 }
 
-.inviteAgentDialog .agentChoiceList {
+.inviteAgentDialog .agentChoiceList,
+.groupDialog .agentChoiceList {
   max-height: calc(5 * 56px + 4 * 8px + 24px);
 }
 

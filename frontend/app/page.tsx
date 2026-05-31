@@ -634,77 +634,82 @@ export default function WorkbenchPage() {
                 <span>填写群聊信息并选择模板</span>
               </div>
             </header>
-            <div className="dialogBody">
-              <div className="buildForm">
+            <div className="buildForm">
+              <label>
+                群聊名称
+                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
+              </label>
+              <label>
+                Orchestrator
+                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
+                  <option value="0">默认 Orchestrator</option>
+                  {templates.map((tpl) => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                  ))}
+                </select>
+              </label>
+              {orchTemplateId !== 0 && (
                 <label>
-                  群聊名称
-                  <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
-                </label>
-                <label>
-                  Orchestrator 模板
-                  <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
-                    <option value="">默认 Orchestrator</option>
-                    {templates.map((tpl) => (
-                      <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                    ))}
+                  Orchestrator Provider
+                  <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                    <option value="claude-code">claude-code</option>
+                    <option value="open-code">open-code</option>
                   </select>
                 </label>
-                {orchTemplateId && (
-                  <label>
-                    Orchestrator Provider
-                    <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
-                      <option value="claude-code">claude-code</option>
-                      <option value="open-code">open-code</option>
-                    </select>
-                  </label>
-                )}
-                <label>群成员模板（多选）</label>
-              </div>
-              <div className="agentChoiceList">
+              )}
+              <label>群成员模板（多选）</label>
+            </div>
+            <div className="agentChoiceList">
               {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板，请先创建模板。</p>}
               {templates.map((tpl) => {
                 const selected = memberTemplates.some((m) => m.templateId === tpl.id);
                 return (
-                  <button
+                  <div
                     key={tpl.id}
                     className={`agentChoice ${selected ? "selected" : ""}`}
-                    type="button"
-                    onClick={() =>
-                      setMemberTemplates((current) =>
-                        selected
-                          ? current.filter((m) => m.templateId !== tpl.id)
-                          : [...current, { templateId: tpl.id, provider: tpl.defaultProvider }],
-                      )
-                    }
                   >
-                    <span className="avatar" style={{ background: agentColor(tpl.id) }}>
-                      {initials(tpl.name)}
-                    </span>
-                    <span>
-                      <strong>{tpl.name}</strong>
-                      <small>{tpl.description.slice(0, 40)}</small>
-                    </span>
+                    <button
+                      className="agentChoiceMain"
+                      type="button"
+                      onClick={() =>
+                        setMemberTemplates((current) =>
+                          selected
+                            ? current.filter((m) => m.templateId !== tpl.id)
+                            : [...current, { templateId: tpl.id, provider: tpl.defaultProvider }],
+                        )
+                      }
+                    >
+                      <span className="avatar" style={{ background: agentColor(tpl.id) }}>
+                        {initials(tpl.name)}
+                      </span>
+                      <span>
+                        <strong>{tpl.name}</strong>
+                        <small>{tpl.description.slice(0, 40)}</small>
+                      </span>
+                    </button>
                     {selected && (
-                      <select
-                        value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? "claude-code"}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          setMemberTemplates((current) =>
-                            current.map((m) =>
-                              m.templateId === tpl.id ? { ...m, provider: e.target.value } : m,
-                            ),
-                          );
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <option value="claude-code">claude-code</option>
-                        <option value="open-code">open-code</option>
-                      </select>
+                      <div className="agentChoiceConfig">
+                        <select
+                          value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? "claude-code"}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setMemberTemplates((current) =>
+                              current.map((m) =>
+                                m.templateId === tpl.id ? { ...m, provider: e.target.value } : m,
+                              ),
+                            );
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ gridColumn: "1 / -1" }}
+                        >
+                          <option value="claude-code">claude-code</option>
+                          <option value="open-code">open-code</option>
+                        </select>
+                      </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
-            </div>
             </div>
             <footer>
               <button className="ghostButton" type="button" onClick={() => setGroupDialogOpen(false)}>
