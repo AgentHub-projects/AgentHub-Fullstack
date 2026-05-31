@@ -634,32 +634,33 @@ export default function WorkbenchPage() {
                 <span>填写群聊信息并选择模板</span>
               </div>
             </header>
-            <div className="buildForm">
-              <label>
-                群聊名称
-                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
-              </label>
-              <label>
-                Orchestrator 模板
-                <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
-                  <option value="">默认 Orchestrator</option>
-                  {templates.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                  ))}
-                </select>
-              </label>
-              {orchTemplateId && (
+            <div className="dialogBody">
+              <div className="buildForm">
                 <label>
-                  Orchestrator Provider
-                  <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
-                    <option value="claude-code">claude-code</option>
-                    <option value="open-code">open-code</option>
+                  群聊名称
+                  <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
+                </label>
+                <label>
+                  Orchestrator 模板
+                  <select value={orchTemplateId} onChange={(e) => setOrchTemplateId(Number(e.target.value))}>
+                    <option value="">默认 Orchestrator</option>
+                    {templates.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                    ))}
                   </select>
                 </label>
-              )}
-              <label>群成员模板（多选）</label>
-            </div>
-            <div className="agentChoiceList">
+                {orchTemplateId && (
+                  <label>
+                    Orchestrator Provider
+                    <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                      <option value="claude-code">claude-code</option>
+                      <option value="open-code">open-code</option>
+                    </select>
+                  </label>
+                )}
+                <label>群成员模板（多选）</label>
+              </div>
+              <div className="agentChoiceList">
               {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板，请先创建模板。</p>}
               {templates.map((tpl) => {
                 const selected = memberTemplates.some((m) => m.templateId === tpl.id);
@@ -703,6 +704,7 @@ export default function WorkbenchPage() {
                   </button>
                 );
               })}
+            </div>
             </div>
             <footer>
               <button className="ghostButton" type="button" onClick={() => setGroupDialogOpen(false)}>

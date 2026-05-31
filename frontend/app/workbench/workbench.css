@@ -1546,7 +1546,13 @@ textarea:focus-visible {
 }
 
 .groupDialog {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.dialogBody {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0;
 }
 
 .agentDialog header,
