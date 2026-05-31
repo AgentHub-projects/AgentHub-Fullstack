@@ -16,6 +16,7 @@ import type {
   HubMessageDto,
   HubRunDto,
   HubSessionDto,
+  ListBuildSessionsResponse,
   PinHubMessageRequest,
   SendBuildMessageRequest,
   SendBuildMessageResponse,
@@ -150,6 +151,10 @@ export function deleteAgentTemplate(id: number) {
 }
 
 // ---- Builder ----
+
+export function listBuildSessions() {
+  return requestJson<ListBuildSessionsResponse>("/agent-templates/build");
+}
 
 export function startBuild(body: StartBuildRequest) {
   return requestJson<StartBuildResponse>("/agent-templates/build/start", {
