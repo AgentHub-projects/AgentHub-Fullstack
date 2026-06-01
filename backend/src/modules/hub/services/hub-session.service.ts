@@ -328,6 +328,7 @@ export class HubSessionService {
           {
             mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
             attachmentIds: attachmentParts.map((part) => part.metadata?.artifactId),
+            quotedMessageId: input.quotedMessageId,
           },
           text,
           attachmentParts,
@@ -419,6 +420,23 @@ export class HubSessionService {
     if (!run) throw new Error("Run not found");
     await this.downstream.cancelRun(sessionId, runId, run.orchestratorAgentId);
     return { runId, status: "cancelled" };
+  }
+
+  async regenerateFromMessage(sessionId: string, messageId: string) {
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, sessionId, role: "user" },
+    });
+    if (!message) throw new NotFoundException("USER_MESSAGE_NOT_FOUND");
+    const contentJson = mergeMetadata(message.contentJson, {});
+    const attachmentIds = Array.isArray(contentJson.attachmentIds)
+      ? contentJson.attachmentIds.filter((item): item is string => typeof item === "string")
+      : [];
+    return this.sendMessage(sessionId, {
+      content: message.contentText,
+      parentMessageId: message.parentMessageId ?? undefined,
+      quotedMessageId: typeof contentJson.quotedMessageId === "string" ? contentJson.quotedMessageId : undefined,
+      attachments: attachmentIds.map((id) => ({ id })),
+    });
   }
 
   async applyFileChange(sessionId: string, fileChangeId: string) {

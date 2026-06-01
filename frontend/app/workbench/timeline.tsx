@@ -7,12 +7,14 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CodeOutlined,
+  CommentOutlined,
   CopyOutlined,
   FileDoneOutlined,
   LoadingOutlined,
   MessageOutlined,
   PushpinFilled,
   PushpinOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { AgentReplyBlockModel } from "../../lib/workbench/types";
 import {
@@ -28,13 +30,19 @@ import { MessageParts, RichText } from "./rich-text";
 export function TimelineMessage({
   message,
   onPin,
+  onReply,
+  onRegenerate,
   agents,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
+  onReply?: (message: HubMessageDto) => void;
+  onRegenerate?: (message: HubMessageDto) => void;
   agents: AgentInstanceDto[];
 }) {
-  if (message.role === "user") return <UserMessage message={message} onPin={onPin} />;
+  if (message.role === "user") {
+    return <UserMessage message={message} onPin={onPin} onReply={onReply} onRegenerate={onRegenerate} />;
+  }
   return <AgentReplyBlock block={messageToReplyBlock(message, agents)} />;
 }
 
@@ -81,7 +89,17 @@ export function RunBadge({ run }: { run: HubRunDto }) {
   );
 }
 
-function UserMessage({ message, onPin }: { message: HubMessageDto; onPin: (message: HubMessageDto) => void }) {
+function UserMessage({
+  message,
+  onPin,
+  onReply,
+  onRegenerate,
+}: {
+  message: HubMessageDto;
+  onPin: (message: HubMessageDto) => void;
+  onReply?: (message: HubMessageDto) => void;
+  onRegenerate?: (message: HubMessageDto) => void;
+}) {
   return (
     <article className="timelineRow userRow">
       <div className="bubble userBubble">
@@ -90,6 +108,16 @@ function UserMessage({ message, onPin }: { message: HubMessageDto; onPin: (messa
           <button type="button" title={message.isPinned ? "取消 Pin" : "Pin 到上下文"} onClick={() => onPin(message)}>
             {message.isPinned ? <PushpinFilled /> : <PushpinOutlined />}
           </button>
+          {onReply && (
+            <button type="button" title="回复/引用" onClick={() => onReply(message)}>
+              <CommentOutlined />
+            </button>
+          )}
+          {onRegenerate && (
+            <button type="button" title="重新生成" onClick={() => onRegenerate(message)}>
+              <ReloadOutlined />
+            </button>
+          )}
           <button type="button" title="复制消息" onClick={() => copyText(message.contentText)}>
             <CopyOutlined />
           </button>

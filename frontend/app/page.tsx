@@ -52,6 +52,7 @@ import {
   listSessions,
   loginWithAccessKey,
   pinSessionMessage,
+  regenerateSessionMessage,
   sendSessionMessage,
   startDeployment,
   uploadSessionAttachment,
@@ -110,6 +111,7 @@ export default function WorkbenchPage() {
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
   const [composer, setComposer] = useState("");
   const [attachments, setAttachments] = useState<UploadedAttachmentDto[]>([]);
+  const [replyTarget, setReplyTarget] = useState<HubMessageDto | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -332,6 +334,7 @@ export default function WorkbenchPage() {
     setActiveSessionId(sessionId);
     setRenamingSession(false);
     setAttachments([]);
+    setReplyTarget(null);
     const result = await getSessionDetail(sessionId);
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
@@ -488,6 +491,8 @@ export default function WorkbenchPage() {
         content: text,
         mentionedAgentIds: targetAgentIds,
         orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
+        parentMessageId: replyTarget?.id,
+        quotedMessageId: replyTarget?.id,
         attachments: attachments.map((item) => ({ id: item.id })),
       });
       if (!result.ok) {
@@ -505,6 +510,7 @@ export default function WorkbenchPage() {
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
       setAttachments([]);
+      setReplyTarget(null);
       setNotice(mode === "direct" ? "消息已发送给 Agent" : "消息已发送给 Orchestrator");
     } finally {
       setSending(false);
@@ -635,6 +641,31 @@ export default function WorkbenchPage() {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(caret, caret);
     });
+  }
+
+  async function handleRegenerate(message: HubMessageDto) {
+    if (!activeSessionId || sending) return;
+    setSending(true);
+    try {
+      const result = await regenerateSessionMessage(activeSessionId, message.id);
+      if (!result.ok) {
+        setNotice(`重新生成失败：${result.error}`);
+        return;
+      }
+      setDetail((current) => {
+        const base = current ?? { session: result.data.session, ...EMPTY_DETAIL };
+        return {
+          ...base,
+          session: result.data.session,
+          messages: upsertById(base.messages, result.data.message).sort(sortMessage),
+          runs: upsertById(base.runs, result.data.run).sort(sortRun),
+        };
+      });
+      setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
+      setNotice("已创建新的重新生成 run");
+    } finally {
+      setSending(false);
+    }
   }
 
   async function handleApplyFileChange(change: HubFileChangeDto) {
@@ -939,7 +970,14 @@ export default function WorkbenchPage() {
         <div className="timeline">
           {conversationItems.map((item) =>
             item.kind === "message" ? (
-              <TimelineMessage key={item.id} message={item.message} onPin={handlePin} agents={agents} />
+              <TimelineMessage
+                key={item.id}
+                message={item.message}
+                onPin={handlePin}
+                onReply={setReplyTarget}
+                onRegenerate={(message) => void handleRegenerate(message)}
+                agents={agents}
+              />
             ) : (
               <RunThread
                 key={item.id}
@@ -954,6 +992,14 @@ export default function WorkbenchPage() {
         </div>
 
         <footer className="composer">
+          {replyTarget && (
+            <div className="replyBanner">
+              <span>引用：{replyTarget.contentText.slice(0, 80)}</span>
+              <button type="button" onClick={() => setReplyTarget(null)}>
+                取消
+              </button>
+            </div>
+          )}
           <div className="composerInputWrap">
             {mentionMatch && !sending && activeSessionId && (
               <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">

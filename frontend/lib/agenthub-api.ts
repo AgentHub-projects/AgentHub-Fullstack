@@ -194,6 +194,13 @@ export function pinSessionMessage(sessionId: string, messageId: string, body: Pi
   );
 }
 
+export function regenerateSessionMessage(sessionId: string, messageId: string) {
+  return requestJson<SendHubMessageResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/regenerate`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 export function cancelRun(sessionId: string, runId: string) {
   return requestJson<{ runId: string; status: string }>(
     `/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,

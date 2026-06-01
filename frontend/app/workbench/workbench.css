@@ -1072,6 +1072,35 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.replyBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--muted);
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.replyBanner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replyBanner button {
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  font-weight: 800;
+}
+
 .mentionMenu {
   position: absolute;
   right: 10px;

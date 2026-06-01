@@ -111,6 +111,11 @@ export class HubSessionController {
     return this.sessions.pinMessage(sessionId, messageId, body);
   }
 
+  @Post(":sessionId/messages/:messageId/regenerate")
+  regenerateMessage(@Param("sessionId") sessionId: string, @Param("messageId") messageId: string) {
+    return this.sessions.regenerateFromMessage(sessionId, messageId);
+  }
+
   @Post(":sessionId/participants")
   addParticipant(
     @Param("sessionId") sessionId: string,
