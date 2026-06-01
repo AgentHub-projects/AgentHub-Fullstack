@@ -256,6 +256,67 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     }));
     expect(responseFor(socket, 88)).toEqual({ jsonrpc: "2.0", id: 88, result: { ok: true } });
   });
+
+  it("loads the downstream session before applying a diff when no socket is connected", async () => {
+    const { service, prisma } = createServiceHarness();
+    prisma.agentRun.findUnique.mockResolvedValue({
+      orchestratorAgentId: 1,
+      downstreamSessionId: "downstream-session-1",
+    });
+
+    const pending = service.applyFileChanges({
+      sessionId: "session-1",
+      runId: "run-1",
+      fileChangeIds: ["change-1"],
+      changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+    });
+    await flushMicrotasks();
+
+    const socket = socketMock.sockets.at(-1);
+    expect(socket).toBeDefined();
+    expect(firstRequestParams("session/load")).toEqual({ sessionId: "downstream-session-1" });
+
+    socket!.trigger("acp:message", { jsonrpc: "2.0", id: 2, result: { sessionId: "downstream-session-1" } });
+    await pending;
+
+    const apply = requestFor(socket!, "file/apply_diff");
+    expect(apply?.params).toEqual({
+      sessionId: "downstream-session-1",
+      agenthubSessionId: "session-1",
+      runId: "run-1",
+      fileChangeIds: ["change-1"],
+      changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+    });
+    expect(requestFor(socket!, "session/new")).toBeUndefined();
+  });
+
+  it("does not create a new downstream session when diff apply session load fails", async () => {
+    const { service, prisma } = createServiceHarness();
+    prisma.agentRun.findUnique.mockResolvedValue({
+      orchestratorAgentId: 1,
+      downstreamSessionId: "missing-downstream-session",
+    });
+
+    const pending = service.applyFileChanges({
+      sessionId: "session-1",
+      runId: "run-1",
+      fileChangeIds: ["change-1"],
+      changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+    });
+    await flushMicrotasks();
+
+    const socket = socketMock.sockets.at(-1);
+    expect(socket).toBeDefined();
+    socket!.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 2,
+      error: { code: "SESSION_NOT_FOUND", message: "SESSION_NOT_FOUND" },
+    });
+
+    await expect(pending).rejects.toThrow("SESSION_NOT_FOUND");
+    expect(requestFor(socket!, "session/new")).toBeUndefined();
+    expect(requestFor(socket!, "file/apply_diff")).toBeUndefined();
+  });
 });
 
 const orchestrator: AgentInstanceDto = {
@@ -448,6 +509,13 @@ function firstRequestParams(method: string) {
     .find((item) => item.event === "acp:message" && item.payload.method === method);
   expect(request).toBeDefined();
   return request!.payload.params;
+}
+
+function requestFor(socket: (typeof socketMock.sockets)[number], method: string) {
+  return socket.emitted
+    .filter((item) => item.event === "acp:message")
+    .map((item) => item.payload)
+    .find((payload) => payload.method === method);
 }
 
 function responseFor(socket: (typeof socketMock.sockets)[number], id: string | number) {

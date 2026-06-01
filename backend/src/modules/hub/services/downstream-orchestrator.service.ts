@@ -172,21 +172,52 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     fileChangeIds: string[];
     changes: Array<{ id: string; path: string; patch?: string | null; beforeContent?: string | null; afterContent?: string | null }>;
   }) {
-    const record = this.connections.get(input.sessionId);
-    if (!record?.socket.connected) {
-      throw new Error("DOWNSTREAM_NOT_CONNECTED");
-    }
+    const record = await this.ensureApplyConnection(input.sessionId, input.runId);
+    const downstreamSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
+    if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
     record.socket.emit("acp:message", {
       jsonrpc: "2.0",
       id: record.nextId++,
       method: "file/apply_diff",
       params: {
+        sessionId: downstreamSessionId,
+        agenthubSessionId: input.sessionId,
         runId: input.runId,
         fileChangeIds: input.fileChangeIds,
         changes: input.changes,
       },
     });
     this.markDownstreamActivity(record);
+  }
+
+  private async ensureApplyConnection(sessionId: string, runId: string) {
+    const existing = this.connections.get(sessionId);
+    if (existing?.socket.connected) return existing;
+
+    const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
+    if (!downstreamUrl) throw new Error("DOWNSTREAM_NOT_CONNECTED");
+
+    const run = await this.prisma.agentRun.findUnique({
+      where: { id: runId },
+      select: { orchestratorAgentId: true, downstreamSessionId: true },
+    });
+    if (!run) throw new Error("RUN_NOT_FOUND");
+
+    const downstreamSessionId = run.downstreamSessionId ?? await this.findReusableDownstreamSessionId(sessionId);
+    if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
+
+    const record = await this.ensureConnection(
+      sessionId,
+      downstreamUrl,
+      { id: run.orchestratorAgentId } as AgentInstanceDto,
+      {
+        downstreamSessionId,
+        allowSessionNewFallback: false,
+      },
+    );
+    const loadedSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
+    if (!loadedSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
+    return record;
   }
 
   /** Push context to downstream on connect/reconnect (complete context injection) */
@@ -247,7 +278,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     sessionId: string,
     downstreamUrl: string,
     agent: AgentInstanceDto,
-    options: { downstreamSessionId?: string | null; activeRunId?: string; activeOrchestratorAgentId?: AgentId } = {},
+    options: {
+      downstreamSessionId?: string | null;
+      activeRunId?: string;
+      activeOrchestratorAgentId?: AgentId;
+      allowSessionNewFallback?: boolean;
+    } = {},
   ): Promise<ConnectionRecord> {
     const existing = this.connections.get(sessionId);
     if (existing?.socket.connected) {
@@ -321,7 +357,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           record.resolveDownstreamReady?.(resultSessionId);
         })
         .catch((error) => {
-          if (loadSessionId && !record.activeRunId) {
+          if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
             record.downstreamSessionId = undefined;
             record.needsBootstrap = true;
             void this.requestDownstream(record, "session/new", {
