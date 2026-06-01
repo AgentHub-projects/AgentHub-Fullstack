@@ -52,4 +52,25 @@ describe("HubSessionService part references", () => {
       parts: [{ id: "code_1", type: "code", language: "ts", text: "const ok = true;" }],
     }, "code_1")).toContain("const ok = true;");
   });
+
+  it("keeps diff metadata patch in part references", () => {
+    const text = referencedPartText({
+      parts: [
+        {
+          id: "diff_1",
+          type: "diff",
+          title: "src/app.ts",
+          metadata: {
+            path: "src/app.ts",
+            changeType: "modified",
+            patch: "@@ -1 +1 @@\n-old\n+new",
+          },
+        },
+      ],
+    }, "diff_1");
+
+    expect(text).toContain("path: src/app.ts");
+    expect(text).toContain("changeType: modified");
+    expect(text).toContain("patch:\n@@ -1 +1 @@\n-old\n+new");
+  });
 });

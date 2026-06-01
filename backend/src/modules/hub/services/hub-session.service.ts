@@ -12,7 +12,7 @@ import type {
   UpdateHubSessionRequest,
 } from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
-import { HubContextService } from "./context.service";
+import { HubContextService, messagePartContextText } from "./context.service";
 import { DownstreamOrchestratorService } from "./downstream-orchestrator.service";
 import { HubEventService } from "./event.service";
 import { DeploymentService } from "./deployment.service";
@@ -795,31 +795,7 @@ export function referencedPartText(contentJson: unknown, partId: string) {
 }
 
 function summarizePartForReference(part: Record<string, unknown>) {
-  const metadata = mergeMetadata(part.metadata, {});
-  const lines = [
-    stringLine("type", part.type),
-    stringLine("title", part.title),
-    stringLine("url", part.url),
-    stringLine("language", part.language),
-    stringLine("mimeType", metadata.mimeType),
-    stringLine("sizeBytes", metadata.sizeBytes),
-    stringLine("description", metadata.description),
-    stringLine("artifactId", metadata.artifactId),
-    stringLine("kind", metadata.kind),
-    stringLine("deploymentId", metadata.deploymentId),
-    stringLine("status", metadata.status),
-    stringLine("target", metadata.target),
-    stringLine("commitSha", metadata.commitSha),
-    stringLine("sourceArchiveUrl", metadata.sourceArchiveUrl),
-    typeof part.text === "string" && part.text.trim() ? `text:\n${part.text}` : "",
-  ].filter(Boolean);
-  return lines.join("\n").slice(0, 20000) || null;
-}
-
-function stringLine(label: string, value: unknown) {
-  if (typeof value === "string" && value.trim()) return `${label}: ${value}`;
-  if (typeof value === "number" && Number.isFinite(value)) return `${label}: ${value}`;
-  return "";
+  return messagePartContextText(part) || null;
 }
 
 function sessionMatchesQuery(
