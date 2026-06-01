@@ -22,6 +22,7 @@ const RUN_ARTIFACT_PARTS_KEY = "__run_artifacts__";
 export class HubEventService {
   private readonly messageBuffers = new Map<string, Map<string, MessageBuffer>>();
   private readonly artifactPartBuffers = new Map<string, Map<string, HubMessagePartDto[]>>();
+  private readonly runSeqWatermarks = new Map<string, number>();
   // key: runId -> Map<speakerAgentId, MessageBuffer>
 
   constructor(
@@ -67,9 +68,19 @@ export class HubEventService {
         where: { runId: input.runId, seq: BigInt(input.seq) },
       });
       if (existing) return mapEvent(existing);
+      if (input.eventType === "message.delta" && input.seq < expectedSeq) {
+        return this.transientEvent(input, input.seq, speaker?.id ?? null, speaker?.name ?? null);
+      }
       if (input.seq !== expectedSeq) throw new Error("EVENT_SEQ_OUT_OF_ORDER");
     }
     const seq = BigInt(input.seq ?? expectedSeq);
+
+    if (input.eventType === "message.delta") {
+      const dto = this.transientEvent(input, Number(seq), speaker?.id ?? null, speaker?.name ?? null);
+      await this.applySideEffects(dto);
+      this.markSeq(input.runId, Number(seq));
+      return dto;
+    }
 
     let event;
     event = await this.prisma.agentEvent.create({
@@ -89,6 +100,7 @@ export class HubEventService {
 
     const dto = mapEvent(event);
     await this.applySideEffects(dto);
+    this.markSeq(input.runId, Number(seq));
     this.gateway.emitEvent(dto);
     return dto;
   }
@@ -98,7 +110,42 @@ export class HubEventService {
       where: { runId },
       _max: { seq: true },
     });
-    return Number(result._max.seq ?? 0n) + 1;
+    return Math.max(Number(result._max.seq ?? 0n), this.runSeqWatermarks.get(runId) ?? 0) + 1;
+  }
+
+  private markSeq(runId: string, seq: number) {
+    this.runSeqWatermarks.set(runId, Math.max(this.runSeqWatermarks.get(runId) ?? 0, seq));
+  }
+
+  private transientEvent(
+    input: {
+      sessionId: string;
+      runId: string;
+      eventType: HubEventType | string;
+      payload?: Record<string, unknown>;
+      source?: string;
+      visibility?: string;
+      occurredAt?: Date;
+    },
+    seq: number,
+    speakerAgentId: number | null,
+    speakerName: string | null,
+  ): HubEventDto {
+    const occurredAt = input.occurredAt ?? new Date();
+    return {
+      id: `transient:${input.runId}:${seq}`,
+      sessionId: input.sessionId,
+      runId: input.runId,
+      seq,
+      source: input.source ?? "downstream_agent",
+      eventType: input.eventType,
+      visibility: input.visibility ?? "public",
+      speakerAgentId,
+      speakerName,
+      payload: input.payload ?? {},
+      occurredAt: occurredAt.toISOString(),
+      persistedAt: occurredAt.toISOString(),
+    };
   }
 
   private async applySideEffects(event: HubEventDto) {
@@ -208,6 +255,12 @@ export class HubEventService {
           },
         });
       }
+    }
+
+    if (event.eventType === "run.completed" || event.eventType === "run.failed" || event.eventType === "run.cancelled") {
+      this.messageBuffers.delete(event.runId);
+      this.artifactPartBuffers.delete(event.runId);
+      this.runSeqWatermarks.delete(event.runId);
     }
   }
 

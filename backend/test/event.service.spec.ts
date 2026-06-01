@@ -4,6 +4,45 @@ import { HubEventService } from "../src/modules/hub/services/event.service";
 const now = new Date("2026-06-02T09:00:00.000Z");
 
 describe("HubEventService artifact message parts", () => {
+  it("buffers message deltas without persisting or broadcasting each chunk", async () => {
+    const { service, prisma, gateway } = createService();
+    prisma.message.create.mockImplementation(async ({ data }: any) => messageRow({ ...data, id: "message-1" }));
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "message.delta",
+      speakerAgentId: 2,
+      seq: 1,
+      payload: { text: "hello " },
+    });
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "message.delta",
+      speakerAgentId: 2,
+      seq: 2,
+      payload: { text: "world" },
+    });
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "message.completed",
+      speakerAgentId: 2,
+      seq: 3,
+      payload: {},
+    });
+
+    expect(prisma.agentEvent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.agentEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ eventType: "message.completed", seq: 3n }),
+    }));
+    expect(gateway.emitEvent).toHaveBeenCalledTimes(1);
+    expect(prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ contentText: "hello world" }),
+    }));
+  });
+
   it("buffers artifact cards until the speaker assistant message is completed", async () => {
     const { service, prisma, artifacts } = createService();
     artifacts.upsertArtifact.mockResolvedValue(artifactRow({ id: "artifact-1", title: "预览页" }));
@@ -137,6 +176,7 @@ function createService() {
     },
     agentEvent: {
       aggregate: vi.fn(async () => ({ _max: { seq } })),
+      findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn(async ({ data }: any) => {
         seq = BigInt(data.seq);
         return {
