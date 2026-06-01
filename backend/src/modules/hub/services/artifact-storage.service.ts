@@ -13,6 +13,8 @@ type OssClient = {
   signatureUrl?: (key: string, options?: Record<string, unknown>) => string;
 };
 
+export const TEXT_ATTACHMENT_PREVIEW_CHAR_LIMIT = 100 * 1024;
+
 @Injectable()
 export class ArtifactStorageService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -27,7 +29,7 @@ export class ArtifactStorageService {
     const sha256 = sha256Buffer(input.data);
     const sizeBytes = input.data.length;
     const kind = inferKindFromMime(input.mimeType);
-    const textPreview = textPreviewFor(input.mimeType, input.data);
+    const textPreview = buildTextAttachmentPreview(input.mimeType, input.data);
     const uploaded = await this.uploadToOss(input.sessionId, "attachments", input.name, input.data, input.mimeType);
     const localPath = uploaded ? null : await this.writeLocalUpload(artifactId, input.name, input.data);
     const publicUrl = uploaded ? (await this.getSignedOssUrl(uploaded.uri)) ?? uploaded.uri : this.localUploadUrl(artifactId);
@@ -477,10 +479,11 @@ function inferKindFromMime(mimeType: string): HubArtifactKind {
   return "other";
 }
 
-function textPreviewFor(mimeType: string, data: Buffer) {
-  if (data.length > 20 * 1024) return null;
+export function buildTextAttachmentPreview(mimeType: string, data: Buffer) {
   if (!mimeType.startsWith("text/") && !mimeType.includes("json") && !mimeType.includes("xml")) return null;
-  return data.toString("utf8");
+  const text = data.toString("utf8");
+  if (text.length > TEXT_ATTACHMENT_PREVIEW_CHAR_LIMIT) return null;
+  return text;
 }
 
 function decodeBinary(payload: ArtifactPayload): Buffer | null {
