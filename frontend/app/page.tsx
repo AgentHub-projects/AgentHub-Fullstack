@@ -180,6 +180,7 @@ export default function WorkbenchPage() {
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
+  const runActionLocked = !sessionWritable || activeRunInProgress;
   const memberMutationLocked = !sessionWritable || activeRunInProgress;
   const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
@@ -268,6 +269,13 @@ export default function WorkbenchPage() {
   useEffect(() => {
     if (memberMutationLocked) setContextMenu(null);
   }, [memberMutationLocked]);
+
+  useEffect(() => {
+    if (!runActionLocked) return;
+    setDeploymentMenuOpen(false);
+    setMentionMatch(null);
+    setActiveMentionIndex(0);
+  }, [runActionLocked]);
 
   async function checkAuth() {
     const result = await getAuthState();
@@ -544,7 +552,7 @@ export default function WorkbenchPage() {
 
   async function handleSend() {
     const text = composer.trim();
-    if (!text || !activeSessionId || !sessionWritable || sending) return;
+    if (!text || !activeSessionId || runActionLocked || sending) return;
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -709,7 +717,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleRegenerate(message: HubMessageDto) {
-    if (!activeSessionId || !sessionWritable || sending) return;
+    if (!activeSessionId || runActionLocked || sending) return;
     setSending(true);
     try {
       const result = await regenerateSessionMessage(activeSessionId, message.id);
@@ -739,7 +747,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleApplyFileChange(change: HubFileChangeDto) {
-    if (!activeSessionId || !sessionWritable || applyingFileChangeId) return;
+    if (!activeSessionId || runActionLocked || applyingFileChangeId) return;
     setApplyingFileChangeId(change.id);
     try {
       const result = await applyFileChange(activeSessionId, change.id);
@@ -750,7 +758,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleStartDeployment(target: DeploymentTarget) {
-    if (!activeSessionId || !sessionWritable || deployingSessionId) return;
+    if (!activeSessionId || runActionLocked || deployingSessionId) return;
     setDeploymentMenuOpen(false);
     setDeployingSessionId(activeSessionId);
     try {
@@ -812,7 +820,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleAttachmentFiles(files: FileList | null) {
-    if (!activeSessionId || !sessionWritable || !files?.length || uploadingAttachment) return;
+    if (!activeSessionId || runActionLocked || !files?.length || uploadingAttachment) return;
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
@@ -1148,7 +1156,8 @@ export default function WorkbenchPage() {
                 <button
                   className="ghostButton"
                   type="button"
-                  disabled={!sessionWritable || deployingSessionId === activeSession.id}
+                  title={activeRunInProgress ? "当前 run 运行中，完成后可部署" : "部署"}
+                  disabled={runActionLocked || deployingSessionId === activeSession.id}
                   onClick={() => setDeploymentMenuOpen((open) => !open)}
                 >
                   {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
@@ -1194,9 +1203,9 @@ export default function WorkbenchPage() {
                 message={item.message}
                 onPin={handlePin}
                 onPinPart={handlePinPart}
-                onReply={sessionWritable ? addReplyTarget : undefined}
-                onReferencePart={sessionWritable ? addReplyPartTarget : undefined}
-                onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
+                onReply={!runActionLocked ? addReplyTarget : undefined}
+                onReferencePart={!runActionLocked ? addReplyPartTarget : undefined}
+                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 agents={agents}
@@ -1211,10 +1220,10 @@ export default function WorkbenchPage() {
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}
-                onReply={sessionWritable ? addReplyTarget : undefined}
-                onReferencePart={sessionWritable ? addReplyPartTarget : undefined}
-                onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
-                onApplyFileChange={sessionWritable ? handleApplyFileChange : undefined}
+                onReply={!runActionLocked ? addReplyTarget : undefined}
+                onReferencePart={!runActionLocked ? addReplyPartTarget : undefined}
+                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
+                onApplyFileChange={!runActionLocked ? handleApplyFileChange : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 applyingFileChangeId={applyingFileChangeId}
@@ -1237,7 +1246,7 @@ export default function WorkbenchPage() {
             </div>
           )}
           <div className="composerInputWrap">
-            {mentionMatch && !sending && activeSessionId && sessionWritable && (
+            {mentionMatch && !sending && activeSessionId && !runActionLocked && (
               <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
                 {mentionCandidates.length > 0 ? (
                   mentionCandidates.map((agent, index) => (
@@ -1314,11 +1323,13 @@ export default function WorkbenchPage() {
               placeholder={
                 !sessionWritable
                   ? sessionReadOnly ? "归档会话为只读" : "请选择会话"
+                  : activeRunInProgress
+                    ? "当前 run 运行中，完成后可继续发送"
                   : mode === "direct"
                     ? "输入要交给这个 Agent 的任务"
                     : "输入任务，使用 @frontend-agent 指定群聊成员"
               }
-              disabled={sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
+              disabled={sending || !activeSessionId || runActionLocked || (mode === "direct" && !directAgent)}
             />
           </div>
           <div className="composerBar">
@@ -1348,7 +1359,7 @@ export default function WorkbenchPage() {
               className="iconButton"
               type="button"
               title="上传附件"
-              disabled={!activeSessionId || !sessionWritable || uploadingAttachment || attachments.length >= 5}
+              disabled={!activeSessionId || runActionLocked || uploadingAttachment || attachments.length >= 5}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
@@ -1356,7 +1367,7 @@ export default function WorkbenchPage() {
             <button
               className="primaryButton"
               type="button"
-              disabled={!composer.trim() || sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
+              disabled={!composer.trim() || sending || !activeSessionId || runActionLocked || (mode === "direct" && !directAgent)}
               onClick={() => void handleSend()}
             >
               {sending ? <LoadingOutlined /> : <SendOutlined />}
