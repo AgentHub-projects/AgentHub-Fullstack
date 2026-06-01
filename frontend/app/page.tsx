@@ -90,6 +90,7 @@ export default function WorkbenchPage() {
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
   const [orchTemplateId, setOrchTemplateId] = useState<number>(0);
+  const [orchName, setOrchName] = useState("");
   const [orchSearch, setOrchSearch] = useState("");
   const [orchDropdownOpen, setOrchDropdownOpen] = useState(false);
   const selectedOrchTpl = templates.find((t) => t.id === orchTemplateId);
@@ -100,7 +101,7 @@ export default function WorkbenchPage() {
     setOrchDropdownOpen(false);
   }
   const [orchProvider, setOrchProvider] = useState("claude-code");
-  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: string }>>([]);
+  const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: string; name: string }>>([]);
   const [contextMenu, setContextMenu] = useState<{ agentId: number; x: number; y: number } | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
@@ -213,6 +214,7 @@ export default function WorkbenchPage() {
   function openCreateGroupDialog() {
     setGroupTitle("");
     setOrchTemplateId(0);
+    setOrchName("");
     setOrchProvider("claude-code");
     setMemberTemplates([]);
     setGroupDialogOpen(true);
@@ -222,6 +224,7 @@ export default function WorkbenchPage() {
     const result = await createSession({
       title: groupTitle.trim() || buildGroupTitle(memberTemplates.map((m) => m.templateId), templates),
       orchestratorTemplateId: orchTemplateId || undefined,
+      orchestratorName: orchName || undefined,
       orchestratorProvider: orchProvider,
       memberTemplates: memberTemplates.length > 0 ? memberTemplates : undefined,
     });
@@ -677,13 +680,23 @@ export default function WorkbenchPage() {
                 </div>
               </label>
               {orchTemplateId !== 0 && (
-                <label>
-                  Orchestrator Provider
-                  <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
-                    <option value="claude-code">claude-code</option>
-                    <option value="open-code">open-code</option>
-                  </select>
-                </label>
+                <>
+                  <label>
+                    Orchestrator 名称
+                    <input
+                      value={orchName}
+                      onChange={(e) => setOrchName(e.target.value)}
+                      placeholder={selectedOrchTpl?.name ?? "实例名称"}
+                    />
+                  </label>
+                  <label>
+                    Orchestrator Provider
+                    <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                      <option value="claude-code">claude-code</option>
+                      <option value="open-code">open-code</option>
+                    </select>
+                  </label>
+                </>
               )}
               <label>群成员模板（多选）</label>
             </div>
@@ -703,7 +716,7 @@ export default function WorkbenchPage() {
                         setMemberTemplates((current) =>
                           selected
                             ? current.filter((m) => m.templateId !== tpl.id)
-                            : [...current, { templateId: tpl.id, provider: tpl.defaultProvider }],
+                            : [...current, { templateId: tpl.id, provider: tpl.defaultProvider, name: tpl.name }],
                         )
                       }
                     >
@@ -717,6 +730,18 @@ export default function WorkbenchPage() {
                     </button>
                     {selected && (
                       <div className="agentChoiceConfig">
+                        <input
+                          value={memberTemplates.find((m) => m.templateId === tpl.id)?.name ?? tpl.name}
+                          onChange={(e) =>
+                            setMemberTemplates((current) =>
+                              current.map((m) =>
+                                m.templateId === tpl.id ? { ...m, name: e.target.value } : m,
+                              ),
+                            )
+                          }
+                          placeholder="实例名称"
+                          onClick={(e) => e.stopPropagation()}
+                        />
                         <select
                           value={memberTemplates.find((m) => m.templateId === tpl.id)?.provider ?? "claude-code"}
                           onChange={(e) => {
@@ -728,7 +753,6 @@ export default function WorkbenchPage() {
                             );
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          style={{ gridColumn: "1 / -1" }}
                         >
                           <option value="claude-code">claude-code</option>
                           <option value="open-code">open-code</option>

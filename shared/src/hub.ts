@@ -249,7 +249,8 @@ export interface CreateHubSessionRequest {
   metadata?: Record<string, unknown>;
   orchestratorTemplateId?: number;
   orchestratorProvider?: string; // "claude-code" | "open-code"
-  memberTemplates?: Array<{ templateId: number; provider: string }>;
+  orchestratorName?: string;
+  memberTemplates?: Array<{ templateId: number; provider: string; name?: string }>;
 }
 
 export interface SendHubMessageRequest {

@@ -70,7 +70,7 @@ export class HubSessionService {
         const agent = await this.prisma.agent.create({
           data: {
             templateId: tpl.id,
-            name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
+            name: input.orchestratorName || `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
             description: tpl.description,
             providerId,
             isDefaultOrchestrator: false,
@@ -102,7 +102,7 @@ export class HubSessionService {
           const agent = await this.prisma.agent.create({
             data: {
               templateId: tpl.id,
-              name: `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
+              name: mt.name || `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
               description: tpl.description,
               providerId,
               isDefaultOrchestrator: false,
