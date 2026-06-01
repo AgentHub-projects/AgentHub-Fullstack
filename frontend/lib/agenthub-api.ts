@@ -1,6 +1,7 @@
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
+  ApplyFileChangeResponse,
   BuildMessageDto,
   BuildSessionDto,
   ConfirmBuildRequest,
@@ -161,6 +162,13 @@ export function pinSessionMessage(sessionId: string, messageId: string, body: Pi
 export function cancelRun(sessionId: string, runId: string) {
   return requestJson<{ runId: string; status: string }>(
     `/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function applyFileChange(sessionId: string, fileChangeId: string) {
+  return requestJson<ApplyFileChangeResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/file-changes/${encodeURIComponent(fileChangeId)}/apply`,
     { method: "POST", body: JSON.stringify({}) },
   );
 }

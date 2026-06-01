@@ -1424,6 +1424,13 @@ textarea:focus-visible {
   padding: 10px 11px;
 }
 
+.diffViewerActions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 .diffViewerTop > div {
   min-width: 0;
 }

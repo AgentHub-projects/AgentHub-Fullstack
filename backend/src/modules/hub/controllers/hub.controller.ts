@@ -127,6 +127,11 @@ export class HubSessionController {
     });
     return { items: items.map(mapFileChange) };
   }
+
+  @Post(":sessionId/file-changes/:fileChangeId/apply")
+  applyFileChange(@Param("sessionId") sessionId: string, @Param("fileChangeId") fileChangeId: string) {
+    return this.sessions.applyFileChange(sessionId, fileChangeId);
+  }
 }
 
 @Controller("agents")

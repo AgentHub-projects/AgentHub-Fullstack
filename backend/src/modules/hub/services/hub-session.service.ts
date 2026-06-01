@@ -421,6 +421,36 @@ export class HubSessionService {
     return { runId, status: "cancelled" };
   }
 
+  async applyFileChange(sessionId: string, fileChangeId: string) {
+    const change = await this.prisma.fileChange.findFirst({
+      where: { id: fileChangeId, sessionId },
+    });
+    if (!change) throw new NotFoundException("FILE_CHANGE_NOT_FOUND");
+
+    await this.downstream.applyFileChanges({
+      sessionId,
+      runId: change.runId,
+      fileChangeIds: [change.id],
+      changes: [
+        {
+          id: change.id,
+          path: change.path,
+          patch: change.patch,
+          beforeContent: change.beforeContent,
+          afterContent: change.afterContent,
+        },
+      ],
+    });
+    await this.events.append({
+      sessionId,
+      runId: change.runId,
+      eventType: "diff.apply.requested",
+      source: "agenthub_backend",
+      payload: { status: "queued", fileChangeIds: [change.id] },
+    });
+    return { ok: true, runId: change.runId, fileChangeIds: [change.id], status: "queued" as const };
+  }
+
   private async resolveSessionOrchestrator(metadata: Record<string, unknown>, requestedAgentId?: number) {
     const orchestratorAgentId = numberMetadataValue(metadata.orchestratorAgentId) ?? requestedAgentId;
     if (orchestratorAgentId) return this.agents.getAgent(orchestratorAgentId);

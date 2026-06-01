@@ -5,6 +5,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   CreateSessionAgentRequest,
+  HubFileChangeDto,
   HubMessageDto,
   HubRunDto,
   HubSessionDto,
@@ -31,6 +32,7 @@ import {
   TeamOutlined,
 } from "@ant-design/icons";
 import {
+  applyFileChange,
   archiveSession,
   cancelRun,
   connectHubSocket,
@@ -108,6 +110,7 @@ export default function WorkbenchPage() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
+  const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
@@ -599,6 +602,17 @@ export default function WorkbenchPage() {
     });
   }
 
+  async function handleApplyFileChange(change: HubFileChangeDto) {
+    if (!activeSessionId || applyingFileChangeId) return;
+    setApplyingFileChangeId(change.id);
+    try {
+      const result = await applyFileChange(activeSessionId, change.id);
+      setNotice(result.ok ? "已发送 Diff 应用命令" : `应用失败：${result.error}`);
+    } finally {
+      setApplyingFileChangeId(null);
+    }
+  }
+
   async function handleAttachmentFiles(files: FileList | null) {
     if (!activeSessionId || !files?.length || uploadingAttachment) return;
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
@@ -1022,7 +1036,13 @@ export default function WorkbenchPage() {
 
         {!inspectorCollapsed && (
           <>
-            {inspectorTab === "diff" && <DiffPanel changes={detail?.fileChanges ?? []} />}
+            {inspectorTab === "diff" && (
+              <DiffPanel
+                changes={detail?.fileChanges ?? []}
+                applyingId={applyingFileChangeId}
+                onApply={handleApplyFileChange}
+              />
+            )}
             {inspectorTab === "artifacts" && <ArtifactPanel artifacts={detail?.artifacts ?? []} />}
           </>
         )}

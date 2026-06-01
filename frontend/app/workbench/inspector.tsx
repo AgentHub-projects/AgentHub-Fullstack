@@ -11,6 +11,7 @@ import type {
 } from "@agenthub/shared";
 import {
   BranchesOutlined,
+  CheckCircleOutlined,
   CodeOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
@@ -28,7 +29,15 @@ import type { DiffLine } from "../../lib/workbench/types";
 import { artifactLabel } from "../../lib/workbench/format";
 import { RichText } from "./rich-text";
 
-export function DiffPanel({ changes }: { changes: HubFileChangeDto[] }) {
+export function DiffPanel({
+  changes,
+  applyingId,
+  onApply,
+}: {
+  changes: HubFileChangeDto[];
+  applyingId?: string | null;
+  onApply?: (change: HubFileChangeDto) => void;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,7 +91,20 @@ export function DiffPanel({ changes }: { changes: HubFileChangeDto[] }) {
             <strong>{activeChange.path}</strong>
             {activeChange.oldPath && <small>{activeChange.oldPath}</small>}
           </div>
-          <span className={`changeType ${activeChange.changeType}`}>{activeChange.changeType}</span>
+          <div className="diffViewerActions">
+            <span className={`changeType ${activeChange.changeType}`}>{activeChange.changeType}</span>
+            {onApply && (
+              <button
+                className="ghostButton"
+                type="button"
+                disabled={applyingId === activeChange.id}
+                onClick={() => onApply(activeChange)}
+              >
+                <CheckCircleOutlined />
+                <span>{applyingId === activeChange.id ? "应用中" : "应用 Diff"}</span>
+              </button>
+            )}
+          </div>
         </div>
         <div className="diffStats">
           <span className="add">+{additions}</span>

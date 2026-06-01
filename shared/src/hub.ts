@@ -302,6 +302,13 @@ export interface SendHubMessageResponse {
   contextSnapshot?: HubContextSnapshotDto | null;
 }
 
+export interface ApplyFileChangeResponse {
+  ok: boolean;
+  runId: string;
+  fileChangeIds: string[];
+  status: "queued";
+}
+
 export interface PinHubMessageRequest {
   pinned: boolean;
 }

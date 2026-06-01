@@ -148,6 +148,29 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.connections.delete(sessionId);
   }
 
+  async applyFileChanges(input: {
+    sessionId: string;
+    runId: string;
+    fileChangeIds: string[];
+    changes: Array<{ id: string; path: string; patch?: string | null; beforeContent?: string | null; afterContent?: string | null }>;
+  }) {
+    const record = this.connections.get(input.sessionId);
+    if (!record?.socket.connected) {
+      throw new Error("DOWNSTREAM_NOT_CONNECTED");
+    }
+    record.socket.emit("acp:message", {
+      jsonrpc: "2.0",
+      id: record.nextId++,
+      method: "file/apply_diff",
+      params: {
+        runId: input.runId,
+        fileChangeIds: input.fileChangeIds,
+        changes: input.changes,
+      },
+    });
+    this.markDownstreamActivity(record);
+  }
+
   /** Push context to downstream on connect/reconnect (complete context injection) */
   async pushContext(
     sessionId: string,
