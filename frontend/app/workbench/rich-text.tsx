@@ -70,6 +70,9 @@ function renderMessagePart(
   if (part.type === "image") {
     return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
+  if (part.type === "file") {
+    return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type === "artifact") {
     return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onOpenArtifact={onOpenArtifact} />];
   }
@@ -91,6 +94,47 @@ function renderMessagePart(
   }
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+  );
+}
+
+function FilePart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  const mimeType = stringMetadata(part.metadata, "mimeType");
+  const sizeBytes = numberMetadata(part.metadata, "sizeBytes");
+  return (
+    <div className="fileMessagePart">
+      <div className="fileMessageIcon">
+        <FileDoneOutlined />
+      </div>
+      <div className="fileMessageBody">
+        <div className="fileMessageTop">
+          <div>
+            <strong>{part.title ?? "文件附件"}</strong>
+            <span>
+              {[mimeType, sizeBytes ? formatBytes(sizeBytes) : null].filter(Boolean).join(" · ") || "附件"}
+            </span>
+          </div>
+          <div>
+            {part.url && (
+              <a title="打开文件" href={part.url} target="_blank" rel="noreferrer">
+                <LinkOutlined />
+              </a>
+            )}
+            {onPinPart && (
+              <button type="button" title={part.pinned ? "取消 Pin 文件" : "Pin 文件"} onClick={() => onPinPart(part)}>
+                {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+              </button>
+            )}
+          </div>
+        </div>
+        {part.text?.trim() && <pre>{part.text}</pre>}
+      </div>
+    </div>
   );
 }
 
@@ -402,4 +446,10 @@ function deploymentTargetLabel(target: string) {
   if (target === "container") return "容器化部署";
   if (target === "source_archive") return "源码包";
   return "静态站点";
+}
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
 }

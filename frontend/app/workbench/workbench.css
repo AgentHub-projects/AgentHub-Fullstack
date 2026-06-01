@@ -1293,6 +1293,93 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.fileMessagePart {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.fileMessageIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--brand);
+}
+
+.fileMessageBody {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.fileMessageTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.fileMessageTop > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.fileMessageTop strong,
+.fileMessageTop span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMessageTop span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fileMessageTop > div:last-child {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.fileMessageTop a,
+.fileMessageTop button {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.fileMessageTop a:hover,
+.fileMessageTop button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.fileMessageBody pre {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
 .imageMessagePart {
   display: grid;
   gap: 8px;
