@@ -85,8 +85,13 @@ export class ArtifactStorageService {
     const final = Boolean(input.payload.final ?? false);
 
     const binary = decodeBinary(input.payload);
-    const metadata = asObject(input.payload.metadata);
-    let storageKind: "inline_text" | "oss_object" = "inline_text";
+    const remoteUrl =
+      stringValue(input.payload.url) ??
+      stringValue(input.payload.storageUri) ??
+      stringValue(input.payload.uri) ??
+      stringValue(input.payload.remoteUrl);
+    const metadata = mergeUrlMetadata(asObject(input.payload.metadata), remoteUrl);
+    let storageKind: "inline_text" | "oss_object" | "remote_url" = "inline_text";
     let storageUri: string | null = null;
     let textContent: string | null = content;
     let sha256: string | null = content ? sha256Text(content) : null;
@@ -105,6 +110,12 @@ export class ArtifactStorageService {
         sha256 = sha256Buffer(binary);
         sizeBytes = BigInt(binary.length);
       }
+    } else if (!content && remoteUrl) {
+      storageKind = remoteUrl.startsWith("oss://") ? "oss_object" : "remote_url";
+      storageUri = remoteUrl;
+      textContent = null;
+      sha256 = stringValue(input.payload.sha256) ?? null;
+      sizeBytes = bigintValue(input.payload.sizeBytes);
     }
 
     const artifact = await this.prisma.artifact.upsert({
@@ -445,6 +456,18 @@ export class ArtifactStorageService {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function bigintValue(value: unknown): bigint | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return BigInt(Math.floor(value));
+  if (typeof value === "bigint" && value >= 0n) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
+  return null;
+}
+
+function mergeUrlMetadata(metadata: Record<string, unknown>, url?: string) {
+  if (!url || typeof metadata.url === "string") return metadata;
+  return { ...metadata, url };
 }
 
 function normalizeArtifactKind(value: string): HubArtifactKind {

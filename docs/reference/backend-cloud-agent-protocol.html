@@ -365,7 +365,7 @@
           <tr><td><code>tool.call</code></td><td>持久化事件并推送前端；当前没有派生表。</td></tr>
           <tr><td><code>tool.result</code></td><td>持久化事件并推送前端；当前没有派生表。</td></tr>
           <tr><td><code>file.change</code></td><td>派生写入 <code>file_changes</code>，推送 <code>hub:file_change</code>，并写入 context item。</td></tr>
-          <tr><td><code>artifact.upsert</code></td><td>创建或更新 <code>artifacts</code>，推送 <code>hub:artifact</code>。</td></tr>
+          <tr><td><code>artifact.upsert</code></td><td>创建或更新 <code>artifacts</code>，支持 <code>content</code>、base64 二进制，或 <code>url/storageUri/uri/remoteUrl</code> 远程资源，并推送 <code>hub:artifact</code>。</td></tr>
           <tr><td><code>artifact.chunk</code></td><td>当前简化为累加文本到 artifact，不使用独立 chunk 表。</td></tr>
           <tr><td><code>artifact.complete</code></td><td>把 artifact 标记为 final，推送前端，并写入 context item。</td></tr>
           <tr><td><code>run.completed</code></td><td>更新 run 为 completed，写入完成事件，推送 session。</td></tr>
@@ -386,12 +386,14 @@
           <tr><td><code>html</code></td><td><code>text/html; charset=utf-8</code></td><td>可内联预览。</td></tr>
           <tr><td><code>pdf</code></td><td><code>application/pdf</code></td><td>base64 二进制且 OSS 配置存在时存为 <code>oss_object</code>。</td></tr>
           <tr><td><code>docx</code></td><td><code>application/vnd.openxmlformats-officedocument.wordprocessingml.document</code></td><td>当前前端提供下载/只读入口。</td></tr>
+          <tr><td><code>pptx</code></td><td><code>application/vnd.openxmlformats-officedocument.presentationml.presentation</code></td><td>前端可按 metadata slides 或 Office 预览浏览。</td></tr>
           <tr><td><code>image</code></td><td><code>image/png</code></td><td>前端可通过内容接口展示。</td></tr>
           <tr><td><code>archive</code></td><td><code>application/zip</code></td><td>二进制 artifact。</td></tr>
           <tr><td><code>log</code></td><td><code>text/plain; charset=utf-8</code></td><td>前端以 pre 展示。</td></tr>
           <tr><td><code>other</code></td><td><code>application/octet-stream</code></td><td>未知类型会归一化为 <code>other</code>。</td></tr>
         </tbody>
       </table>
+      <p>如果 artifact 只带 URL 而不带正文或二进制，AgentHub 会保存为 <code>remote_url</code>；如果 URL 是 <code>oss://</code>，会保存为 <code>oss_object</code> 并通过内容接口签名跳转。</p>
 
       <h3>5.3 file.change 类型</h3>
       <table>

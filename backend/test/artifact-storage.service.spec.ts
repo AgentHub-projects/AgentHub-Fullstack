@@ -41,6 +41,41 @@ describe("ArtifactStorageService presentations", () => {
       mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     });
   });
+
+  it("stores URL-only artifacts as remote resources", async () => {
+    const prisma = {
+      artifact: {
+        upsert: vi.fn(async ({ create }: any) => artifactRow(create)),
+      },
+      $executeRawUnsafe: vi.fn(),
+    };
+    const service = new ArtifactStorageService(prisma as any);
+
+    await service.upsertArtifact({
+      sessionId: "session-1",
+      runId: "run-1",
+      producingEventId: "event-1",
+      payload: {
+        artifactKey: "report",
+        kind: "pdf",
+        title: "report.pdf",
+        url: "https://oss.example/report.pdf",
+        sizeBytes: 2048,
+        sha256: "remote-sha",
+      },
+    });
+
+    expect(prisma.artifact.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        storageKind: "remote_url",
+        storageUri: "https://oss.example/report.pdf",
+        textContent: null,
+        sha256: "remote-sha",
+        sizeBytes: 2048n,
+        metadata: expect.objectContaining({ url: "https://oss.example/report.pdf" }),
+      }),
+    }));
+  });
 });
 
 describe("ArtifactStorageService text attachment previews", () => {
