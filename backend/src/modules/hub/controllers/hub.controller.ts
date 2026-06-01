@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+} from "@nestjs/common";
 import type { Response } from "express";
 import type {
   AddParticipantRequest,
@@ -194,6 +207,20 @@ export class HubArtifactController {
       return;
     }
     response.type(content.contentType).send(content.body ?? "");
+  }
+}
+
+@PublicRoute()
+@Controller("downstream")
+export class DownstreamController {
+  constructor(@Inject(AgentRegistryService) private readonly agents: AgentRegistryService) {}
+
+  @Get("agents/:agentId/config")
+  async getAgentConfig(@Param("agentId") agentId: string) {
+    if (!/^\d+$/.test(agentId)) throw new BadRequestException("AGENT_ID_INVALID");
+    const config = await this.agents.getDownstreamConfig(Number(agentId));
+    if (!config) throw new NotFoundException("AGENT_NOT_FOUND");
+    return config;
   }
 }
 

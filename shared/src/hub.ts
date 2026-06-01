@@ -316,6 +316,19 @@ export interface AgentDetailResponse {
   template?: AgentTemplateDto;
 }
 
+export interface DownstreamAgentConfigResponse {
+  agentId: AgentId;
+  templateId: number;
+  name: string;
+  description: string;
+  provider: string;
+  systemPrompt: string;
+  promptConfig: Record<string, unknown>;
+  capabilities: unknown[];
+  modelConfig: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+}
+
 export interface FrontendRealtimeSubscribe {
   sessionId: string;
 }

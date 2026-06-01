@@ -5,6 +5,7 @@ import { AuthController } from "./controllers/auth.controller";
 import { AgentTemplateController } from "./controllers/agent-template.controller";
 import { BuilderController } from "./controllers/builder.controller";
 import {
+  DownstreamController,
   HubAgentController,
   HubArtifactController,
   HubHealthController,
@@ -24,6 +25,7 @@ import { PrismaService } from "./services/prisma.service";
 @Module({
   controllers: [
     AuthController,
+    DownstreamController,
     HubHealthController,
     HubAgentController,
     HubArtifactController,

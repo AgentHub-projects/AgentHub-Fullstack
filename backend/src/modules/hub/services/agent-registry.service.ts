@@ -1,7 +1,12 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
-import type { AgentInstanceDto, AgentTemplateDto, UpdateAgentRequest } from "@agenthub/shared";
+import type {
+  AgentInstanceDto,
+  AgentTemplateDto,
+  DownstreamAgentConfigResponse,
+  UpdateAgentRequest,
+} from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapAgent, mapTemplate } from "../mappers/hub.mappers";
+import { asObject, mapAgent, mapTemplate } from "../mappers/hub.mappers";
 
 const IDS = {
   orchestrator: 1,
@@ -153,6 +158,33 @@ export class AgentRegistryService implements OnModuleInit {
     return {
       agentId: agent.id,
       systemPrompt: agent.template.systemPrompt,
+    };
+  }
+
+  async getDownstreamConfig(id: number): Promise<DownstreamAgentConfigResponse | null> {
+    const [agent, providerNames] = await Promise.all([
+      this.prisma.agent.findUnique({
+        where: { id },
+        include: { template: true },
+      }),
+      this.loadProviderNames(),
+    ]);
+    if (!agent) return null;
+    return {
+      agentId: agent.id,
+      templateId: agent.templateId,
+      name: agent.name,
+      description: agent.description || agent.template.description || "",
+      provider: providerNames.get(agent.providerId) ?? "claude-code",
+      systemPrompt: agent.template.systemPrompt ?? "",
+      promptConfig: asObject(agent.template.promptConfig),
+      capabilities: Array.isArray(agent.template.defaultCapabilities) ? agent.template.defaultCapabilities : [],
+      modelConfig: asObject(agent.template.defaultModelConfig),
+      metadata: {
+        ...asObject(agent.template.metadata),
+        agentStatus: agent.status,
+        templateStatus: agent.template.status,
+      },
     };
   }
 
