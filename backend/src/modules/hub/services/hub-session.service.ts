@@ -191,6 +191,7 @@ export class HubSessionService {
     });
     if (!currentSession || currentSession.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
     if (currentSession.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
+    await this.assertNoActiveRun(sessionId);
 
     const agent = await this.agents.getAgent(input.agentId);
     if (!agent) throw new Error("Agent not found");

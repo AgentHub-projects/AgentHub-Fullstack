@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  HubSessionService,
   deriveTitle,
   parseDeploymentCommandTarget,
   referencedPartText,
@@ -72,5 +73,37 @@ describe("HubSessionService part references", () => {
     expect(text).toContain("path: src/app.ts");
     expect(text).toContain("changeType: modified");
     expect(text).toContain("patch:\n@@ -1 +1 @@\n-old\n+new");
+  });
+});
+
+describe("HubSessionService participant guards", () => {
+  it("rejects adding participants while a run is active", async () => {
+    const prisma = {
+      session: {
+        findUnique: vi.fn().mockResolvedValue({ status: "active", metadata: {} }),
+      },
+      agentRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: "run-1" }),
+      },
+      sessionAgent: {
+        upsert: vi.fn(),
+      },
+    };
+    const agents = {
+      getAgent: vi.fn(),
+    };
+    const service = new HubSessionService(
+      prisma as any,
+      agents as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.addParticipant("session-1", { agentId: 2 })).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
+    expect(agents.getAgent).not.toHaveBeenCalled();
+    expect(prisma.sessionAgent.upsert).not.toHaveBeenCalled();
   });
 });
