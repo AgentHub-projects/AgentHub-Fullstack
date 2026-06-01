@@ -969,6 +969,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       pins: snapshot?.pins ?? [],
       memory: {
         summary: snapshot?.summary ?? "",
+        recent: snapshot?.recent ?? [],
         retrieved: snapshot?.retrieved ?? [],
       },
     };

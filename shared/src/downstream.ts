@@ -15,6 +15,7 @@ export interface DownstreamPromptAgentBrief {
 
 export interface DownstreamPromptMemory {
   summary: string;
+  recent: ContextSnapshotItem[];
   retrieved: ContextSnapshotItem[];
 }
 

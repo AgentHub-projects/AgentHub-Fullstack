@@ -271,7 +271,7 @@
           <tr><td><code>metadata</code></td><td>object</td><td>包含 <code>source: "agenthub"</code> 和 <code>contextSnapshotId</code>。</td></tr>
           <tr><td><code>orchestratorSystemPrompt</code></td><td>string</td><td>仅 <code>bootstrap</code> 时发送。</td></tr>
           <tr><td><code>agents</code></td><td>Array&lt;{agentId, description}&gt;</td><td>仅 <code>bootstrap</code> 时发送，会话中的非 Orchestrator 成员简介。</td></tr>
-          <tr><td><code>memory</code></td><td>{summary, retrieved}</td><td>仅 <code>bootstrap</code> 时发送长期摘要和召回记忆。</td></tr>
+          <tr><td><code>memory</code></td><td>{summary, recent, retrieved}</td><td>仅 <code>bootstrap</code> 时发送长期摘要、少量最近历史和召回记忆。</td></tr>
         </tbody>
       </table>
 
@@ -309,6 +309,7 @@
     ],
     "memory": {
       "summary": "摘要记忆",
+      "recent": [],
       "retrieved": []
     }
   }
@@ -316,7 +317,7 @@
 
       <div class="warn">
         <strong>注意</strong>
-        <p>当前测试明确要求 <code>snapshotJson.recent</code> 和渲染后的 <code>promptText</code> 不直接发给云 Agent；云 Agent 在 bootstrap 中拿到的是 pins、summary、retrieved、system prompt 和 agents。</p>
+        <p><code>bootstrap</code> 会发送结构化的 pins、summary、recent、retrieved、system prompt 和 agents；渲染后的 <code>promptText</code> 不直接发给云 Agent。</p>
       </div>
     </section>
 

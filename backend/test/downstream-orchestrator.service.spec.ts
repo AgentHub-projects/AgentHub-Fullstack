@@ -106,11 +106,13 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.memory.retrieved).toEqual([
       expect.objectContaining({ id: "retrieved-1", text: "召回记忆" }),
     ]);
+    expect(params.memory.recent).toEqual([
+      expect.objectContaining({ id: "recent-1", text: "最近历史" }),
+    ]);
     expect(params.pins).toEqual([
       expect.objectContaining({ id: "pin-1", kind: "message", text: "本轮 pin" }),
     ]);
     expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 1 });
-    expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("rendered context prompt should not be sent");
   });
 
@@ -140,7 +142,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.prompt).toEqual([{ text: "第二次需求", type: "text" }]);
     expect(params.pins).toBeUndefined();
     expect(params.memory).toBeUndefined();
-    expect(JSON.stringify(params)).not.toContain("recent should not be sent");
+    expect(JSON.stringify(params)).not.toContain("最近历史");
     expect(JSON.stringify(params)).not.toContain("摘要记忆");
   });
 
@@ -157,6 +159,9 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.promptMode).toBe("bootstrap");
     expect(params.prompt).toEqual([{ text: "断线后的需求", type: "text" }]);
     expect(params.memory.summary).toBe("摘要记忆");
+    expect(params.memory.recent).toEqual([
+      expect.objectContaining({ id: "recent-1", text: "最近历史" }),
+    ]);
   });
 
   it("keeps idle downstream connections while frontend subscribers exist", async () => {
@@ -372,7 +377,7 @@ const context: HubContextSnapshotDto = {
       {
         id: "recent-1",
         kind: "message",
-        text: "recent should not be sent",
+        text: "最近历史",
         tokenCount: 5,
         importance: 0,
         pinned: false,
