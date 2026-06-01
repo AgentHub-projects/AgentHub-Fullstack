@@ -1,4 +1,7 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { AgentHubAuthGuard } from "./auth/auth.guard";
+import { AuthController } from "./controllers/auth.controller";
 import { AgentTemplateController } from "./controllers/agent-template.controller";
 import { BuilderController } from "./controllers/builder.controller";
 import {
@@ -20,6 +23,7 @@ import { PrismaService } from "./services/prisma.service";
 
 @Module({
   controllers: [
+    AuthController,
     HubHealthController,
     HubAgentController,
     HubArtifactController,
@@ -28,6 +32,7 @@ import { PrismaService } from "./services/prisma.service";
     AgentTemplateController,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: AgentHubAuthGuard },
     PrismaService,
     AgentRegistryService,
     AgentTemplateService,

@@ -10,6 +10,7 @@ import type {
 } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapSession } from "../mappers/hub.mappers";
+import { PublicRoute } from "../auth/public.decorator";
 import { AgentRegistryService } from "../services/agent-registry.service";
 import { ArtifactStorageService } from "../services/artifact-storage.service";
 import { HubSessionService } from "../services/hub-session.service";
@@ -177,6 +178,7 @@ export class HubArtifactController {
   }
 }
 
+@PublicRoute()
 @Controller("health")
 export class HubHealthController {
   @Get()

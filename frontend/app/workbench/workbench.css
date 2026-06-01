@@ -12,6 +12,49 @@
   grid-template-columns: 272px minmax(500px, 1fr) 56px;
 }
 
+.authShell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--bg);
+  padding: 24px;
+}
+
+.authPanel {
+  display: grid;
+  width: min(360px, 100%);
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  padding: 22px;
+  box-shadow: var(--shadow-menu);
+}
+
+.authPanel strong {
+  display: block;
+  color: var(--ink);
+  font-size: 20px;
+}
+
+.authPanel span,
+.authError {
+  color: var(--muted);
+}
+
+.authPanel input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 11px 12px;
+}
+
+.authError {
+  color: var(--danger);
+}
+
 .sessionRail,
 .conversationPane,
 .inspector {

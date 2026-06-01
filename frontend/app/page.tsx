@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
@@ -31,10 +31,12 @@ import {
   createSession,
   createSessionAgent,
   deleteAgent,
+  getAuthState,
   getSessionDetail,
   listAgents,
   listAgentTemplates,
   listSessions,
+  loginWithAccessKey,
   pinSessionMessage,
   sendSessionMessage,
   updateAgent,
@@ -74,6 +76,11 @@ const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
 };
 
 export default function WorkbenchPage() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [accessKey, setAccessKey] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetailDto | null>(null);
@@ -133,11 +140,11 @@ export default function WorkbenchPage() {
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
 
   useEffect(() => {
-    void bootstrap();
+    void checkAuth();
   }, []);
 
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!authenticated || !activeSessionId) return;
     const disconnect = connectHubSocket(activeSessionId, {
       onState: () => undefined,
       onEvent: (event) => {
@@ -167,7 +174,7 @@ export default function WorkbenchPage() {
       },
     });
     return disconnect;
-  }, [activeSessionId]);
+  }, [authenticated, activeSessionId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -178,6 +185,40 @@ export default function WorkbenchPage() {
       setActiveMentionIndex(0);
     }
   }, [activeMentionIndex, mentionCandidates.length]);
+
+  async function checkAuth() {
+    const result = await getAuthState();
+    if (result.ok && result.data.authenticated) {
+      setAuthenticated(true);
+      await bootstrap();
+    } else {
+      setAuthenticated(false);
+      if (result.ok && !result.data.configured) {
+        setAuthError("后端未配置访问密钥");
+      }
+    }
+    setAuthChecked(true);
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const key = accessKey.trim();
+    if (!key || authSubmitting) return;
+    setAuthSubmitting(true);
+    setAuthError("");
+    try {
+      const result = await loginWithAccessKey(key);
+      if (!result.ok) {
+        setAuthError("密钥无效");
+        return;
+      }
+      setAuthenticated(true);
+      setAccessKey("");
+      await bootstrap();
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
 
   async function bootstrap() {
     const [agentRes, templateRes, sessionRes] = await Promise.all([listAgents(), listAgentTemplates(), listSessions()]);
@@ -385,6 +426,43 @@ export default function WorkbenchPage() {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(caret, caret);
     });
+  }
+
+  if (!authChecked) {
+    return (
+      <main className="authShell">
+        <section className="authPanel">
+          <strong>AgentHub</strong>
+          <span>正在检查访问状态...</span>
+        </section>
+      </main>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <main className="authShell">
+        <form className="authPanel" onSubmit={(event) => void handleLogin(event)}>
+          <div>
+            <strong>AgentHub</strong>
+            <span>输入访问密钥后继续</span>
+          </div>
+          <input
+            aria-label="访问密钥"
+            autoFocus
+            type="password"
+            value={accessKey}
+            onChange={(event) => setAccessKey(event.target.value)}
+            placeholder="访问密钥"
+          />
+          {authError && <small className="authError">{authError}</small>}
+          <button className="primaryButton" type="submit" disabled={!accessKey.trim() || authSubmitting}>
+            {authSubmitting ? <LoadingOutlined /> : null}
+            <span>进入</span>
+          </button>
+        </form>
+      </main>
+    );
   }
 
   return (

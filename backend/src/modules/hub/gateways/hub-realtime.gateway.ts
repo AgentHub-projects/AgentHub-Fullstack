@@ -17,9 +17,10 @@ import type {
   HubFileChangeDto,
   HubSessionDto,
 } from "@agenthub/shared";
+import { isCookieHeaderAuthenticated } from "../auth/auth.utils";
 
 @WebSocketGateway({
-  cors: true,
+  cors: { origin: true, credentials: true },
   path: "/socket.io",
 })
 export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -29,6 +30,11 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   private readonly sessionSubscriberCounts = new Map<string, number>();
 
   handleConnection(client: Socket) {
+    if (!isCookieHeaderAuthenticated(client.handshake.headers.cookie)) {
+      client.emit("auth.required", { message: "AUTH_REQUIRED" });
+      client.disconnect(true);
+      return;
+    }
     client.emit("realtime.ready", { ok: true });
   }
 

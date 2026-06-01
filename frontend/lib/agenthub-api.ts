@@ -40,6 +40,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResu
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...init?.headers,
@@ -58,6 +59,24 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResu
 
 export function artifactContentUrl(artifactId: string) {
   return `${API_BASE_URL}/artifacts/${encodeURIComponent(artifactId)}/content`;
+}
+
+export function getAuthState() {
+  return requestJson<{ authenticated: boolean; configured: boolean }>("/auth/me");
+}
+
+export function loginWithAccessKey(accessKey: string) {
+  return requestJson<{ authenticated: boolean }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ accessKey }),
+  });
+}
+
+export function logoutAuthSession() {
+  return requestJson<{ authenticated: boolean }>("/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export function listSessions() {
@@ -204,6 +223,7 @@ export function connectHubSocket(
       path: "/socket.io",
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
+      withCredentials: true,
     });
   } catch {
     handlers.onState("unavailable");
