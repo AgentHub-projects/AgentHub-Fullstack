@@ -366,6 +366,10 @@ function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifact
     return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} srcDoc={artifact.textContent} sandbox="" />;
   }
 
+  if (artifact.kind === "html") {
+    return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} src={contentUrl} sandbox="" />;
+  }
+
   if (artifact.kind === "docx") {
     const publicUrl = publicArtifactUrl(artifact);
     const officeUrl = publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
