@@ -574,10 +574,15 @@ export default function WorkbenchPage() {
       }
       setDetail((current) => {
         const base = current ?? { session: result.data.session, ...EMPTY_DETAIL };
+        const responseMessages = result.data.messages?.length ? result.data.messages : [result.data.message];
+        let messages = base.messages;
+        for (const message of responseMessages) {
+          messages = upsertById(messages, message);
+        }
         return {
           ...base,
           session: result.data.session,
-          messages: upsertById(base.messages, result.data.message).sort(sortMessage),
+          messages: messages.sort(sortMessage),
           runs: upsertById(base.runs, result.data.run).sort(sortRun),
         };
       });
