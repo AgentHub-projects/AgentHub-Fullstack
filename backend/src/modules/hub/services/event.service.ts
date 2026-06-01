@@ -44,34 +44,46 @@ export class HubEventService {
     seq?: number;
     occurredAt?: Date;
   }): Promise<HubEventDto> {
+    const run = await this.prisma.agentRun.findUnique({
+      where: { id: input.runId },
+      select: { status: true },
+    });
+    if (
+      run?.status === "cancelled" &&
+      input.source !== "agenthub_backend" &&
+      input.eventType !== "run.cancelled"
+    ) {
+      throw new Error("RUN_ALREADY_CANCELLED");
+    }
+
     const speaker = input.speakerAgentId
       ? await this.prisma.agent.findUnique({ where: { id: input.speakerAgentId } })
       : null;
-    const seq = BigInt(input.seq ?? (await this.nextSeq(input.runId)));
+    const expectedSeq = await this.nextSeq(input.runId);
+    if (input.seq !== undefined) {
+      const existing = await this.prisma.agentEvent.findFirst({
+        where: { runId: input.runId, seq: BigInt(input.seq) },
+      });
+      if (existing) return mapEvent(existing);
+      if (input.seq !== expectedSeq) throw new Error("EVENT_SEQ_OUT_OF_ORDER");
+    }
+    const seq = BigInt(input.seq ?? expectedSeq);
 
     let event;
-    try {
-      event = await this.prisma.agentEvent.create({
-        data: {
-          sessionId: input.sessionId,
-          runId: input.runId,
-          seq,
-          source: input.source ?? "downstream_agent",
-          eventType: input.eventType,
-          visibility: input.visibility ?? "public",
-          speakerAgentId: speaker?.id ?? null,
-          speakerName: speaker?.name ?? null,
-          payload: (input.payload ?? {}) as any,
-          occurredAt: input.occurredAt ?? new Date(),
-        },
-      });
-    } catch {
-      const existing = await this.prisma.agentEvent.findFirst({
-        where: { runId: input.runId, seq },
-      });
-      if (!existing) throw new Error("Failed to persist agent event");
-      event = existing;
-    }
+    event = await this.prisma.agentEvent.create({
+      data: {
+        sessionId: input.sessionId,
+        runId: input.runId,
+        seq,
+        source: input.source ?? "downstream_agent",
+        eventType: input.eventType,
+        visibility: input.visibility ?? "public",
+        speakerAgentId: speaker?.id ?? null,
+        speakerName: speaker?.name ?? null,
+        payload: (input.payload ?? {}) as any,
+        occurredAt: input.occurredAt ?? new Date(),
+      },
+    });
 
     const dto = mapEvent(event);
     await this.applySideEffects(dto);
