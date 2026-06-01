@@ -21,8 +21,8 @@ AgentHub 是一个 Web 化的多 Agent 协作平台。第一版目标是完成�
 ### 1.2 明确不做
 
 - 不实现下游 Agent 调度、工具调用、代码执行、沙箱文件系统操作。
-- 第一版不做 diff 接受、拒绝、回滚、编辑和前端直连沙箱。
-- 第一版按单用户、单后端实例设计，不做账号体系、权限体系、多租户、Redis 广播或横向扩展。
+- 第一版不做前端直连沙箱、Diff 手工编辑、拒绝和回滚；一键应用 Diff 通过 AgentHub 向下游发送命令，由下游执行并回报状态。
+- 第一版按单用户、单后端实例设计；有固定初始用户 `admin` 和 Redis-backed Cookie session，不做用户注册、多租户、Redis 广播或横向扩展。
 - 后端可以同时配置多个 Agent/Orchestrator 实例，但第一版实际执行入口是主 Orchestrator；worker Agent 由 Orchestrator 协调。
 
 ### 1.3 核心假设

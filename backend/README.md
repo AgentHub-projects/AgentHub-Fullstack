@@ -35,9 +35,13 @@ Create `backend/.env`:
 ```env
 PORT=3001
 DATABASE_URL=postgresql://agenthub:agenthub@localhost:5432/agenthub?schema=public
+REDIS_URL=redis://localhost:6379
+
+# Seed 会创建账号 admin；真实密码只放本地 .env。
+AGENTHUB_ADMIN_PASSWORD=change-me
 
 # Optional. If omitted, the built-in mock Orchestrator is used.
-DOWNSTREAM_ORCHESTRATOR_WS_URL=http://115.33.108.104:31056/acp
+DOWNSTREAM_ORCHESTRATOR_WS_URL=http://localhost:4000/acp
 
 # Optional context retrieval.
 OPENAI_API_KEY=sk-...
@@ -56,6 +60,10 @@ ALIYUN_OSS_BUCKET=your-bucket
 ALIYUN_OSS_ACCESS_KEY_ID=...
 ALIYUN_OSS_ACCESS_KEY_SECRET=...
 ARTIFACT_OSS_PREFIX=agenthub/artifacts
+
+# Optional deployment service. AgentHub polls this service every 3 seconds.
+DEPLOY_SERVICE_URL=http://localhost:4001
+DEPLOY_SERVICE_API_KEY=change-me
 ```
 
 ## Local Setup
@@ -114,18 +122,43 @@ pnpm acceptance
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Backend health check |
+| `GET` | `/api/auth/me` | Read login state |
+| `POST` | `/api/auth/login` | Login and create a Redis-backed Cookie session |
+| `POST` | `/api/auth/logout` | Logout and clear the session |
 | `GET` | `/api/agents` | List Agent instances |
+| `GET` | `/api/agents/:agentId/detail` | Read Agent instance detail plus executable downstream `config` |
+| `POST` | `/api/agents` | Create a session-owned Agent instance from a template |
+| `PATCH` | `/api/agents/:agentId` | Update instance name, description, or provider |
+| `DELETE` | `/api/agents/:agentId` | Logically delete an Agent instance |
 | `GET` | `/api/agent-templates` | List Agent templates |
+| `POST` | `/api/agent-templates` | Create an Agent template |
+| `PATCH` | `/api/agent-templates/:templateId` | Update an Agent template |
+| `DELETE` | `/api/agent-templates/:templateId` | Disable an Agent template |
+| `GET` | `/api/downstream/agents/:agentId/config` | Public downstream config endpoint; validates `agentId` but does not require frontend auth |
 | `GET` | `/api/sessions` | List sessions |
 | `POST` | `/api/sessions` | Create a session |
 | `GET` | `/api/sessions/:sessionId` | Load session snapshot |
+| `PATCH` | `/api/sessions/:sessionId` | Rename or pin a session |
+| `POST` | `/api/sessions/:sessionId/archive` | Archive a session and close its downstream connection |
+| `DELETE` | `/api/sessions/:sessionId` | Logically delete a session |
 | `POST` | `/api/sessions/:sessionId/messages` | Persist user message and start a run |
 | `POST` | `/api/sessions/:sessionId/messages/:messageId/pin` | Pin/unpin a message |
+| `POST` | `/api/sessions/:sessionId/messages/:messageId/regenerate` | Regenerate from the source user message |
+| `POST` | `/api/sessions/:sessionId/uploads` | Upload an attachment before sending a message |
 | `POST` | `/api/sessions/:sessionId/runs/:runId/cancel` | Cancel a run |
 | `GET` | `/api/sessions/:sessionId/events` | Replay persisted events |
 | `GET` | `/api/sessions/:sessionId/artifacts` | List artifacts |
 | `GET` | `/api/sessions/:sessionId/file-changes` | List file changes |
+| `POST` | `/api/sessions/:sessionId/file-changes/:fileChangeId/apply` | Ask downstream to apply a file change |
+| `POST` | `/api/sessions/:sessionId/deployments` | Trigger deployment for the latest successful pushed commit |
+| `GET` | `/api/projects` | List active projects |
+| `POST` | `/api/projects` | Create a project binding target |
+| `PATCH` | `/api/projects/:projectId` | Update project metadata |
+| `DELETE` | `/api/projects/:projectId` | Logically delete a project |
 | `GET` | `/api/artifacts/:artifactId/content` | Read or redirect artifact content |
+| `GET` | `/api/:artifactId/versions` | List artifact versions |
+
+Frontend-facing routes are protected by the `agenthub_session` cookie. The downstream config route is intentionally public for the local downstream runtime and relies on parameter validation instead of a shared secret.
 
 ## Realtime Events
 

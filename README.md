@@ -58,6 +58,10 @@ AgentHub-Fullstack/
 ```bash
 # backend/.env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agenthub
+REDIS_URL=redis://localhost:6379
+
+# 初始用户由 seed 创建：账号 admin；真实密码只放本地 .env，不提交仓库
+AGENTHUB_ADMIN_PASSWORD=change-me
 
 # 可选：真实下游 Orchestrator 地址（不配置则使用 mock 模式）
 DOWNSTREAM_ORCHESTRATOR_WS_URL=ws://localhost:4000
@@ -71,6 +75,10 @@ CONTEXT_EMBEDDING_MODEL=text-embedding-3-small
 SUMMARY_API_KEY=sk-xxx
 SUMMARY_BASE_URL=https://api.deepseek.com/v1
 CONTEXT_SUMMARY_MODEL=deepseek-chat
+
+# 可选：部署服务
+DEPLOY_SERVICE_URL=http://localhost:4001
+DEPLOY_SERVICE_API_KEY=change-me
 ```
 
 ### 安装与启动
@@ -102,20 +110,38 @@ pnpm dev
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
-| GET | `/api/agents` | 列出所有 Agent |
-| GET | `/api/agents/templates` | 列出 Agent 模板 |
-| GET | `/api/agents/:id/detail` | Agent 详情（下游查询用，含 systemPrompt + provider） |
+| GET | `/api/auth/me` | 查询登录状态 |
+| POST | `/api/auth/login` | 登录，写入 7 天 Redis-backed Cookie session |
+| POST | `/api/auth/logout` | 登出 |
+| GET | `/api/agents` | 列出 Agent 实例 |
+| GET | `/api/agents/:id/detail` | Agent 详情，含 `agent`、`template`、下游最小可执行 `config` |
+| POST | `/api/agents` | 从模板创建会话内 Agent 实例 |
+| PATCH | `/api/agents/:id` | 更新实例名称、描述、provider |
+| DELETE | `/api/agents/:id` | 逻辑删除 Agent 实例 |
+| GET | `/api/agent-templates` | 列出 Agent 模板 |
+| POST | `/api/agent-templates` | 创建 Agent 模板 |
+| PATCH | `/api/agent-templates/:id` | 更新 Agent 模板 |
+| DELETE | `/api/agent-templates/:id` | 停用 Agent 模板 |
+| GET | `/api/downstream/agents/:agentId/config` | 下游公开配置接口；无鉴权，按 `agentId` 参数校验 |
 | GET | `/api/artifacts/:id/content` | 获取产物内容 |
 | GET | `/api/sessions` | 列出会话 |
 | POST | `/api/sessions` | 创建会话 |
 | GET | `/api/sessions/:id` | 会话详情（含消息、事件、产物） |
+| PATCH | `/api/sessions/:id` | 重命名、全局置顶 |
+| POST | `/api/sessions/:id/archive` | 归档会话并关闭下游连接 |
+| DELETE | `/api/sessions/:id` | 逻辑删除会话 |
 | POST | `/api/sessions/:id/messages` | 发送消息 |
 | POST | `/api/sessions/:id/messages/:mid/pin` | Pin/Unpin 消息 |
+| POST | `/api/sessions/:id/messages/:mid/regenerate` | 基于用户消息重新生成 |
 | POST | `/api/sessions/:id/participants` | 添加 Agent 到群聊 |
 | POST | `/api/sessions/:id/runs/:rid/cancel` | 取消 Run |
+| POST | `/api/sessions/:id/uploads` | 上传消息附件，最大 50MB |
 | GET | `/api/sessions/:id/events` | 列出事件 |
 | GET | `/api/sessions/:id/artifacts` | 列出产物 |
 | GET | `/api/sessions/:id/file-changes` | 列出文件变更 |
+| POST | `/api/sessions/:id/file-changes/:fid/apply` | 请求下游执行一键应用 Diff |
+| POST | `/api/sessions/:id/deployments` | 手动触发当前项目最新成功 push commit 的部署 |
+| GET/POST/PATCH/DELETE | `/api/projects` | 项目 GitHub 地址绑定所需的最小 CRUD |
 
 ## 核心概念
 
@@ -130,8 +156,9 @@ pnpm dev
 ### Agent 管理
 
 - `provider` 字段标识底层实例类型：字符串，`"claude-code"` 或 `"open-code"`
-- 下游可调用 `GET /api/agents/:id/detail` 获取 Agent 的 systemPrompt 和 provider
-- 群聊参与者通过 `POST /api/sessions/:id/participants` 动态添加
+- 前端调用 `GET /api/agents/:id/detail` 读取实例详情和 `config`
+- 下游运行时调用公开的 `GET /api/downstream/agents/:agentId/config` 获取最小可执行配置
+- 群聊参与者通过 `POST /api/sessions/:id/participants` 动态添加；删除是逻辑删除，历史消息不物理删除
 
 ## 开发命令
 
