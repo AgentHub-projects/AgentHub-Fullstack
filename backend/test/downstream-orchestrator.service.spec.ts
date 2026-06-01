@@ -91,18 +91,29 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     });
     const params = lastPromptParams();
     expect(params.sessionId).toBe("downstream-session-1");
-    const promptText = params.prompt[0].text;
-    expect(promptText).toContain("## System\norchestrator system prompt");
-    expect(promptText).toContain("- 2: 前端成员描述");
-    expect(promptText).toContain("- 3: 后端模板描述");
-    expect(promptText).toContain("## Context Summary\n摘要记忆");
-    expect(promptText).toContain("## Pinned\n- [message] 本轮 pin");
-    expect(promptText).toContain("## User Message\n请实现登录页");
+    expect(params.agenthubSessionId).toBe("session-1");
+    expect(params.promptMode).toBe("bootstrap");
+    expect(params.prompt).toEqual([{ text: "请实现登录页", type: "text" }]);
+    expect(params.messageId).toBe("message-run-1");
+    expect(params.agentId).toBe(1);
+    expect(params.contextSnapshotId).toBe("context-id");
+    expect(params.orchestratorSystemPrompt).toBe("orchestrator system prompt");
+    expect(params.agents).toEqual([
+      { agentId: 2, description: "前端成员描述" },
+      { agentId: 3, description: "后端模板描述" },
+    ]);
+    expect(params.memory.summary).toBe("摘要记忆");
+    expect(params.memory.retrieved).toEqual([
+      expect.objectContaining({ id: "retrieved-1", text: "召回记忆" }),
+    ]);
+    expect(params.pins).toEqual([
+      expect.objectContaining({ id: "pin-1", kind: "message", text: "本轮 pin" }),
+    ]);
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("rendered context prompt should not be sent");
   });
 
-  it("sends only prompt and pins while the downstream connection is alive", async () => {
+  it("sends only the current prompt while the downstream connection is alive", async () => {
     const service = createService();
 
     await startRunWithDownstreamSession(service, createRunInput("run-1", "第一次需求"), "downstream-session-1");
@@ -111,7 +122,10 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(1);
     expect(params.sessionId).toBe("downstream-session-1");
+    expect(params.promptMode).toBe("incremental");
     expect(params.prompt).toEqual([{ text: "第二次需求", type: "text" }]);
+    expect(params.pins).toBeUndefined();
+    expect(params.memory).toBeUndefined();
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("摘要记忆");
   });
@@ -126,8 +140,9 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(2);
     expect(params.sessionId).toBe("downstream-session-2");
-    expect(params.prompt[0].text).toContain("## Context Summary\n摘要记忆");
-    expect(params.prompt[0].text).toContain("## User Message\n断线后的需求");
+    expect(params.promptMode).toBe("bootstrap");
+    expect(params.prompt).toEqual([{ text: "断线后的需求", type: "text" }]);
+    expect(params.memory.summary).toBe("摘要记忆");
   });
 
   it("keeps idle downstream connections while frontend subscribers exist", async () => {

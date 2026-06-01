@@ -18,16 +18,24 @@ export interface DownstreamPromptMemory {
   retrieved: ContextSnapshotItem[];
 }
 
+export interface DownstreamPromptPart {
+  type: "text";
+  text: string;
+}
+
 export interface DownstreamPromptInput {
+  sessionId: string;
   agenthubSessionId: string;
   runId: string;
   messageId: string;
   agentId: AgentId;
-  mode: DownstreamPromptMode;
-  prompt: string;
-  pins: ContextSnapshotItem[];
+  promptMode: DownstreamPromptMode;
+  prompt: DownstreamPromptPart[];
+  pins?: ContextSnapshotItem[];
   memory?: DownstreamPromptMemory;
   orchestratorSystemPrompt?: string;
   agents?: DownstreamPromptAgentBrief[];
+  contextSnapshotId?: string | null;
+  messageContext?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }

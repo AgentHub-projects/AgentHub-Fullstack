@@ -235,7 +235,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       method: "session/context_delta",
       params: {
         sessionId: record.downstreamSessionId,
-        agentHubSessionId: sessionId,
+        agenthubSessionId: sessionId,
         type,
         ...payload,
       },
@@ -826,47 +826,37 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   ) {
     const snapshot = input.context?.snapshotJson;
 
+    const base = {
+      sessionId: downstreamSessionId,
+      runId: input.runId,
+      agenthubSessionId: input.sessionId,
+      messageId: input.userMessageId,
+      agentId: input.orchestrator.id,
+      prompt: [{ text: input.promptText, type: "text" }],
+      messageContext: input.messageContext ?? {},
+    };
+
     if (!bootstrap) {
       return {
-        sessionId: downstreamSessionId,
-        runId: input.runId,
-        agentHubSessionId: input.sessionId,
-        prompt: [{ text: input.promptText, type: "text" }],
-        messageContext: input.messageContext ?? {},
+        ...base,
+        promptMode: "incremental",
       };
     }
 
-    // Bootstrap is the only time AgentHub expands controlled context into the prompt.
-    const sections: string[] = [];
-
     const systemPrompt = input.orchestrator.template?.systemPrompt;
-    if (systemPrompt) {
-      sections.push(`## System\n${systemPrompt}`);
-    }
-
     const agents = await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id);
-    if (agents.length > 0) {
-      sections.push(`## Available Agents\n${agents.map((a) => `- ${a.agentId}: ${a.description}`).join("\n")}`);
-    }
-
-    if (snapshot?.summary) {
-      sections.push(`## Context Summary\n${snapshot.summary}`);
-    }
-
-    if (snapshot?.pins?.length) {
-      sections.push(`## Pinned\n${snapshot.pins.map((p) => `- [${p.kind}] ${p.text}`).join("\n")}`);
-    }
-
-    sections.push(`## User Message\n${input.promptText}`);
-
-    const promptText = sections.join("\n\n");
 
     return {
-      sessionId: downstreamSessionId,
-      runId: input.runId,
-      agentHubSessionId: input.sessionId,
-      prompt: [{ text: promptText, type: "text" }],
-      messageContext: input.messageContext ?? {},
+      ...base,
+      promptMode: "bootstrap",
+      contextSnapshotId: input.context?.id ?? null,
+      ...(systemPrompt ? { orchestratorSystemPrompt: systemPrompt } : {}),
+      ...(agents.length > 0 ? { agents } : {}),
+      pins: snapshot?.pins ?? [],
+      memory: {
+        summary: snapshot?.summary ?? "",
+        retrieved: snapshot?.retrieved ?? [],
+      },
     };
   }
 
