@@ -176,6 +176,60 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     await vi.advanceTimersByTimeAsync(IDLE_RECHECK_MS);
     expect(socketMock.sockets[0].disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it("acks inbound session events only after persistence succeeds", async () => {
+    const events = { append: vi.fn().mockResolvedValue({}) };
+    const service = createService({ events });
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "事件 ack"), "downstream-session-1");
+    events.append.mockClear();
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 77,
+      method: "session/event",
+      params: {
+        runId: "run-1",
+        type: "message.completed",
+        payload: { text: "完成" },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(events.append).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      eventType: "message.completed",
+      payload: { text: "完成" },
+    }));
+    expect(responseFor(socket, 77)).toEqual({ jsonrpc: "2.0", id: 77, result: { ok: true } });
+  });
+
+  it("rejects successful ack when inbound event persistence fails", async () => {
+    const events = { append: vi.fn().mockResolvedValue({}) };
+    const service = createService({ events });
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "事件失败"), "downstream-session-1");
+    events.append.mockRejectedValueOnce(new Error("RUN_ALREADY_CANCELLED"));
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: "event-1",
+      method: "session/event",
+      params: {
+        runId: "run-1",
+        type: "message.completed",
+        payload: { text: "完成" },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(responseFor(socket, "event-1")).toEqual({
+      jsonrpc: "2.0",
+      id: "event-1",
+      error: {
+        code: "RUN_ALREADY_CANCELLED",
+        message: "RUN_ALREADY_CANCELLED",
+      },
+    });
+  });
 });
 
 const orchestrator: AgentInstanceDto = {
@@ -266,10 +320,10 @@ function createRunInput(runId: string, promptText: string) {
   };
 }
 
-function createService(options?: { gateway?: ReturnType<typeof createGateway> }) {
+function createService(options?: { gateway?: ReturnType<typeof createGateway>; events?: { append: ReturnType<typeof vi.fn> } }) {
   return new DownstreamOrchestratorService(
     createPrisma() as any,
-    { append: vi.fn().mockResolvedValue({}) } as any,
+    (options?.events ?? { append: vi.fn().mockResolvedValue({}) }) as any,
     (options?.gateway ?? createGateway()) as any,
     { buildSnapshot: vi.fn().mockResolvedValue(context) } as any,
   );
@@ -279,6 +333,7 @@ function createPrisma() {
   return {
     agentRun: {
       update: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     session: {
       update: vi.fn().mockResolvedValue({
@@ -354,4 +409,11 @@ function firstRequestParams(method: string) {
     .find((item) => item.event === "acp:message" && item.payload.method === method);
   expect(request).toBeDefined();
   return request!.payload.params;
+}
+
+function responseFor(socket: (typeof socketMock.sockets)[number], id: string | number) {
+  return socket.emitted
+    .filter((item) => item.event === "acp:message")
+    .map((item) => item.payload)
+    .find((payload) => payload.id === id && (payload.result || payload.error));
 }

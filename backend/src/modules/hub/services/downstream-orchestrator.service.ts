@@ -454,7 +454,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
     this.markDownstreamActivity(record);
 
-    const requestId = typeof envelope.id === "number" ? envelope.id : typeof envelope.id === "string" ? Number(envelope.id) : null;
+    const envelopeId = typeof envelope.id === "number" || typeof envelope.id === "string" ? envelope.id : undefined;
+    const requestId =
+      typeof envelopeId === "number"
+        ? envelopeId
+        : typeof envelopeId === "string" && /^\d+$/.test(envelopeId)
+          ? Number(envelopeId)
+          : null;
     if (requestId && record.pendingRequests.has(requestId)) {
       const pending = record.pendingRequests.get(requestId)!;
       record.pendingRequests.delete(requestId);
@@ -468,37 +474,43 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       return;
     }
 
+    const inboundRequestId = envelopeId;
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
 
     // Handle session/update (agent message chunks from downstream)
     if (envelope.method === "session/update") {
-      const update = params.update;
-      const content = asRecord(typeof update === "object" ? update : {});
-      const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
-      const sessionUpdate = stringValue((content as any).sessionUpdate);
-      const runId = record.activeRunId;
-      if (text && runId) {
-        const meta = asRecord(params._meta ?? (content as any)._meta);
-        const speaker = stringValue(meta.agentId) ?? "agent";
-        const speakerAgentId = agentIdValue(meta.agentId);
-        await this.events.append({
-          sessionId: record.sessionId,
-          runId,
-          eventType: "message.delta",
-          speakerAgentId,
-          source: "downstream_agent",
-          payload: { text, speaker },
-        });
-        if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop") {
+      try {
+        const update = params.update;
+        const content = asRecord(typeof update === "object" ? update : {});
+        const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
+        const sessionUpdate = stringValue((content as any).sessionUpdate);
+        const runId = record.activeRunId;
+        if (text && runId) {
+          const meta = asRecord(params._meta ?? (content as any)._meta);
+          const speaker = stringValue(meta.agentId) ?? "agent";
+          const speakerAgentId = agentIdValue(meta.agentId);
           await this.events.append({
             sessionId: record.sessionId,
             runId,
-            eventType: "message.completed",
+            eventType: "message.delta",
             speakerAgentId,
             source: "downstream_agent",
             payload: { text, speaker },
           });
+          if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop") {
+            await this.events.append({
+              sessionId: record.sessionId,
+              runId,
+              eventType: "message.completed",
+              speakerAgentId,
+              source: "downstream_agent",
+              payload: { text, speaker },
+            });
+          }
         }
+        this.ackDownstreamEvent(record, inboundRequestId);
+      } catch (error) {
+        this.rejectDownstreamEvent(record, inboundRequestId, error);
       }
       return;
     }
@@ -516,13 +528,22 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     // Legacy session/event handling
     if (envelope.method && envelope.method !== "session/event") return;
     const runId = stringValue(params.runId) ?? stringValue(envelope.runId);
-    if (!runId) return;
+    if (!runId) {
+      this.rejectDownstreamEvent(record, inboundRequestId, new Error("RUN_ID_REQUIRED"));
+      return;
+    }
 
     // Drop events for runs that have been cancelled
-    if (await this.isRunCancelled(runId)) return;
+    if (await this.isRunCancelled(runId)) {
+      this.rejectDownstreamEvent(record, inboundRequestId, new Error("RUN_ALREADY_CANCELLED"));
+      return;
+    }
 
     const eventType = stringValue(params.type) ?? stringValue(params.eventType) ?? stringValue(envelope.type);
-    if (!eventType) return;
+    if (!eventType) {
+      this.rejectDownstreamEvent(record, inboundRequestId, new Error("EVENT_TYPE_REQUIRED"));
+      return;
+    }
     const payload = asRecord(params.payload ?? params);
 
     const speakerAgentId =
@@ -530,29 +551,56 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       agentIdValue(payload.speaker) ??
       agentIdValue(envelope.speaker);
 
-    await this.events.append({
-      sessionId: record.sessionId,
-      runId,
-      eventType,
-      speakerAgentId,
-      seq: numberValue(params.seq),
-      payload,
-      source: "downstream_agent",
-      occurredAt: new Date(),
-    });
-
-    if (eventType === "run.completed") {
-      await this.completeRun(record.sessionId, runId, speakerAgentId ?? record.activeOrchestratorAgentId ?? 1, payload);
-    }
-    if (eventType === "run.failed") {
-      await this.failRun(
-        record.sessionId,
+    try {
+      await this.events.append({
+        sessionId: record.sessionId,
         runId,
-        speakerAgentId ?? record.activeOrchestratorAgentId ?? 1,
-        "DOWNSTREAM_RUN_FAILED",
-        stringValue(payload.message) ?? "run failed",
-      );
+        eventType,
+        speakerAgentId,
+        seq: numberValue(params.seq),
+        payload,
+        source: "downstream_agent",
+        occurredAt: new Date(),
+      });
+
+      if (eventType === "run.completed") {
+        await this.completeRun(record.sessionId, runId, speakerAgentId ?? record.activeOrchestratorAgentId ?? 1, payload);
+      }
+      if (eventType === "run.failed") {
+        await this.failRun(
+          record.sessionId,
+          runId,
+          speakerAgentId ?? record.activeOrchestratorAgentId ?? 1,
+          "DOWNSTREAM_RUN_FAILED",
+          stringValue(payload.message) ?? "run failed",
+        );
+      }
+      this.ackDownstreamEvent(record, inboundRequestId);
+    } catch (error) {
+      this.rejectDownstreamEvent(record, inboundRequestId, error);
     }
+  }
+
+  private ackDownstreamEvent(record: ConnectionRecord, id?: string | number) {
+    if (id === undefined) return;
+    record.socket.emit("acp:message", {
+      jsonrpc: "2.0",
+      id,
+      result: { ok: true },
+    });
+  }
+
+  private rejectDownstreamEvent(record: ConnectionRecord, id: string | number | undefined, error: unknown) {
+    if (id === undefined) return;
+    const message = error instanceof Error ? error.message : String(error);
+    record.socket.emit("acp:message", {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: errorCode(message),
+        message,
+      },
+    });
   }
 
   private async simulateRun(input: {
@@ -944,4 +992,8 @@ function readActiveRun(result: Record<string, unknown>) {
     stringValue(result.runId);
   const status = stringValue(activeRun.status) ?? stringValue(result.activeRunStatus) ?? stringValue(result.status);
   return runId || status ? { runId, status } : undefined;
+}
+
+function errorCode(message: string) {
+  return /^[A-Z0-9_]+$/.test(message) ? message : "DOWNSTREAM_EVENT_FAILED";
 }
