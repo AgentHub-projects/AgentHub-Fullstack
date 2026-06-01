@@ -1064,6 +1064,8 @@ export default function WorkbenchPage() {
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}
+                onReply={addReplyTarget}
+                onRegenerate={(message) => void handleRegenerate(message)}
                 onApplyFileChange={handleApplyFileChange}
                 applyingFileChangeId={applyingFileChangeId}
               />

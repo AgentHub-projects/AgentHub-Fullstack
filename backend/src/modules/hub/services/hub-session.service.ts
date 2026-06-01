@@ -467,10 +467,7 @@ export class HubSessionService {
   }
 
   async regenerateFromMessage(sessionId: string, messageId: string) {
-    const message = await this.prisma.message.findFirst({
-      where: { id: messageId, sessionId, role: "user" },
-    });
-    if (!message) throw new NotFoundException("USER_MESSAGE_NOT_FOUND");
+    const message = await this.resolveRegenerationSourceMessage(sessionId, messageId);
     const contentJson = mergeMetadata(message.contentJson, {});
     const attachmentIds = Array.isArray(contentJson.attachmentIds)
       ? contentJson.attachmentIds.filter((item): item is string => typeof item === "string")
@@ -491,6 +488,27 @@ export class HubSessionService {
       references,
       attachments: attachmentIds.map((id) => ({ id })),
     });
+  }
+
+  private async resolveRegenerationSourceMessage(sessionId: string, messageId: string) {
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, sessionId },
+    });
+    if (!message) throw new NotFoundException("MESSAGE_NOT_FOUND");
+    if (message.role === "user") return message;
+    if (message.runId) {
+      const run = await this.prisma.agentRun.findUnique({
+        where: { id: message.runId },
+        select: { userMessageId: true },
+      });
+      if (run?.userMessageId) {
+        const userMessage = await this.prisma.message.findFirst({
+          where: { id: run.userMessageId, sessionId, role: "user" },
+        });
+        if (userMessage) return userMessage;
+      }
+    }
+    throw new NotFoundException("USER_MESSAGE_NOT_FOUND");
   }
 
   async applyFileChange(sessionId: string, fileChangeId: string) {

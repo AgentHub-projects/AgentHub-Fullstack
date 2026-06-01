@@ -53,7 +53,15 @@ export function TimelineMessage({
   if (message.role === "user") {
     return <UserMessage message={message} onPin={onPin} onPinPart={onPinPart} onReply={onReply} onRegenerate={onRegenerate} />;
   }
-  return <AgentReplyBlock block={messageToReplyBlock(message, agents)} onPinPart={(part) => onPinPart?.(message, part)} />;
+  const canRegenerate = canRegenerateMessage(message);
+  return (
+    <AgentReplyBlock
+      block={messageToReplyBlock(message, agents)}
+      onPinPart={(part) => onPinPart?.(message, part)}
+      onReply={onReply ? () => onReply(message) : undefined}
+      onRegenerate={canRegenerate && onRegenerate ? () => onRegenerate(message) : undefined}
+    />
+  );
 }
 
 export function RunThread({
@@ -63,6 +71,8 @@ export function RunThread({
   messages,
   agents,
   onPinPart,
+  onReply,
+  onRegenerate,
   onApplyFileChange,
   applyingFileChangeId,
 }: {
@@ -72,6 +82,8 @@ export function RunThread({
   messages: HubMessageDto[];
   agents: AgentInstanceDto[];
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
+  onReply?: (message: HubMessageDto) => void;
+  onRegenerate?: (message: HubMessageDto) => void;
   onApplyFileChange?: (change: HubFileChangeDto) => void;
   applyingFileChangeId?: string | null;
 }) {
@@ -88,16 +100,20 @@ export function RunThread({
         <span>Run · {formatTime(run.createdAt)}</span>
         <RunBadge run={run} />
       </div>
-      {replyBlocks.map((block) => (
-        <AgentReplyBlock
-          key={block.id}
-          block={block}
-          onPinPart={(part) => {
-            const message = block.messageId ? messages.find((item) => item.id === block.messageId) : undefined;
-            if (message) onPinPart?.(message, part);
-          }}
-        />
-      ))}
+      {replyBlocks.map((block) => {
+        const message = block.messageId ? messages.find((item) => item.id === block.messageId) : undefined;
+        return (
+          <AgentReplyBlock
+            key={block.id}
+            block={block}
+            onPinPart={(part) => {
+              if (message) onPinPart?.(message, part);
+            }}
+            onReply={message && onReply ? () => onReply(message) : undefined}
+            onRegenerate={message && canRegenerateMessage(message) && onRegenerate ? () => onRegenerate(message) : undefined}
+          />
+        );
+      })}
       {fileChanges.length > 0 && (
         <RunDiffCards
           changes={fileChanges}
@@ -210,9 +226,13 @@ function UserMessage({
 function AgentReplyBlock({
   block,
   onPinPart,
+  onReply,
+  onRegenerate,
 }: {
   block: AgentReplyBlockModel;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReply?: () => void;
+  onRegenerate?: () => void;
 }) {
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
   return (
@@ -225,6 +245,16 @@ function AgentReplyBlock({
           <span>{block.name} · {formatTime(block.timestamp)}</span>
           {streaming && <small className="statusTag">生成中...</small>}
           {block.status === "failed" && <small className="statusTag error">失败</small>}
+          {!streaming && onReply && (
+            <button type="button" title="回复/引用" onClick={onReply}>
+              <CommentOutlined />
+            </button>
+          )}
+          {!streaming && onRegenerate && (
+            <button type="button" title="重新生成" onClick={onRegenerate}>
+              <ReloadOutlined />
+            </button>
+          )}
           <button type="button" title="复制消息" onClick={() => copyText(block.text)}>
             <CopyOutlined />
           </button>
@@ -338,4 +368,8 @@ function buildBeforeAfterPreview(change: HubFileChangeDto) {
 function referenceCount(message: HubMessageDto) {
   const refs = message.contentJson.references;
   return Array.isArray(refs) ? refs.length : message.contentJson.quotedMessageId ? 1 : 0;
+}
+
+function canRegenerateMessage(message: HubMessageDto) {
+  return message.role === "assistant" || message.role === "agent";
 }
