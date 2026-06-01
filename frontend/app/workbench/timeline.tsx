@@ -52,6 +52,7 @@ export function TimelineMessage({
   onReferencePart,
   onRegenerate,
   onOpenArtifact,
+  onOpenPart,
   agents,
 }: {
   message: HubMessageDto;
@@ -61,6 +62,7 @@ export function TimelineMessage({
   onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
   agents: AgentInstanceDto[];
 }) {
   if (message.role === "user") {
@@ -73,6 +75,7 @@ export function TimelineMessage({
         onReferencePart={onReferencePart}
         onRegenerate={onRegenerate}
         onOpenArtifact={onOpenArtifact}
+        onOpenPart={onOpenPart}
       />
     );
   }
@@ -85,6 +88,7 @@ export function TimelineMessage({
       onReply={onReply ? () => onReply(message) : undefined}
       onRegenerate={canRegenerate && onRegenerate ? () => onRegenerate(message) : undefined}
       onOpenArtifact={onOpenArtifact}
+      onOpenPart={onOpenPart}
     />
   );
 }
@@ -101,6 +105,7 @@ export function RunThread({
   onRegenerate,
   onApplyFileChange,
   onOpenArtifact,
+  onOpenPart,
   applyingFileChangeId,
 }: {
   run: HubRunDto;
@@ -114,6 +119,7 @@ export function RunThread({
   onRegenerate?: (message: HubMessageDto) => void;
   onApplyFileChange?: (change: HubFileChangeDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
   applyingFileChangeId?: string | null;
 }) {
   const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
@@ -144,6 +150,7 @@ export function RunThread({
             onReply={message && onReply ? () => onReply(message) : undefined}
             onRegenerate={message && canRegenerateMessage(message) && onRegenerate ? () => onRegenerate(message) : undefined}
             onOpenArtifact={onOpenArtifact}
+            onOpenPart={onOpenPart}
           />
         );
       })}
@@ -235,6 +242,7 @@ function UserMessage({
   onReferencePart,
   onRegenerate,
   onOpenArtifact,
+  onOpenPart,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
@@ -243,6 +251,7 @@ function UserMessage({
   onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   return (
     <article className="timelineRow userRow">
@@ -273,6 +282,7 @@ function UserMessage({
           onPinPart={onPinPart ? (part) => onPinPart(message, part) : undefined}
           onReferencePart={onReferencePart ? (part) => onReferencePart(message, part) : undefined}
           onOpenArtifact={onOpenArtifact}
+          onOpenPart={onOpenPart}
         />
       </div>
     </article>
@@ -286,6 +296,7 @@ function AgentReplyBlock({
   onReply,
   onRegenerate,
   onOpenArtifact,
+  onOpenPart,
 }: {
   block: AgentReplyBlockModel;
   onPinPart?: (part: HubMessagePartDto) => void;
@@ -293,6 +304,7 @@ function AgentReplyBlock({
   onReply?: () => void;
   onRegenerate?: () => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
   return (
@@ -326,6 +338,7 @@ function AgentReplyBlock({
             onPinPart={block.messageId ? onPinPart : undefined}
             onReferencePart={block.messageId ? onReferencePart : undefined}
             onOpenArtifact={onOpenArtifact}
+            onOpenPart={onOpenPart}
           />
         ) : (
           <RichText text={block.text} />

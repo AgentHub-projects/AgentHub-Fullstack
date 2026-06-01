@@ -2592,6 +2592,7 @@ textarea:focus-visible {
   max-height: calc(100vh - 190px);
 }
 
+.messagePartViewerLayer,
 .artifactViewerLayer {
   position: fixed;
   inset: 0;
@@ -2600,6 +2601,19 @@ textarea:focus-visible {
   place-items: center;
   background: rgba(15, 23, 42, 0.32);
   padding: 22px;
+}
+
+.messagePartViewer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(980px, 100%);
+  height: min(740px, calc(100vh - 44px));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
 }
 
 .artifactViewer {
@@ -2615,6 +2629,7 @@ textarea:focus-visible {
   box-shadow: var(--shadow-soft);
 }
 
+.messagePartViewer header,
 .artifactViewer header {
   display: flex;
   align-items: center;
@@ -2624,10 +2639,13 @@ textarea:focus-visible {
   padding: 12px 14px;
 }
 
+.messagePartViewer header > div:first-child,
 .artifactViewer header > div:first-child {
   min-width: 0;
 }
 
+.messagePartViewer header strong,
+.messagePartViewer header span,
 .artifactViewer header strong,
 .artifactViewer header span {
   display: block;
@@ -2637,16 +2655,45 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.messagePartViewer header span,
 .artifactViewer header span {
   margin-top: 2px;
   color: var(--muted);
   font-size: 12px;
 }
 
+.messagePartViewerActions,
 .artifactViewerActions {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 5px;
+}
+
+.messagePartViewerActions a,
+.messagePartViewerActions button,
+.artifactViewerActions a,
+.artifactViewerActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.messagePartViewerActions button {
+  padding: 0 9px;
+}
+
+.messagePartViewerActions button span {
+  margin: 0 0 0 6px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .artifactViewerActions button:not(:last-child) {
@@ -2696,6 +2743,7 @@ textarea:focus-visible {
   color: var(--brand);
 }
 
+.messagePartViewerBody,
 .artifactViewerBody {
   min-width: 0;
   min-height: 0;
@@ -2703,9 +2751,120 @@ textarea:focus-visible {
   padding: 14px;
 }
 
+.messagePartViewerBody {
+  display: grid;
+}
+
 .artifactViewerBody > .richText,
 .artifactViewerBody > pre {
   min-height: 100%;
+}
+
+.messagePartMediaPreview {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.messagePartMediaPreview img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 150px);
+  object-fit: contain;
+}
+
+.messagePartFramePreview {
+  width: 100%;
+  min-height: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.messagePartCodePreview {
+  min-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  color: #263242;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.messagePartDiffPreview {
+  min-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.messagePartDiffPreview .unifiedDiff {
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.messagePartDetailCard {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  padding: 14px;
+}
+
+.messagePartDetailCard strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.messagePartDetailCard p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.messagePartDetailCard a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.messagePartDetailCard dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.messagePartDetailCard dl > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.28fr) minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.messagePartDetailCard dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.messagePartDetailCard dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .artifactCodeEditor {

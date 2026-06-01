@@ -35,17 +35,19 @@ export function MessageParts({
   onPinPart,
   onReferencePart,
   onOpenArtifact,
+  onOpenPart,
 }: {
   parts?: HubMessagePartDto[];
   fallbackText: string;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   if (!parts?.length) return <RichText text={fallbackText} />;
   return (
     <div className="richText">
-      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onReferencePart, onOpenArtifact))}
+      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onReferencePart, onOpenArtifact, onOpenPart))}
     </div>
   );
 }
@@ -56,6 +58,7 @@ function renderMessagePart(
   onPinPart?: (part: HubMessagePartDto) => void,
   onReferencePart?: (part: HubMessagePartDto) => void,
   onOpenArtifact?: (artifactId: string) => void,
+  onOpenPart?: (part: HubMessagePartDto) => void,
 ): React.ReactNode[] {
   if (part.type === "code") {
     return [
@@ -66,26 +69,27 @@ function renderMessagePart(
         pinned={part.pinned}
         onPin={onPinPart ? () => onPinPart(part) : undefined}
         onReference={onReferencePart ? () => onReferencePart(part) : undefined}
+        onExpand={onOpenPart ? () => onOpenPart(part) : undefined}
       />,
     ];
   }
   if (part.type === "deploy_status") {
-    return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
+    return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "link_preview") {
-    return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
+    return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "image") {
-    return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
+    return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "file") {
-    return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
+    return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "diff") {
-    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
+    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "artifact") {
-    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenArtifact={onOpenArtifact} />];
+    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenArtifact={onOpenArtifact} onOpenPart={onOpenPart} />];
   }
   if (part.type !== "text") {
     return [
@@ -93,6 +97,11 @@ function renderMessagePart(
         <div>
           <strong>{part.title ?? part.type}</strong>
           <span className="messageCardActions">
+            {onOpenPart && (
+              <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+                <ExpandOutlined />
+              </button>
+            )}
             {onPinPart && (
               <button type="button" title={part.pinned ? "取消 Pin 这个 part" : "Pin 这个 part"} onClick={() => onPinPart(part)}>
                 {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
@@ -119,10 +128,12 @@ function DiffPart({
   part,
   onPinPart,
   onReferencePart,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const path = stringMetadata(part.metadata, "path") ?? part.title ?? "Diff";
   const changeType = stringMetadata(part.metadata, "changeType");
@@ -141,6 +152,11 @@ function DiffPart({
           <span>{changeType ?? "diff"}</span>
         </div>
         <div>
+          {onOpenPart && (
+            <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+              <ExpandOutlined />
+            </button>
+          )}
           {part.url && (
             <a title="打开 Diff" href={part.url} target="_blank" rel="noreferrer">
               <LinkOutlined />
@@ -191,10 +207,12 @@ function FilePart({
   part,
   onPinPart,
   onReferencePart,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const mimeType = stringMetadata(part.metadata, "mimeType");
   const sizeBytes = numberMetadata(part.metadata, "sizeBytes");
@@ -212,6 +230,11 @@ function FilePart({
             </span>
           </div>
           <div>
+            {onOpenPart && (
+              <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+                <ExpandOutlined />
+              </button>
+            )}
             {part.url && (
               <a title="打开文件" href={part.url} target="_blank" rel="noreferrer">
                 <LinkOutlined />
@@ -239,16 +262,23 @@ function ImagePart({
   part,
   onPinPart,
   onReferencePart,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   return (
     <div className="imageMessagePart">
       <div className="imageMessageTop">
         <strong>{part.title ?? "图片附件"}</strong>
         <div>
+          {onOpenPart && (
+            <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+              <ExpandOutlined />
+            </button>
+          )}
           {part.url && (
             <a title="打开图片" href={part.url} target="_blank" rel="noreferrer">
               <LinkOutlined />
@@ -280,11 +310,13 @@ function ArtifactPart({
   onPinPart,
   onReferencePart,
   onOpenArtifact,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const artifactId = stringMetadata(part.metadata, "artifactId");
   const kind = stringMetadata(part.metadata, "kind") ?? "artifact";
@@ -293,22 +325,31 @@ function ArtifactPart({
   const final = booleanMetadata(part.metadata, "final");
   const contentUrl = artifactId ? artifactContentUrl(artifactId) : part.url;
   const title = part.title ?? "Artifact";
-  const canExpand = Boolean(artifactId && onOpenArtifact);
+  const canOpenArtifact = Boolean(artifactId && onOpenArtifact);
+  const canOpenPart = Boolean(!canOpenArtifact && onOpenPart);
+  const canExpand = canOpenArtifact || canOpenPart;
   const openArtifact = () => {
     if (artifactId && onOpenArtifact) onOpenArtifact(artifactId);
+  };
+  const openPreview = () => {
+    if (canOpenArtifact) {
+      openArtifact();
+      return;
+    }
+    onOpenPart?.(part);
   };
   return (
     <div
       className={`artifactMessagePart ${kind} ${canExpand ? "clickable" : ""}`}
       role={canExpand ? "button" : undefined}
       tabIndex={canExpand ? 0 : undefined}
-      onClick={canExpand ? openArtifact : undefined}
+      onClick={canExpand ? openPreview : undefined}
       onKeyDown={
         canExpand
           ? (event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
-              openArtifact();
+              openPreview();
             }
           : undefined
       }
@@ -325,7 +366,7 @@ function ArtifactPart({
         </div>
         <div className="artifactMessageActions" onClick={(event) => event.stopPropagation()}>
           {canExpand && (
-            <button type="button" title="展开预览" onClick={openArtifact}>
+            <button type="button" title="展开预览" onClick={openPreview}>
               <ExpandOutlined />
             </button>
           )}
@@ -382,10 +423,12 @@ function LinkPreviewPart({
   part,
   onPinPart,
   onReferencePart,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const description = stringMetadata(part.metadata, "description") ?? part.text ?? "";
   return (
@@ -400,6 +443,11 @@ function LinkPreviewPart({
         )}
       </div>
       <div className="linkPreviewActions">
+        {onOpenPart && (
+          <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+            <ExpandOutlined />
+          </button>
+        )}
         {onPinPart && (
           <button type="button" title={part.pinned ? "取消 Pin 网页预览" : "Pin 网页预览"} onClick={() => onPinPart(part)}>
             {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
@@ -419,10 +467,12 @@ function DeployStatusPart({
   part,
   onPinPart,
   onReferencePart,
+  onOpenPart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const status = stringMetadata(part.metadata, "status") ?? "queued";
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
@@ -455,6 +505,11 @@ function DeployStatusPart({
         {status === "failed" && errorMessage && <small>{errorMessage}</small>}
       </div>
       <div className="deployStatusActions">
+        {onOpenPart && (
+          <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
+            <ExpandOutlined />
+          </button>
+        )}
         {onPinPart && (
           <button type="button" title={part.pinned ? "取消 Pin 部署状态" : "Pin 部署状态"} onClick={() => onPinPart(part)}>
             {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
@@ -514,18 +569,25 @@ function CodeBlock({
   pinned,
   onPin,
   onReference,
+  onExpand,
 }: {
   text: string;
   language?: string;
   pinned?: boolean;
   onPin?: () => void;
   onReference?: () => void;
+  onExpand?: () => void;
 }) {
   return (
     <div className="codeBlock">
       <div className="codeBlockHeader">
         <span>{language || "code"}</span>
         <div>
+          {onExpand && (
+            <button type="button" title="展开预览" onClick={onExpand}>
+              <ExpandOutlined />
+            </button>
+          )}
           {onPin && (
             <button type="button" title={pinned ? "取消 Pin 这段代码" : "Pin 这段代码"} onClick={onPin}>
               {pinned ? <PushpinFilled /> : <PushpinOutlined />}
@@ -544,6 +606,239 @@ function CodeBlock({
       <pre>{text}</pre>
     </div>
   );
+}
+
+export function MessagePartViewerLayer({ part, onClose }: { part: HubMessagePartDto; onClose: () => void }) {
+  const copyableText = partCopyText(part);
+  return (
+    <div className="messagePartViewerLayer" role="presentation" onMouseDown={onClose}>
+      <section
+        className="messagePartViewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={partTitle(part)}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <strong>{partTitle(part)}</strong>
+            <span>{partSubtitle(part)}</span>
+          </div>
+          <div className="messagePartViewerActions">
+            {copyableText && (
+              <button type="button" title="复制内容" onClick={() => copyText(copyableText)}>
+                <CopyOutlined />
+                <span>复制</span>
+              </button>
+            )}
+            {part.url && (
+              <a title="打开原始地址" href={part.url} target="_blank" rel="noreferrer">
+                <LinkOutlined />
+              </a>
+            )}
+            <button type="button" title="关闭" onClick={onClose}>
+              ×
+            </button>
+          </div>
+        </header>
+        <div className="messagePartViewerBody">
+          <ExpandedPartPreview part={part} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ExpandedPartPreview({ part }: { part: HubMessagePartDto }) {
+  if (part.type === "image") {
+    return part.url ? (
+      <div className="messagePartMediaPreview">
+        <img alt={part.title ?? "图片附件"} src={part.url} />
+      </div>
+    ) : (
+      <PartFallback part={part} />
+    );
+  }
+
+  if (part.type === "file") {
+    return <ExpandedFilePart part={part} />;
+  }
+
+  if (part.type === "diff") {
+    const patch = part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
+    const before = stringMetadata(part.metadata, "beforeContent");
+    const after = stringMetadata(part.metadata, "afterContent");
+    const lines = patch.trim() ? parseUnifiedPatch(patch) : before || after ? beforeAfterLines(before ?? "", after ?? "") : [];
+    return lines.length ? (
+      <div className="messagePartDiffPreview">
+        <DiffLines lines={lines} />
+      </div>
+    ) : (
+      <PartFallback part={part} />
+    );
+  }
+
+  if (part.type === "link_preview") {
+    const description = stringMetadata(part.metadata, "description") ?? part.text ?? "";
+    return (
+      <div className="messagePartDetailCard">
+        <strong>{part.title ?? "网页预览"}</strong>
+        {description && <p>{description}</p>}
+        {part.url && (
+          <a href={part.url} target="_blank" rel="noreferrer">
+            {part.url}
+          </a>
+        )}
+        <PartMetadata part={part} />
+      </div>
+    );
+  }
+
+  if (part.type === "deploy_status") {
+    return <ExpandedDeployStatus part={part} />;
+  }
+
+  if (part.type === "code") {
+    return <pre className="messagePartCodePreview">{part.text ?? ""}</pre>;
+  }
+
+  if (part.text?.trim()) {
+    return <pre className="messagePartCodePreview">{part.text}</pre>;
+  }
+
+  return <PartFallback part={part} />;
+}
+
+function ExpandedFilePart({ part }: { part: HubMessagePartDto }) {
+  const mimeType = stringMetadata(part.metadata, "mimeType") ?? "";
+  if (part.url && mimeType.startsWith("image/")) {
+    return (
+      <div className="messagePartMediaPreview">
+        <img alt={part.title ?? "文件附件"} src={part.url} />
+      </div>
+    );
+  }
+
+  if (part.url && (mimeType === "application/pdf" || mimeType === "text/html")) {
+    return <iframe className="messagePartFramePreview" title={part.title ?? "文件附件"} src={part.url} />;
+  }
+
+  if (part.text?.trim()) {
+    return <pre className="messagePartCodePreview">{part.text}</pre>;
+  }
+
+  return <PartFallback part={part} />;
+}
+
+function ExpandedDeployStatus({ part }: { part: HubMessagePartDto }) {
+  const status = stringMetadata(part.metadata, "status") ?? "queued";
+  const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
+  const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
+  const target = stringMetadata(part.metadata, "target") ?? "static";
+  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? deploymentTargetLabel(target);
+  const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
+  const sourceArchiveUrl = stringMetadata(part.metadata, "sourceArchiveUrl");
+  return (
+    <div className={`messagePartDetailCard deploy ${deployStatusClass(status)}`}>
+      <strong>{part.title ?? "部署状态"}</strong>
+      <dl>
+        <div>
+          <dt>状态</dt>
+          <dd>{status}</dd>
+        </div>
+        <div>
+          <dt>项目</dt>
+          <dd>{projectName}</dd>
+        </div>
+        <div>
+          <dt>目标</dt>
+          <dd>{targetLabel}</dd>
+        </div>
+        {commitSha && (
+          <div>
+            <dt>Commit</dt>
+            <dd>{commitSha}</dd>
+          </div>
+        )}
+      </dl>
+      {part.url && target !== "source_archive" && (
+        <a href={part.url} target="_blank" rel="noreferrer">
+          预览地址：{part.url}
+        </a>
+      )}
+      {sourceArchiveUrl && (
+        <a href={sourceArchiveUrl} target="_blank" rel="noreferrer">
+          下载源码包
+        </a>
+      )}
+      {status === "failed" && errorMessage && <p>{errorMessage}</p>}
+    </div>
+  );
+}
+
+function PartFallback({ part }: { part: HubMessagePartDto }) {
+  return (
+    <div className="messagePartDetailCard">
+      <strong>{part.title ?? part.type}</strong>
+      {part.url && (
+        <a href={part.url} target="_blank" rel="noreferrer">
+          {part.url}
+        </a>
+      )}
+      {part.text && <p>{part.text}</p>}
+      <PartMetadata part={part} />
+    </div>
+  );
+}
+
+function PartMetadata({ part }: { part: HubMessagePartDto }) {
+  const entries = Object.entries(part.metadata ?? {}).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (entries.length === 0) return null;
+  return (
+    <dl>
+      {entries.map(([key, value]) => (
+        <div key={key}>
+          <dt>{key}</dt>
+          <dd>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function partTitle(part: HubMessagePartDto) {
+  if (part.title) return part.title;
+  if (part.type === "image") return "图片附件";
+  if (part.type === "file") return "文件附件";
+  if (part.type === "link_preview") return "网页预览";
+  if (part.type === "diff") return stringMetadata(part.metadata, "path") ?? "Diff";
+  if (part.type === "deploy_status") return "部署状态";
+  if (part.type === "code") return part.language ?? "代码";
+  return part.type;
+}
+
+function partSubtitle(part: HubMessagePartDto) {
+  if (part.type === "file") {
+    const mimeType = stringMetadata(part.metadata, "mimeType");
+    const sizeBytes = numberMetadata(part.metadata, "sizeBytes");
+    return [mimeType, sizeBytes ? formatBytes(sizeBytes) : null].filter(Boolean).join(" · ") || "附件";
+  }
+  if (part.type === "diff") return stringMetadata(part.metadata, "changeType") ?? "diff";
+  if (part.type === "deploy_status") {
+    const status = stringMetadata(part.metadata, "status") ?? "queued";
+    const target = stringMetadata(part.metadata, "target") ?? "static";
+    return `${deploymentTargetLabel(target)} · ${status}`;
+  }
+  if (part.type === "link_preview") return part.url ?? "Open Graph";
+  if (part.type === "code") return part.language ?? "code";
+  return part.type;
+}
+
+function partCopyText(part: HubMessagePartDto) {
+  if (part.text?.trim()) return part.text;
+  if (part.type === "diff") return stringMetadata(part.metadata, "patch");
+  if (part.url) return part.url;
+  return null;
 }
 
 function copyText(text: string) {

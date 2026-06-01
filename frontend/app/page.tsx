@@ -65,6 +65,7 @@ import {
   upsertById,
 } from "../lib/agenthub-api";
 import { ArtifactPanel, ArtifactViewerLayer, DiffPanel } from "./workbench/inspector";
+import { MessagePartViewerLayer } from "./workbench/rich-text";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
@@ -136,6 +137,7 @@ export default function WorkbenchPage() {
   const [deploymentMenuOpen, setDeploymentMenuOpen] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
+  const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [creatingContactTemplateId, setCreatingContactTemplateId] = useState<number | null>(null);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
@@ -1187,6 +1189,7 @@ export default function WorkbenchPage() {
                 onReferencePart={sessionWritable ? addReplyPartTarget : undefined}
                 onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
+                onOpenPart={setActivePartViewer}
                 agents={agents}
               />
             ) : (
@@ -1203,6 +1206,7 @@ export default function WorkbenchPage() {
                 onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
                 onApplyFileChange={sessionWritable ? handleApplyFileChange : undefined}
                 onOpenArtifact={openArtifactViewer}
+                onOpenPart={setActivePartViewer}
                 applyingFileChangeId={applyingFileChangeId}
               />
             ),
@@ -1415,6 +1419,13 @@ export default function WorkbenchPage() {
           artifact={activeArtifactViewer}
           onClose={() => setActiveArtifactViewerId(null)}
           onUseSelection={handleArtifactSelection}
+        />
+      )}
+
+      {activePartViewer && (
+        <MessagePartViewerLayer
+          part={activePartViewer}
+          onClose={() => setActivePartViewer(null)}
         />
       )}
 
