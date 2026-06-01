@@ -390,6 +390,107 @@ textarea:focus-visible {
   padding: 0;
 }
 
+.agentContacts {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.agentContactsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agentContactsHeader strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.agentContactsHeader span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agentContactList {
+  display: grid;
+  gap: 4px;
+  max-height: 246px;
+  min-width: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.agentContactItem {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.agentContactItem:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-muted);
+}
+
+.agentContactItem:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.agentContactMeta {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.agentContactTop {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.agentContactTop strong,
+.agentContactMeta > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentContactTop strong {
+  flex: 1;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.agentContactTop small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.agentContactMeta > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .emptySessionList {
   margin: 8px 4px;
   color: var(--muted);

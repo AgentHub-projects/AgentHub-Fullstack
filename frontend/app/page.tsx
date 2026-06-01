@@ -129,6 +129,7 @@ export default function WorkbenchPage() {
   const [deploymentMenuOpen, setDeploymentMenuOpen] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [creatingContactTemplateId, setCreatingContactTemplateId] = useState<number | null>(null);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
   const [directTemplateId, setDirectTemplateId] = useState<number>(0);
   const [directName, setDirectName] = useState("");
@@ -183,6 +184,7 @@ export default function WorkbenchPage() {
     () => filterInviteTemplates(templates, inviteQuery),
     [templates, inviteQuery],
   );
+  const contactTemplates = useMemo(() => templates.filter((tpl) => tpl.status !== "disabled"), [templates]);
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
 
@@ -487,6 +489,32 @@ export default function WorkbenchPage() {
     if (agentRes.ok) setAgents(agentRes.data.items);
     closeMentionMenu();
     closeGroupDialog();
+  }
+
+  async function handleCreateDirectFromTemplate(template: AgentTemplateDto) {
+    if (creatingContactTemplateId !== null) return;
+    setCreatingContactTemplateId(template.id);
+    try {
+      const result = await createSession({
+        mode: "direct",
+        title: template.name,
+        directTemplateId: template.id,
+        directProvider: template.defaultProvider,
+        directName: template.name,
+      });
+      if (!result.ok) {
+        setNotice(`创建失败：${result.error}`);
+        return;
+      }
+      setSessions((current) => upsertById(current, result.data).sort(sortSession));
+      setDetail({ session: result.data, ...EMPTY_DETAIL });
+      setActiveSessionId(result.data.id);
+      const agentRes = await listAgents();
+      if (agentRes.ok) setAgents(agentRes.data.items);
+      closeMentionMenu();
+    } finally {
+      setCreatingContactTemplateId(null);
+    }
   }
 
   async function handleSend() {
@@ -917,6 +945,42 @@ export default function WorkbenchPage() {
             placeholder="搜索会话、最近消息、Agent"
           />
         </label>
+
+        {contactTemplates.length > 0 && (
+          <section className="agentContacts" aria-label="Agent 联系人">
+            <div className="agentContactsHeader">
+              <strong>Agent 联系人</strong>
+              <span>{contactTemplates.length} 个</span>
+            </div>
+            <div className="agentContactList">
+              {contactTemplates.map((tpl) => {
+                const creating = creatingContactTemplateId === tpl.id;
+                return (
+                  <button
+                    key={tpl.id}
+                    className="agentContactItem"
+                    type="button"
+                    title={`和 ${tpl.name} 单聊`}
+                    disabled={creatingContactTemplateId !== null}
+                    onClick={() => void handleCreateDirectFromTemplate(tpl)}
+                  >
+                    <span className="avatar" style={{ background: agentColor(tpl.id) }}>
+                      {initials(tpl.name)}
+                    </span>
+                    <span className="agentContactMeta">
+                      <span className="agentContactTop">
+                        <strong>{tpl.name}</strong>
+                        {creating ? <LoadingOutlined /> : <small>{tpl.defaultProvider}</small>}
+                      </span>
+                      <small>{tpl.description}</small>
+                      <CapabilityTags capabilities={tpl.defaultCapabilities} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <nav className="sessionList" aria-label="会话">
           {sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
