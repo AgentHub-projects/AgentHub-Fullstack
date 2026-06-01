@@ -287,7 +287,7 @@ export interface SendHubMessageResponse {
   session: HubSessionDto;
   message: HubMessageDto;
   run: HubRunDto;
-  contextSnapshot: HubContextSnapshotDto;
+  contextSnapshot?: HubContextSnapshotDto | null;
 }
 
 export interface PinHubMessageRequest {

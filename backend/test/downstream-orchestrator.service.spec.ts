@@ -239,6 +239,7 @@ function createService(options?: { gateway?: ReturnType<typeof createGateway> })
     createPrisma() as any,
     { append: vi.fn().mockResolvedValue({}) } as any,
     (options?.gateway ?? createGateway()) as any,
+    { buildSnapshot: vi.fn().mockResolvedValue(context) } as any,
   );
 }
 
@@ -282,6 +283,7 @@ function createPrisma() {
 function createGateway() {
   return {
     emitSession: vi.fn(),
+    emitContext: vi.fn(),
     hasSessionSubscribers: vi.fn().mockReturnValue(false),
   };
 }

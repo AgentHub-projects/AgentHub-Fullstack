@@ -349,17 +349,6 @@ export class HubSessionService {
       }
     }
 
-    const contextSnapshot = await this.context.buildSnapshot({
-      sessionId,
-      runId: run.id,
-      promptText: text,
-      mentionedAgents,
-    });
-
-    const updatedRun = await this.prisma.agentRun.update({
-      where: { id: run.id },
-      data: { contextSnapshotId: contextSnapshot.id },
-    });
     const updatedSession = await this.prisma.session.update({
       where: { id: sessionId },
       data: { title: deriveTitle(session.title, text, session.metadata), updatedAt: new Date() },
@@ -368,7 +357,6 @@ export class HubSessionService {
 
     const sessionDto = mapSession(updatedSession);
     this.gateway.emitSession(sessionDto);
-    this.gateway.emitContext(sessionId, contextSnapshot);
     await this.events.append({
       sessionId,
       runId: run.id,
@@ -381,7 +369,6 @@ export class HubSessionService {
         mode: isDirect ? "direct" : "group",
         mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
         mentionedAgentNames: mentionedAgents.map((agent) => agent.name),
-        contextSnapshotId: contextSnapshot.id,
       },
     });
 
@@ -392,14 +379,13 @@ export class HubSessionService {
       promptText: text,
       orchestrator: runAgent,
       mentionedAgents,
-      context: contextSnapshot,
     });
 
     return {
       session: sessionDto,
       message: mapMessage(message),
-      run: mapRun(updatedRun),
-      contextSnapshot,
+      run: mapRun(run),
+      contextSnapshot: null,
     };
   }
 

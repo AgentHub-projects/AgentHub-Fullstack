@@ -5,6 +5,7 @@ import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
+import { HubContextService } from "./context.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
@@ -22,6 +23,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     private readonly events: HubEventService,
     @Inject(HubRealtimeGateway)
     private readonly gateway: HubRealtimeGateway,
+    @Inject(HubContextService)
+    private readonly context: HubContextService,
   ) {}
 
   onModuleDestroy() {
@@ -39,7 +42,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     promptText: string;
     orchestrator: AgentInstanceDto;
     mentionedAgents: AgentInstanceDto[];
-    context: HubContextSnapshotDto;
   }) {
     await this.prisma.agentRun.update({
       where: { id: input.runId },
@@ -63,7 +65,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     try {
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator);
       const downstreamSessionId = await connection.downstreamReady;
-      const promptInput = await this.buildPromptInput(input, downstreamSessionId!, connection.needsBootstrap);
+      const needsBootstrap = connection.needsBootstrap;
+      const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
+      const promptInput = await this.buildPromptInput(
+        { ...input, context: contextSnapshot },
+        downstreamSessionId!,
+        needsBootstrap,
+      );
 
       connection.activeRunId = input.runId;
       connection.activeOrchestratorAgentId = input.orchestrator.id;
@@ -504,6 +512,38 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return run?.status === "cancelled";
   }
 
+  private async createBootstrapSnapshot(input: {
+    sessionId: string;
+    runId: string;
+    promptText: string;
+    mentionedAgents: AgentInstanceDto[];
+  }) {
+    await this.prisma.agentRun.update({
+      where: { id: input.runId },
+      data: { status: "context_building" },
+    });
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "run.status",
+      source: "agenthub_backend",
+      payload: { status: "context_building", reason: "bootstrap" },
+    });
+
+    const contextSnapshot = await this.context.buildSnapshot({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      promptText: input.promptText,
+      mentionedAgents: input.mentionedAgents,
+    });
+    await this.prisma.agentRun.update({
+      where: { id: input.runId },
+      data: { contextSnapshotId: contextSnapshot.id },
+    });
+    this.gateway.emitContext(input.sessionId, contextSnapshot);
+    return contextSnapshot;
+  }
+
   private async buildPromptInput(
     input: {
       sessionId: string;
@@ -511,12 +551,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       userMessageId: string;
       promptText: string;
       orchestrator: AgentInstanceDto;
-      context: HubContextSnapshotDto;
+      mentionedAgents: AgentInstanceDto[];
+      context?: HubContextSnapshotDto | null;
     },
     downstreamSessionId: string,
     bootstrap: boolean,
   ) {
-    const snapshot = input.context.snapshotJson;
+    const snapshot = input.context?.snapshotJson;
 
     // Build a comprehensive prompt that embeds all context
     const sections: string[] = [];
@@ -532,11 +573,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         sections.push(`## Available Agents\n${agents.map((a) => `- ${a.agentId}: ${a.description}`).join("\n")}`);
       }
 
-      if (snapshot.summary) {
+      if (snapshot?.summary) {
         sections.push(`## Context Summary\n${snapshot.summary}`);
       }
 
-      if (snapshot.pins?.length) {
+      if (snapshot?.pins?.length) {
         sections.push(`## Pinned\n${snapshot.pins.map((p) => `- [${p.kind}] ${p.text}`).join("\n")}`);
       }
     }
