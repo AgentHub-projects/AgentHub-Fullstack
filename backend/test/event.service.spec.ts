@@ -83,6 +83,46 @@ describe("HubEventService artifact message parts", () => {
     }));
   });
 
+  it("persists rich message parts from downstream completed messages", async () => {
+    const { service, prisma } = createService();
+    prisma.message.create.mockImplementation(async ({ data }: any) => messageRow({ ...data, id: "message-1" }));
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "message.completed",
+      speakerAgentId: 2,
+      payload: {
+        text: "已生成 Diff",
+        parts: [
+          {
+            id: "diff_1",
+            type: "diff",
+            title: "src/app.ts",
+            metadata: {
+              path: "src/app.ts",
+              changeType: "modified",
+              patch: "@@ -1 +1 @@\n-old\n+new",
+            },
+          },
+        ],
+      },
+    });
+
+    const createData = prisma.message.create.mock.calls[0]?.[0]?.data;
+    expect(createData.contentJson.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: "已生成 Diff" }),
+        expect.objectContaining({
+          id: "diff_1",
+          type: "diff",
+          title: "src/app.ts",
+          metadata: expect.objectContaining({ path: "src/app.ts", patch: "@@ -1 +1 @@\n-old\n+new" }),
+        }),
+      ]),
+    );
+  });
+
   it("adds artifact cards to an existing speaker assistant message", async () => {
     const { service, prisma, artifacts, gateway } = createService();
     const existing = messageRow({

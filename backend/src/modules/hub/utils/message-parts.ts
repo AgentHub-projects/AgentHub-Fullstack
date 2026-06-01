@@ -48,9 +48,31 @@ export function messageJsonWithParts(
   contentText: string,
   extraParts: HubMessagePartDto[] = [],
 ) {
+  const payloadParts = Array.isArray(base.parts)
+    ? base.parts.map(normalizePayloadPart).filter((part): part is HubMessagePartDto => Boolean(part))
+    : [];
   return {
     ...base,
-    parts: [...parseMessageParts(contentText), ...extraParts],
+    parts: [...parseMessageParts(contentText), ...payloadParts, ...extraParts],
+  };
+}
+
+function normalizePayloadPart(value: unknown, index: number): HubMessagePartDto | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const type = typeof raw.type === "string" && raw.type.trim() ? raw.type.trim() : "";
+  if (!type) return null;
+  return {
+    id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : `payload_${index + 1}`,
+    type,
+    ...(typeof raw.text === "string" ? { text: raw.text } : {}),
+    ...(typeof raw.language === "string" ? { language: raw.language } : {}),
+    ...(typeof raw.title === "string" ? { title: raw.title } : {}),
+    ...(typeof raw.url === "string" ? { url: raw.url } : {}),
+    ...(typeof raw.pinned === "boolean" ? { pinned: raw.pinned } : {}),
+    ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata)
+      ? { metadata: raw.metadata as Record<string, unknown> }
+      : {}),
   };
 }
 
