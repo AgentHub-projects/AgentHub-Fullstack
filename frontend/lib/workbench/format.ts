@@ -64,6 +64,8 @@ export function sessionSubtitle(session: HubSessionDto) {
 }
 
 export function sortSession(a: HubSessionDto, b: HubSessionDto) {
+  const pinnedDiff = Number(b.isPinned) - Number(a.isPinned);
+  if (pinnedDiff !== 0) return pinnedDiff;
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 

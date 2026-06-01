@@ -319,6 +319,32 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.sessionSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 8px 10px;
+}
+
+.sessionSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+}
+
+.emptySessionList {
+  margin: 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .sessionList {
   display: grid;
   align-content: start;
@@ -329,15 +355,16 @@ textarea:focus-visible {
 }
 
 .sessionItem {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: transparent;
   color: var(--ink-soft);
-  padding: 9px 10px;
+  padding: 4px;
   text-align: left;
 }
 
@@ -353,7 +380,26 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
-.sessionItem span,
+.sessionItemMain {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 5px 4px 5px 7px;
+  text-align: left;
+}
+
+.sessionItemMain > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.sessionItemMain > span > span,
 .sessionItem small {
   min-width: 0;
   overflow: hidden;
@@ -361,12 +407,35 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.sessionItem span {
+.sessionItemMain > span > span {
   font-weight: 700;
 }
 
 .sessionItem small {
   font-size: 12px;
+}
+
+.sessionItemActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  opacity: 0;
+}
+
+.sessionItem:hover .sessionItemActions,
+.sessionItem:focus-within .sessionItemActions,
+.sessionItem.active .sessionItemActions {
+  opacity: 1;
+}
+
+.sessionItemActions .iconButton {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+}
+
+.dangerIcon {
+  color: var(--danger);
 }
 
 .conversationPane {
@@ -388,6 +457,11 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.conversationTitleBlock {
+  display: grid;
+  gap: 3px;
+}
+
 .conversationHeader strong {
   display: block;
   min-width: 0;
@@ -403,6 +477,24 @@ textarea:focus-visible {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.titleEditForm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(520px, 100%);
+}
+
+.titleEditForm input {
+  min-width: 180px;
+  max-width: 360px;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--ink);
+  padding: 8px 10px;
 }
 
 .headerActions {

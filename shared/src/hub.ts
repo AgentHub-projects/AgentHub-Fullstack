@@ -78,6 +78,7 @@ export interface HubSessionDto {
   id: string;
   title: string;
   status: HubSessionStatus;
+  isPinned: boolean;
   metadata: Record<string, unknown>;
   createdAt: ISODateString;
   updatedAt: ISODateString;
@@ -251,6 +252,11 @@ export interface CreateHubSessionRequest {
   orchestratorProvider?: string; // "claude-code" | "open-code"
   orchestratorName?: string;
   memberTemplates?: Array<{ templateId: number; provider: string; name?: string }>;
+}
+
+export interface UpdateHubSessionRequest {
+  title?: string;
+  isPinned?: boolean;
 }
 
 export interface SendHubMessageRequest {

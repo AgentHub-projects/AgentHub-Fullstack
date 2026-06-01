@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import type {
   AddParticipantRequest,
@@ -6,6 +6,7 @@ import type {
   CreateSessionAgentRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
+  UpdateHubSessionRequest,
   UpdateAgentRequest,
 } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -26,8 +27,11 @@ export class HubSessionController {
   ) {}
 
   @Get()
-  listSessions() {
-    return this.sessions.listSessions();
+  listSessions(@Query("q") query?: string, @Query("includeArchived") includeArchived?: string) {
+    return this.sessions.listSessions({
+      query,
+      includeArchived: includeArchived === "true",
+    });
   }
 
   @Post()
@@ -38,6 +42,21 @@ export class HubSessionController {
   @Get(":sessionId")
   getSession(@Param("sessionId") sessionId: string) {
     return this.sessions.getDetail(sessionId);
+  }
+
+  @Patch(":sessionId")
+  updateSession(@Param("sessionId") sessionId: string, @Body() body: UpdateHubSessionRequest) {
+    return this.sessions.updateSession(sessionId, body ?? {});
+  }
+
+  @Post(":sessionId/archive")
+  archiveSession(@Param("sessionId") sessionId: string) {
+    return this.sessions.archiveSession(sessionId);
+  }
+
+  @Delete(":sessionId")
+  deleteSession(@Param("sessionId") sessionId: string) {
+    return this.sessions.deleteSession(sessionId);
   }
 
   @Post(":sessionId/messages")

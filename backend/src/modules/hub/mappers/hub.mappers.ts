@@ -65,11 +65,13 @@ export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentIn
 }
 
 export function mapSession(row: Row): HubSessionDto {
+  const metadata = asObject(row.metadata);
   return {
     id: row.id,
     title: row.title,
     status: row.status,
-    metadata: asObject(row.metadata),
+    isPinned: metadata.isPinned === true,
+    metadata,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     lastRun: row.runs?.[0] ? mapRun(row.runs[0]) : undefined,

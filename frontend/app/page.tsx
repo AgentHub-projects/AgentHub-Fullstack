@@ -17,19 +17,24 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
+  InboxOutlined,
   LoadingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
+  PushpinFilled,
+  PushpinOutlined,
   SendOutlined,
   SearchOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
 import {
+  archiveSession,
   cancelRun,
   connectHubSocket,
   createSession,
   createSessionAgent,
+  deleteSession,
   deleteAgent,
   getAuthState,
   getSessionDetail,
@@ -39,6 +44,7 @@ import {
   loginWithAccessKey,
   pinSessionMessage,
   sendSessionMessage,
+  updateSession,
   updateAgent,
   upsertById,
 } from "../lib/agenthub-api";
@@ -46,7 +52,6 @@ import { ArtifactPanel, DiffPanel } from "./workbench/inspector";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
-  buildGroupTitle,
   initials,
   isRunning,
   readMemberAgentIds,
@@ -82,6 +87,8 @@ export default function WorkbenchPage() {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetailDto | null>(null);
   const [agents, setAgents] = useState<AgentInstanceDto[]>([]);
@@ -118,6 +125,8 @@ export default function WorkbenchPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgentInstanceDto | null>(null);
   const [groupMembersExpanded, setGroupMembersExpanded] = useState(false);
+  const [renamingSession, setRenamingSession] = useState(false);
+  const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -142,6 +151,14 @@ export default function WorkbenchPage() {
   useEffect(() => {
     void checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (!authenticated || !authChecked) return;
+    const timer = window.setTimeout(() => {
+      void refreshSessions(sessionSearch);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [authenticated, authChecked, sessionSearch]);
 
   useEffect(() => {
     if (!authenticated || !activeSessionId) return;
@@ -221,7 +238,11 @@ export default function WorkbenchPage() {
   }
 
   async function bootstrap() {
-    const [agentRes, templateRes, sessionRes] = await Promise.all([listAgents(), listAgentTemplates(), listSessions()]);
+    const [agentRes, templateRes, sessionRes] = await Promise.all([
+      listAgents(),
+      listAgentTemplates(),
+      listSessions({ query: sessionSearch }),
+    ]);
     if (agentRes.ok) setAgents(agentRes.data.items);
     if (templateRes.ok) setTemplates(templateRes.data);
 
@@ -241,8 +262,18 @@ export default function WorkbenchPage() {
     if (selected) await loadSession(selected);
   }
 
+  async function refreshSessions(query = sessionSearch) {
+    const result = await listSessions({ query });
+    if (!result.ok) {
+      setNotice(`会话列表加载失败：${result.error}`);
+      return;
+    }
+    setSessions(result.data.items);
+  }
+
   async function loadSession(sessionId: string) {
     setActiveSessionId(sessionId);
+    setRenamingSession(false);
     const result = await getSessionDetail(sessionId);
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
@@ -250,6 +281,94 @@ export default function WorkbenchPage() {
     }
     setDetail(result.data);
     closeMentionMenu();
+  }
+
+  async function handleToggleSessionPin(session: HubSessionDto) {
+    if (sessionActionId) return;
+    setSessionActionId(session.id);
+    try {
+      const result = await updateSession(session.id, { isPinned: !session.isPinned });
+      if (!result.ok) {
+        setNotice(`置顶失败：${result.error}`);
+        return;
+      }
+      setSessions((current) => upsertById(current, result.data).sort(sortSession));
+      setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
+    } finally {
+      setSessionActionId(null);
+    }
+  }
+
+  function beginRenameSession() {
+    if (!activeSession) return;
+    setSessionTitleDraft(activeSession.title);
+    setRenamingSession(true);
+  }
+
+  async function handleRenameSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeSession || sessionActionId) return;
+    const title = sessionTitleDraft.trim();
+    if (!title) return;
+    setSessionActionId(activeSession.id);
+    try {
+      const result = await updateSession(activeSession.id, { title });
+      if (!result.ok) {
+        setNotice(`重命名失败：${result.error}`);
+        return;
+      }
+      setSessions((current) => upsertById(current, result.data).sort(sortSession));
+      setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
+      setRenamingSession(false);
+    } finally {
+      setSessionActionId(null);
+    }
+  }
+
+  async function handleArchiveSession(session: HubSessionDto) {
+    if (sessionActionId || isRunning(session.lastRun?.status ?? "")) return;
+    if (!window.confirm(`归档会话「${session.title}」？`)) return;
+    setSessionActionId(session.id);
+    try {
+      const result = await archiveSession(session.id);
+      if (!result.ok) {
+        setNotice(`归档失败：${result.error}`);
+        return;
+      }
+      const nextSessions = sessions.filter((item) => item.id !== session.id).sort(sortSession);
+      setSessions(nextSessions);
+      if (activeSessionId === session.id) {
+        const next = nextSessions[0] ?? null;
+        setActiveSessionId(next?.id ?? null);
+        setDetail(null);
+        if (next) await loadSession(next.id);
+      }
+    } finally {
+      setSessionActionId(null);
+    }
+  }
+
+  async function handleDeleteSession(session: HubSessionDto) {
+    if (sessionActionId || isRunning(session.lastRun?.status ?? "")) return;
+    if (!window.confirm(`删除会话「${session.title}」？历史记录会保留在数据库中。`)) return;
+    setSessionActionId(session.id);
+    try {
+      const result = await deleteSession(session.id);
+      if (!result.ok) {
+        setNotice(`删除失败：${result.error}`);
+        return;
+      }
+      const nextSessions = sessions.filter((item) => item.id !== session.id).sort(sortSession);
+      setSessions(nextSessions);
+      if (activeSessionId === session.id) {
+        const next = nextSessions[0] ?? null;
+        setActiveSessionId(next?.id ?? null);
+        setDetail(null);
+        if (next) await loadSession(next.id);
+      }
+    } finally {
+      setSessionActionId(null);
+    }
   }
 
   function openCreateGroupDialog() {
@@ -263,7 +382,7 @@ export default function WorkbenchPage() {
 
   async function handleCreateGroup() {
     const result = await createSession({
-      title: groupTitle.trim() || buildGroupTitle(memberTemplates.map((m) => m.templateId), templates),
+      title: groupTitle.trim() || undefined,
       orchestratorTemplateId: orchTemplateId || undefined,
       orchestratorName: orchName || undefined,
       orchestratorProvider: orchProvider,
@@ -273,7 +392,7 @@ export default function WorkbenchPage() {
       setNotice(`创建失败：${result.error}`);
       return;
     }
-    setSessions((current) => [result.data, ...current]);
+    setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setDetail({ session: result.data, ...EMPTY_DETAIL });
     setActiveSessionId(result.data.id);
     closeMentionMenu();
@@ -528,28 +647,97 @@ export default function WorkbenchPage() {
           </section>
         </div>
 
+        <label className="sessionSearch">
+          <SearchOutlined />
+          <input
+            value={sessionSearch}
+            onChange={(event) => setSessionSearch(event.target.value)}
+            placeholder="搜索会话、最近消息、Agent"
+          />
+        </label>
+
         <nav className="sessionList" aria-label="会话">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
-              type="button"
-              onClick={() => void loadSession(session.id)}
-            >
-              <span>{session.title}</span>
-              <small>{sessionSubtitle(session)}</small>
-            </button>
-          ))}
+          {sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
+          {sessions.map((session) => {
+            const sessionBusy = isRunning(session.lastRun?.status ?? "");
+            const actionBusy = sessionActionId === session.id;
+            return (
+              <div
+                key={session.id}
+                className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
+              >
+                <button className="sessionItemMain" type="button" onClick={() => void loadSession(session.id)}>
+                  <span>
+                    {session.isPinned && <PushpinFilled />}
+                    <span>{session.title}</span>
+                  </span>
+                  <small>{sessionSubtitle(session)}</small>
+                </button>
+                <div className="sessionItemActions">
+                  <button
+                    className="iconButton"
+                    type="button"
+                    title={session.isPinned ? "取消置顶" : "置顶"}
+                    disabled={actionBusy}
+                    onClick={() => void handleToggleSessionPin(session)}
+                  >
+                    {session.isPinned ? <PushpinFilled /> : <PushpinOutlined />}
+                  </button>
+                  <button
+                    className="iconButton"
+                    type="button"
+                    title={sessionBusy ? "运行中不能归档" : "归档"}
+                    disabled={actionBusy || sessionBusy}
+                    onClick={() => void handleArchiveSession(session)}
+                  >
+                    <InboxOutlined />
+                  </button>
+                  <button
+                    className="iconButton dangerIcon"
+                    type="button"
+                    title={sessionBusy ? "运行中不能删除" : "删除"}
+                    disabled={actionBusy || sessionBusy}
+                    onClick={() => void handleDeleteSession(session)}
+                  >
+                    <DeleteOutlined />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </nav>
       </aside>
 
       <section className="conversationPane">
         <header className="conversationHeader">
-          <div>
-            <strong>{activeSession?.title ?? "AgentHub 群聊"}</strong>
-            {notice && <span>{notice}</span>}
+          <div className="conversationTitleBlock">
+            {renamingSession && activeSession ? (
+              <form className="titleEditForm" onSubmit={(event) => void handleRenameSession(event)}>
+                <input
+                  value={sessionTitleDraft}
+                  onChange={(event) => setSessionTitleDraft(event.target.value)}
+                  autoFocus
+                />
+                <button className="primaryButton" type="submit" disabled={!sessionTitleDraft.trim() || sessionActionId === activeSession.id}>
+                  保存
+                </button>
+                <button className="ghostButton" type="button" onClick={() => setRenamingSession(false)}>
+                  取消
+                </button>
+              </form>
+            ) : (
+              <>
+                <strong>{activeSession?.title ?? "AgentHub 群聊"}</strong>
+                {notice && <span>{notice}</span>}
+              </>
+            )}
           </div>
           <div className="headerActions">
+            {activeSession && !renamingSession && (
+              <button className="iconButton" type="button" title="重命名会话" onClick={beginRenameSession}>
+                <EditOutlined />
+              </button>
+            )}
             {latestRun && <RunBadge run={latestRun} />}
             {latestRun && isRunning(latestRun.status) && (
               <button

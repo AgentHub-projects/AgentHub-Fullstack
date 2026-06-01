@@ -24,6 +24,7 @@ import type {
   SessionDetailDto,
   StartBuildRequest,
   StartBuildResponse,
+  UpdateHubSessionRequest,
   UpdateAgentRequest,
   UpdateAgentTemplateRequest,
 } from "@agenthub/shared";
@@ -79,8 +80,12 @@ export function logoutAuthSession() {
   });
 }
 
-export function listSessions() {
-  return requestJson<{ items: HubSessionDto[] }>("/sessions");
+export function listSessions(options: { query?: string; includeArchived?: boolean } = {}) {
+  const params = new URLSearchParams();
+  if (options.query?.trim()) params.set("q", options.query.trim());
+  if (options.includeArchived) params.set("includeArchived", "true");
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return requestJson<{ items: HubSessionDto[] }>(`/sessions${suffix}`);
 }
 
 export function createSession(body: CreateHubSessionRequest) {
@@ -92,6 +97,26 @@ export function createSession(body: CreateHubSessionRequest) {
 
 export function getSessionDetail(sessionId: string) {
   return requestJson<SessionDetailDto>(`/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function updateSession(sessionId: string, body: UpdateHubSessionRequest) {
+  return requestJson<HubSessionDto>(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function archiveSession(sessionId: string) {
+  return requestJson<HubSessionDto>(`/sessions/${encodeURIComponent(sessionId)}/archive`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function deleteSession(sessionId: string) {
+  return requestJson<HubSessionDto>(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
 }
 
 export function sendSessionMessage(sessionId: string, body: SendHubMessageRequest) {

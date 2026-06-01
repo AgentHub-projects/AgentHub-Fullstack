@@ -132,6 +132,14 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 
+  async closeSession(sessionId: string) {
+    const record = this.connections.get(sessionId);
+    if (!record) return;
+    this.clearIdleTimer(record);
+    record.socket.disconnect();
+    this.connections.delete(sessionId);
+  }
+
   /** Push context to downstream on connect/reconnect (complete context injection) */
   async pushContext(
     sessionId: string,
