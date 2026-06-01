@@ -367,15 +367,12 @@ function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifact
   }
 
   if (artifact.kind === "docx") {
-    return (
-      <div className="documentFallback">
-        <FileDoneOutlined />
-        <div>
-          <strong>DOCX 原始文件</strong>
-          <span>后端当前提供只读下载入口；接入 HTML render 后可在此处内联预览。</span>
-        </div>
-      </div>
-    );
+    const publicUrl = publicArtifactUrl(artifact);
+    const officeUrl = publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
+    if (officeUrl) {
+      return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} src={officeUrl} />;
+    }
+    return <DocumentFallback title="DOCX 原始文件" text="当前文件没有可供在线渲染的公开 URL，可打开原文件查看。" />;
   }
 
   if (artifact.kind === "pptx") {
@@ -437,6 +434,18 @@ function PptxPreview({
       <div>
         <strong>PPTX 原始文件</strong>
         <span>可打开原文件；下游若提供 metadata.slides，将在这里按页浏览。</span>
+      </div>
+    </div>
+  );
+}
+
+function DocumentFallback({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="documentFallback">
+      <FileDoneOutlined />
+      <div>
+        <strong>{title}</strong>
+        <span>{text}</span>
       </div>
     </div>
   );
