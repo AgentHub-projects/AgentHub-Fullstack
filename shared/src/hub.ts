@@ -70,6 +70,7 @@ export interface AgentInstanceDto {
   provider: string; // "claude-code" | "open-code"
   isDefaultOrchestrator: boolean;
   status: HubAgentStatus;
+  capabilities: unknown[];
   template?: AgentTemplateDto;
   createdAt: ISODateString;
   updatedAt: ISODateString;

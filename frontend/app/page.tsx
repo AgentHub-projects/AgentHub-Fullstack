@@ -881,8 +881,13 @@ export default function WorkbenchPage() {
                     <span className="avatar" style={{ background: agentColor(agent.id) }}>
                       {initials(agent.name)}
                     </span>
-                    <span className="memberName">{agent.name}</span>
-                    {mode === "group" && agent.id === orchestrator?.id && <span className="memberOrchTag">协调者</span>}
+                    <span className="memberMeta">
+                      <span>
+                        <span className="memberName">{agent.name}</span>
+                        {mode === "group" && agent.id === orchestrator?.id && <span className="memberOrchTag">协调者</span>}
+                      </span>
+                      <CapabilityTags capabilities={agent.capabilities} />
+                    </span>
                   </div>
                 ))}
                 {mode === "group" && (
@@ -1099,6 +1104,7 @@ export default function WorkbenchPage() {
                       <span>
                         <strong>@{agent.name}</strong>
                         <small>{agent.template?.name ?? "worker"}</small>
+                        <CapabilityTags capabilities={agent.capabilities} />
                       </span>
                       {index === activeMentionIndex && <CheckCircleOutlined />}
                     </button>
@@ -1405,6 +1411,7 @@ export default function WorkbenchPage() {
                       <span>
                         <strong>{tpl.name}</strong>
                         <small>{tpl.description.slice(0, 40)}</small>
+                        <CapabilityTags capabilities={tpl.defaultCapabilities} />
                       </span>
                     </button>
                     {selected && (
@@ -1620,6 +1627,7 @@ export default function WorkbenchPage() {
                       <span>
                         <strong>{tpl.name}</strong>
                         <small>{tpl.description.slice(0, 40)}</small>
+                        <CapabilityTags capabilities={tpl.defaultCapabilities} />
                       </span>
                     </button>
                     {selected && (
@@ -1701,4 +1709,30 @@ function deploymentTargetLabel(target: DeploymentTarget) {
   if (target === "container") return "容器化部署";
   if (target === "source_archive") return "源码包";
   return "静态站点部署";
+}
+
+function CapabilityTags({ capabilities }: { capabilities?: unknown[] }) {
+  const labels = capabilityLabels(capabilities).slice(0, 3);
+  if (labels.length === 0) return null;
+  return (
+    <span className="capabilityTags">
+      {labels.map((label) => (
+        <span key={label}>{label}</span>
+      ))}
+    </span>
+  );
+}
+
+function capabilityLabels(capabilities: unknown[] | undefined) {
+  if (!Array.isArray(capabilities)) return [];
+  return capabilities
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const name = (item as Record<string, unknown>).name;
+        return typeof name === "string" ? name.trim() : "";
+      }
+      return "";
+    })
+    .filter(Boolean);
 }

@@ -62,6 +62,7 @@ export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentIn
     provider: providerNames?.get(row.providerId) ?? "claude-code",
     isDefaultOrchestrator: Boolean(row.isDefaultOrchestrator),
     status: row.status,
+    capabilities: asArray(row.template?.defaultCapabilities),
     template: row.template ? mapTemplate(row.template, providerNames) : undefined,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),

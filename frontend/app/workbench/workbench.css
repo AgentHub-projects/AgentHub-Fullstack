@@ -317,6 +317,20 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.memberMeta {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.memberMeta > span:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .memberOrchTag {
   flex: 0 0 auto;
   border: 1px solid rgba(36, 87, 214, 0.18);
@@ -326,6 +340,28 @@ textarea:focus-visible {
   padding: 2px 7px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.capabilityTags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.capabilityTags > span {
+  max-width: 96px;
+  overflow: hidden;
+  border: 1px solid rgba(44, 109, 103, 0.16);
+  border-radius: 999px;
+  background: rgba(44, 109, 103, 0.07);
+  color: #2c6d67;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .addMemberRow {

@@ -157,6 +157,7 @@ const orchestrator: AgentInstanceDto = {
   provider: "claude-code",
   isDefaultOrchestrator: true,
   status: "enabled",
+  capabilities: ["orchestrate"],
   template: {
     id: 1,
     name: "Orchestrator",
