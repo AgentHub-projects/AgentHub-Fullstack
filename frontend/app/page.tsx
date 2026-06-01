@@ -179,6 +179,8 @@ export default function WorkbenchPage() {
     : null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
+  const activeRunInProgress = isRunning(latestRun?.status ?? "");
+  const memberMutationLocked = !sessionWritable || activeRunInProgress;
   const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
   const directAgentId = readDirectAgentId(activeSession);
@@ -262,6 +264,10 @@ export default function WorkbenchPage() {
       setActiveMentionIndex(0);
     }
   }, [activeMentionIndex, mentionCandidates.length]);
+
+  useEffect(() => {
+    if (memberMutationLocked) setContextMenu(null);
+  }, [memberMutationLocked]);
 
   async function checkAuth() {
     const result = await getAuthState();
@@ -611,7 +617,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleEditAgent(body: UpdateAgentRequest) {
-    if (!editTarget || !sessionWritable) return;
+    if (!editTarget || memberMutationLocked) return;
     const result = await updateAgent(editTarget.id, body);
     if (!result.ok) {
       setNotice(`编辑失败：${result.error}`);
@@ -624,7 +630,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleDeleteAgent() {
-    if (!deleteTarget || !sessionWritable) return;
+    if (!deleteTarget || memberMutationLocked) return;
     const result = await deleteAgent(deleteTarget.id);
     if (!result.ok) {
       setNotice(`删除失败：${result.error}`);
@@ -652,7 +658,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleInviteAgent() {
-    if (!activeSessionId || !sessionWritable) return;
+    if (!activeSessionId || memberMutationLocked) return;
     const selected = inviteSelection.filter((item) => item.templateId);
     if (selected.length === 0) {
       setNotice("请至少选择一个模板");
@@ -947,7 +953,7 @@ export default function WorkbenchPage() {
                     key={agent.id}
                     className="memberRow"
                     onContextMenu={(e) => {
-                      if (!sessionWritable || mode !== "group" || agent.id === orchestrator?.id) return;
+                      if (memberMutationLocked || mode !== "group" || agent.id === orchestrator?.id) return;
                       e.preventDefault();
                       setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
                     }}
@@ -968,7 +974,10 @@ export default function WorkbenchPage() {
                   <button
                     className="addMemberRow"
                     type="button"
+                    disabled={memberMutationLocked}
+                    title={activeRunInProgress ? "运行中不能修改成员" : "添加成员"}
                     onClick={() => {
+                      if (memberMutationLocked) return;
                       setInviteSelection([]);
                       setInviteQuery("");
                       setInviteDialogOpen(true);
@@ -1637,7 +1646,7 @@ export default function WorkbenchPage() {
         </div>
       )}
 
-      {contextMenu && (
+      {contextMenu && !memberMutationLocked && (
         <div
           className="contextMenuOverlay"
           role="presentation"
@@ -1730,7 +1739,8 @@ export default function WorkbenchPage() {
               <button
                 className="primaryButton"
                 type="button"
-                disabled={!sessionWritable || !editTarget.name.trim()}
+                disabled={memberMutationLocked || !editTarget.name.trim()}
+                title={activeRunInProgress ? "运行中不能修改成员" : "保存"}
                 onClick={() => handleEditAgent({
                   name: editTarget.name,
                   description: editTarget.description,
@@ -1835,7 +1845,13 @@ export default function WorkbenchPage() {
             </div>
             <footer>
               <button className="ghostButton" type="button" onClick={() => setInviteDialogOpen(false)}>取消</button>
-              <button className="primaryButton" type="button" disabled={!sessionWritable} onClick={() => void handleInviteAgent()}>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={memberMutationLocked}
+                title={activeRunInProgress ? "运行中不能修改成员" : "邀请加入"}
+                onClick={() => void handleInviteAgent()}
+              >
                 邀请加入
               </button>
             </footer>
@@ -1864,7 +1880,13 @@ export default function WorkbenchPage() {
               <button className="ghostButton" type="button" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
                 取消
               </button>
-              <button className="dangerButton" type="button" disabled={!sessionWritable} onClick={() => void handleDeleteAgent()}>
+              <button
+                className="dangerButton"
+                type="button"
+                disabled={memberMutationLocked}
+                title={activeRunInProgress ? "运行中不能修改成员" : "确认删除"}
+                onClick={() => void handleDeleteAgent()}
+              >
                 确认删除
               </button>
             </footer>
