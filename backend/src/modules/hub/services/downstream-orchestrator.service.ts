@@ -597,7 +597,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: {
         sessionId,
         agentId: { not: orchestratorAgentId },
-        participantRole: { not: "orchestrator" },
+        participantRole: "member",
       },
       include: {
         agent: { include: { template: true } },

@@ -51,7 +51,7 @@ export class HubSessionService {
       include: {
         runs: { orderBy: { createdAt: "desc" }, take: 1 },
         messages: { orderBy: { createdAt: "desc" }, take: 5, select: { contentText: true } },
-        participants: { include: { agent: true } },
+        participants: { where: { participantRole: { not: "deleted" } }, include: { agent: true } },
       },
       orderBy: { updatedAt: "desc" },
     });

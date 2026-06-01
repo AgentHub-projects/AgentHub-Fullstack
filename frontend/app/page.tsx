@@ -528,6 +528,17 @@ export default function WorkbenchPage() {
       return;
     }
     setAgents((current) => current.filter((agent) => agent.id !== deleteTarget.id));
+    setDetail((current) => {
+      if (!current) return current;
+      const memberAgentIds = readMemberAgentIds(current.session).filter((id) => id !== deleteTarget.id);
+      return {
+        ...current,
+        session: {
+          ...current.session,
+          metadata: { ...current.session.metadata, memberAgentIds },
+        },
+      };
+    });
     setDeleteConfirmOpen(false);
     setDeleteTarget(null);
     setNotice(`Agent "${deleteTarget.name}" 已移除`);
@@ -694,6 +705,7 @@ export default function WorkbenchPage() {
                     key={agent.id}
                     className="memberRow"
                     onContextMenu={(e) => {
+                      if (mode !== "group" || agent.id === orchestrator?.id) return;
                       e.preventDefault();
                       setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
                     }}

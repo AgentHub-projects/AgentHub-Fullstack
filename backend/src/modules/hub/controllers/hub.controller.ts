@@ -187,7 +187,15 @@ export class HubAgentController {
     if (!agent) {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
+    const links = await this.prisma.sessionAgent.findMany({ where: { agentId } });
     await this.agents.deleteAgent(agentId);
+    for (const link of links) {
+      const session = await this.prisma.session.findUnique({
+        where: { id: link.sessionId },
+        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+      });
+      if (session) this.gateway.emitSession(mapSession(session));
+    }
     return { ok: true };
   }
 }

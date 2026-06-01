@@ -54,6 +54,7 @@ export class AgentRegistryService implements OnModuleInit {
   async listAgents(): Promise<AgentInstanceDto[]> {
     const [items, providerNames] = await Promise.all([
       this.prisma.agent.findMany({
+        where: { status: { not: "disabled" } },
         include: { template: true },
         orderBy: [{ isDefaultOrchestrator: "desc" }, { createdAt: "asc" }],
       }),
@@ -192,7 +193,35 @@ export class AgentRegistryService implements OnModuleInit {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
 
-    await this.prisma.agent.delete({ where: { id } });
+    const links = await this.prisma.sessionAgent.findMany({ where: { agentId: id } });
+    if (links.some((link) => link.participantRole === "orchestrator" || link.participantRole === "direct")) {
+      throw new Error("Cannot delete direct agent or orchestrator");
+    }
+
+    await this.prisma.agent.update({
+      where: { id },
+      data: { status: "disabled" },
+    });
+    await this.prisma.sessionAgent.updateMany({
+      where: { agentId: id },
+      data: { participantRole: "deleted", source: "manual_delete", lastActiveAt: new Date() },
+    });
+
+    for (const link of links) {
+      const session = await this.prisma.session.findUnique({
+        where: { id: link.sessionId },
+        select: { metadata: true },
+      });
+      if (!session) continue;
+      const metadata = asObject(session.metadata);
+      const memberAgentIds = Array.isArray(metadata.memberAgentIds)
+        ? metadata.memberAgentIds.filter((item) => item !== id)
+        : [];
+      await this.prisma.session.update({
+        where: { id: link.sessionId },
+        data: { metadata: { ...metadata, memberAgentIds } as any, updatedAt: new Date() },
+      });
+    }
   }
 
   private async nextAgentName(baseName: string): Promise<string> {
