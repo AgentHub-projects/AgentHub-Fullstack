@@ -1018,6 +1018,86 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.deployStatusPart {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.deployStatusIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.deployStatusPart.running .deployStatusIcon,
+.deployStatusPart.queued .deployStatusIcon {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.deployStatusPart.completed .deployStatusIcon {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.deployStatusPart.failed .deployStatusIcon {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.deployStatusPart > div:nth-child(2) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.deployStatusPart strong,
+.deployStatusPart span,
+.deployStatusPart a,
+.deployStatusPart small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deployStatusPart span,
+.deployStatusPart small {
+  color: var(--muted);
+}
+
+.deployStatusPart a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.deployStatusPart button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.deployStatusPart button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .markdownTableWrap {
   min-width: 0;
   overflow: auto;

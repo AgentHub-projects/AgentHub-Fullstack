@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
 import { mapDeployment, mapMessage, mapSession, asObject } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -50,9 +51,10 @@ export class DeploymentService {
         status: "queued",
       },
     });
+    const syncedMessage = await this.syncDeploymentMessage(deployment.id);
     this.gateway.emitSession(mapSession(session));
     void this.runDeployJob(deployment.id);
-    return { deployment: mapDeployment(deployment), message: mapMessage(message) };
+    return { deployment: mapDeployment(deployment), message: syncedMessage ?? mapMessage(message) };
   }
 
   private async runDeployJob(deploymentId: string) {
@@ -81,9 +83,10 @@ export class DeploymentService {
       if (!response.ok) throw new Error(`Deploy service HTTP ${response.status}`);
       const payload = (await response.json()) as Record<string, unknown>;
       const jobId = stringValue(payload.jobId) ?? stringValue(payload.id);
-      await this.prisma.deployment.update({
-        where: { id: deploymentId },
-        data: { status: "running", deployServiceJobId: jobId },
+      await this.updateDeployment(deploymentId, {
+        status: "running",
+        deployServiceJobId: jobId,
+        metadata: { jobId } as any,
       });
       if (jobId) await this.pollJob(deploymentId, jobId, Date.now());
     } catch (error) {
@@ -106,9 +109,11 @@ export class DeploymentService {
       const status = stringValue(payload.status) ?? "running";
       const url = stringValue(payload.url) ?? stringValue(payload.previewUrl);
       if (status === "completed" || status === "ready" || status === "success") {
-        await this.prisma.deployment.update({
-          where: { id: deploymentId },
-          data: { status: "completed", url, completedAt: new Date(), metadata: payload as any },
+        await this.updateDeployment(deploymentId, {
+          status: "completed",
+          url,
+          completedAt: new Date(),
+          metadata: payload as any,
         });
         return;
       }
@@ -116,9 +121,9 @@ export class DeploymentService {
         await this.markFailed(deploymentId, stringValue(payload.error) ?? "DEPLOY_FAILED");
         return;
       }
-      await this.prisma.deployment.update({
-        where: { id: deploymentId },
-        data: { status: "running", metadata: payload as any },
+      await this.updateDeployment(deploymentId, {
+        status: "running",
+        metadata: payload as any,
       });
     } catch (error) {
       await this.markFailed(deploymentId, error instanceof Error ? error.message : String(error));
@@ -127,10 +132,63 @@ export class DeploymentService {
     setTimeout(() => void this.pollJob(deploymentId, jobId, startedAt), POLL_INTERVAL_MS);
   }
 
-  private async markFailed(deploymentId: string, message: string) {
-    await this.prisma.deployment.update({
+  private async updateDeployment(deploymentId: string, data: Prisma.DeploymentUpdateArgs["data"]) {
+    const deployment = await this.prisma.deployment.update({
       where: { id: deploymentId },
-      data: { status: "failed", errorMessage: message, completedAt: new Date() },
+      data,
+    });
+    await this.syncDeploymentMessage(deployment.id);
+    return deployment;
+  }
+
+  private async syncDeploymentMessage(deploymentId: string) {
+    const deployment = await this.prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      include: { project: true },
+    });
+    if (!deployment?.triggerMessageId) return null;
+    const existing = await this.prisma.message.findUnique({ where: { id: deployment.triggerMessageId } });
+    if (!existing) return null;
+    const contentJson = asObject(existing.contentJson);
+    const statusText = deploymentStatusText(deployment.status);
+    const contentText = `${statusText}：${deployment.project.name}@${deployment.commitSha.slice(0, 12)}`;
+    const message = await this.prisma.message.update({
+      where: { id: existing.id },
+      data: {
+        contentText,
+        contentJson: {
+          ...contentJson,
+          parts: [
+            {
+              id: "deploy_status",
+              type: "deploy_status",
+              title: statusText,
+              url: deployment.url,
+              text: deployment.errorMessage ?? deployment.url ?? "",
+              metadata: {
+                deploymentId: deployment.id,
+                projectId: deployment.projectId,
+                projectName: deployment.project.name,
+                commitSha: deployment.commitSha,
+                status: deployment.status,
+                jobId: deployment.deployServiceJobId,
+                errorMessage: deployment.errorMessage,
+              },
+            },
+          ],
+        } as any,
+      },
+    });
+    const dto = mapMessage(message);
+    this.gateway.emitMessage(dto);
+    return dto;
+  }
+
+  private async markFailed(deploymentId: string, message: string) {
+    await this.updateDeployment(deploymentId, {
+      status: "failed",
+      errorMessage: message,
+      completedAt: new Date(),
     });
   }
 }
@@ -143,4 +201,11 @@ function deployHeaders() {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function deploymentStatusText(status: string) {
+  if (status === "completed") return "部署完成";
+  if (status === "failed") return "部署失败";
+  if (status === "running") return "部署中";
+  return "部署排队";
 }

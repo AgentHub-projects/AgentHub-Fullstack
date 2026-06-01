@@ -317,6 +317,7 @@ export function connectHubSocket(
     onState: (state: SocketState) => void;
     onEvent: (event: HubEventDto) => void;
     onSession: (session: HubSessionDto) => void;
+    onMessage?: (message: HubMessageDto) => void;
     onArtifact: (artifact: HubArtifactDto) => void;
     onFileChange: (fileChange: HubFileChangeDto) => void;
   },
@@ -345,6 +346,9 @@ export function connectHubSocket(
   });
   socket.on("hub:session", (envelope: FrontendRealtimeEnvelope) => {
     if (envelope.type === "session") handlers.onSession(envelope.payload as HubSessionDto);
+  });
+  socket.on("hub:message", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "message") handlers.onMessage?.(envelope.payload as HubMessageDto);
   });
   socket.on("hub:artifact", (envelope: FrontendRealtimeEnvelope) => {
     if (envelope.type === "artifact") handlers.onArtifact(envelope.payload as HubArtifactDto);

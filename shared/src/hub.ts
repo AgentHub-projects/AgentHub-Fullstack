@@ -401,11 +401,12 @@ export interface FrontendRealtimeSubscribe {
 }
 
 export interface FrontendRealtimeEnvelope {
-  type: "event" | "session" | "artifact" | "file_change" | "context";
+  type: "event" | "session" | "message" | "artifact" | "file_change" | "context";
   sessionId: string;
   payload:
     | HubEventDto
     | HubSessionDto
+    | HubMessageDto
     | HubArtifactDto
     | HubFileChangeDto
     | HubContextSnapshotDto;

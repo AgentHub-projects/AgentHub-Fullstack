@@ -1,6 +1,14 @@
 import type React from "react";
 import type { HubMessagePartDto } from "@agenthub/shared";
-import { CopyOutlined, PushpinFilled, PushpinOutlined } from "@ant-design/icons";
+import {
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  CopyOutlined,
+  LoadingOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+  RocketOutlined,
+} from "@ant-design/icons";
 import { parseMarkdownBlocks, type MarkdownBlock } from "../../lib/workbench/markdown";
 
 export function RichText({ text }: { text: string }) {
@@ -46,6 +54,9 @@ function renderMessagePart(
       />,
     ];
   }
+  if (part.type === "deploy_status") {
+    return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type !== "text") {
     return [
       <div className="messageCardPart" key={part.id || index}>
@@ -64,6 +75,43 @@ function renderMessagePart(
   }
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+  );
+}
+
+function DeployStatusPart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  const status = stringMetadata(part.metadata, "status") ?? "queued";
+  const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
+  const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
+  const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
+  const shortSha = commitSha ? commitSha.slice(0, 12) : "";
+  return (
+    <div className={`deployStatusPart ${deployStatusClass(status)}`}>
+      <div className="deployStatusIcon">{deployStatusIcon(status)}</div>
+      <div>
+        <strong>{part.title ?? "部署状态"}</strong>
+        <span>
+          {projectName}
+          {shortSha ? ` · ${shortSha}` : ""}
+        </span>
+        {part.url && (
+          <a href={part.url} target="_blank" rel="noreferrer">
+            {part.url}
+          </a>
+        )}
+        {status === "failed" && errorMessage && <small>{errorMessage}</small>}
+      </div>
+      {onPinPart && (
+        <button type="button" title={part.pinned ? "取消 Pin 部署状态" : "Pin 部署状态"} onClick={() => onPinPart(part)}>
+          {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -138,4 +186,23 @@ function CodeBlock({
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function deployStatusClass(status: string) {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "running") return "running";
+  return "queued";
+}
+
+function deployStatusIcon(status: string) {
+  if (status === "completed") return <CheckCircleOutlined />;
+  if (status === "failed") return <CloseCircleOutlined />;
+  if (status === "running") return <LoadingOutlined />;
+  return <RocketOutlined />;
 }

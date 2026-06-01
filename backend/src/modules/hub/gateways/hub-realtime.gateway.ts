@@ -15,6 +15,7 @@ import type {
   HubContextSnapshotDto,
   HubEventDto,
   HubFileChangeDto,
+  HubMessageDto,
   HubSessionDto,
 } from "@agenthub/shared";
 import { isCookieHeaderAuthenticated } from "../auth/auth.utils";
@@ -98,6 +99,15 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
       payload: session,
     };
     this.server.to(sessionRoom(session.id)).emit("hub:session", envelope);
+  }
+
+  emitMessage(message: HubMessageDto) {
+    const envelope: FrontendRealtimeEnvelope = {
+      type: "message",
+      sessionId: message.sessionId,
+      payload: message,
+    };
+    this.server.to(sessionRoom(message.sessionId)).emit("hub:message", envelope);
   }
 
   emitArtifact(sessionId: string, artifact: HubArtifactDto) {

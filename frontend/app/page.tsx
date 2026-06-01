@@ -212,6 +212,11 @@ export default function WorkbenchPage() {
         setSessions((current) => upsertById(current, session).sort(sortSession));
         setDetail((current) => (current?.session.id === session.id ? { ...current, session } : current));
       },
+      onMessage: (message) => {
+        setDetail((current) =>
+          current ? { ...current, messages: upsertById(current.messages, message).sort(sortMessage) } : current,
+        );
+      },
       onArtifact: (artifact) => {
         setDetail((current) =>
           current ? { ...current, artifacts: upsertById(current.artifacts, artifact).sort(sortArtifact) } : current,
