@@ -154,7 +154,15 @@ export interface HubMessageDto {
   updatedAt: ISODateString;
 }
 
-export type HubMessagePartType = "text" | "code" | "image" | "file" | "link_preview" | "diff" | "deploy_status";
+export type HubMessagePartType =
+  | "text"
+  | "code"
+  | "image"
+  | "file"
+  | "link_preview"
+  | "diff"
+  | "artifact"
+  | "deploy_status";
 
 export interface HubMessagePartDto {
   id: string;

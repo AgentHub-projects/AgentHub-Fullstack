@@ -1127,6 +1127,117 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.artifactMessagePart {
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.artifactMessageTop {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 8px;
+}
+
+.artifactMessageIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--brand);
+}
+
+.artifactMessageTop > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.artifactMessageTop strong,
+.artifactMessageTop small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifactMessageTop small,
+.artifactMessageHint {
+  color: var(--muted);
+}
+
+.artifactMessageActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.artifactMessageActions a,
+.artifactMessageActions button {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.artifactMessageActions a:hover,
+.artifactMessageActions button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.artifactMessageMedia,
+.artifactMessageText,
+.artifactMessageHint {
+  margin: 0 8px 8px;
+}
+
+.artifactMessageMedia {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.artifactMessageMedia img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.artifactMessageFrame {
+  width: calc(100% - 16px);
+  height: 220px;
+  margin: 0 8px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.artifactMessageText {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 8px;
+}
+
 .deployStatusPart {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;

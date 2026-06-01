@@ -1,0 +1,180 @@
+import { describe, expect, it, vi } from "vitest";
+import { HubEventService } from "../src/modules/hub/services/event.service";
+
+const now = new Date("2026-06-02T09:00:00.000Z");
+
+describe("HubEventService artifact message parts", () => {
+  it("buffers artifact cards until the speaker assistant message is completed", async () => {
+    const { service, prisma, artifacts } = createService();
+    artifacts.upsertArtifact.mockResolvedValue(artifactRow({ id: "artifact-1", title: "预览页" }));
+    prisma.message.findFirst.mockResolvedValue(null);
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "artifact.upsert",
+      speakerAgentId: 2,
+      payload: { artifactKey: "preview", title: "预览页", kind: "html" },
+    });
+
+    prisma.message.create.mockImplementation(async ({ data }: any) => messageRow({ ...data, id: "message-1" }));
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "message.completed",
+      speakerAgentId: 2,
+      payload: { text: "页面已经生成" },
+    });
+
+    const createData = prisma.message.create.mock.calls[0]?.[0]?.data;
+    expect(createData.contentJson.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: "页面已经生成" }),
+        expect.objectContaining({
+          id: "artifact_artifact-1",
+          type: "artifact",
+          title: "预览页",
+          metadata: expect.objectContaining({ artifactId: "artifact-1", kind: "html" }),
+        }),
+      ]),
+    );
+    expect(prisma.agentRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run-1" },
+      data: { assistantMessageId: "message-1" },
+    }));
+  });
+
+  it("adds artifact cards to an existing speaker assistant message", async () => {
+    const { service, prisma, artifacts, gateway } = createService();
+    const existing = messageRow({
+      id: "message-1",
+      contentText: "先前回复",
+      contentJson: { parts: [{ id: "part_1", type: "text", text: "先前回复" }] },
+    });
+    artifacts.completeArtifact.mockResolvedValue(artifactRow({
+      id: "artifact-2",
+      title: "结果图",
+      kind: "image",
+      mimeType: "image/png",
+      textContent: null,
+    }));
+    prisma.message.findFirst.mockResolvedValue(existing);
+    prisma.message.update.mockImplementation(async ({ data }: any) => messageRow({ ...existing, ...data }));
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "artifact.complete",
+      speakerAgentId: 2,
+      payload: { artifactKey: "result-image" },
+    });
+
+    const updateData = prisma.message.update.mock.calls[0]?.[0]?.data;
+    expect(updateData.contentJson.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "part_1", type: "text" }),
+        expect.objectContaining({
+          id: "artifact_artifact-2",
+          type: "artifact",
+          title: "结果图",
+          metadata: expect.objectContaining({ artifactId: "artifact-2", kind: "image" }),
+        }),
+      ]),
+    );
+    expect(gateway.emitMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "message-1" }));
+  });
+});
+
+function createService() {
+  let seq = 0n;
+  const prisma = {
+    agentRun: {
+      findUnique: vi.fn().mockResolvedValue({ status: "running", assistantMessageId: null }),
+      update: vi.fn(),
+    },
+    agent: {
+      findUnique: vi.fn().mockResolvedValue({ id: 2, name: "frontend-agent" }),
+    },
+    agentEvent: {
+      aggregate: vi.fn(async () => ({ _max: { seq } })),
+      create: vi.fn(async ({ data }: any) => {
+        seq = BigInt(data.seq);
+        return {
+          id: `event-${seq}`,
+          persistedAt: now,
+          ...data,
+        };
+      }),
+    },
+    message: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+  };
+  const gateway = {
+    emitEvent: vi.fn(),
+    emitArtifact: vi.fn(),
+    emitMessage: vi.fn(),
+  };
+  const artifacts = {
+    upsertArtifact: vi.fn(),
+    storeChunk: vi.fn(),
+    completeArtifact: vi.fn(),
+  };
+  const context = {
+    estimateTokens: vi.fn((text: string) => text.length),
+    recordContextItem: vi.fn(),
+  };
+  return {
+    prisma,
+    gateway,
+    artifacts,
+    context,
+    service: new HubEventService(prisma as any, gateway as any, artifacts as any, context as any),
+  };
+}
+
+function artifactRow(overrides: Record<string, any> = {}) {
+  return {
+    id: "artifact-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    producingEventId: "event-1",
+    artifactKey: "preview",
+    kind: "html",
+    title: "预览页",
+    mimeType: "text/html; charset=utf-8",
+    storageKind: "inline_text",
+    storageUri: null,
+    textContent: "<main>preview</main>",
+    sha256: "sha",
+    sizeBytes: 20,
+    version: 1,
+    final: false,
+    metadata: {},
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    ...overrides,
+  };
+}
+
+function messageRow(overrides: Record<string, any> = {}) {
+  return {
+    id: "message-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    role: "assistant",
+    agentId: 2,
+    parentMessageId: null,
+    contentText: "",
+    contentJson: {},
+    tokenCount: 0,
+    status: "completed",
+    isPinned: false,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}

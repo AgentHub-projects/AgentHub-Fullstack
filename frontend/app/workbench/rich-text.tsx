@@ -4,11 +4,14 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CopyOutlined,
+  FileDoneOutlined,
+  LinkOutlined,
   LoadingOutlined,
   PushpinFilled,
   PushpinOutlined,
   RocketOutlined,
 } from "@ant-design/icons";
+import { artifactContentUrl } from "../../lib/agenthub-api";
 import { parseMarkdownBlocks, type MarkdownBlock } from "../../lib/workbench/markdown";
 
 export function RichText({ text }: { text: string }) {
@@ -60,6 +63,9 @@ function renderMessagePart(
   if (part.type === "link_preview") {
     return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
+  if (part.type === "artifact") {
+    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type !== "text") {
     return [
       <div className="messageCardPart" key={part.id || index}>
@@ -79,6 +85,77 @@ function renderMessagePart(
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
   );
+}
+
+function ArtifactPart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  const artifactId = stringMetadata(part.metadata, "artifactId");
+  const kind = stringMetadata(part.metadata, "kind") ?? "artifact";
+  const mimeType = stringMetadata(part.metadata, "mimeType") ?? "application/octet-stream";
+  const version = numberMetadata(part.metadata, "version");
+  const final = booleanMetadata(part.metadata, "final");
+  const contentUrl = artifactId ? artifactContentUrl(artifactId) : part.url;
+  const title = part.title ?? "Artifact";
+  return (
+    <div className={`artifactMessagePart ${kind}`}>
+      <div className="artifactMessageTop">
+        <span className="artifactMessageIcon"><FileDoneOutlined /></span>
+        <div>
+          <strong>{title}</strong>
+          <small>
+            {kind} · {mimeType}
+            {version ? ` · v${version}` : ""}
+            {final ? " · final" : ""}
+          </small>
+        </div>
+        <div className="artifactMessageActions">
+          {contentUrl && (
+            <a title="打开预览" href={contentUrl} target="_blank" rel="noreferrer">
+              <LinkOutlined />
+            </a>
+          )}
+          {onPinPart && (
+            <button type="button" title={part.pinned ? "取消 Pin 这个 artifact" : "Pin 这个 artifact"} onClick={() => onPinPart(part)}>
+              {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </button>
+          )}
+        </div>
+      </div>
+      <ArtifactInlinePreview kind={kind} title={title} contentUrl={contentUrl} text={part.text} />
+    </div>
+  );
+}
+
+function ArtifactInlinePreview({
+  kind,
+  title,
+  contentUrl,
+  text,
+}: {
+  kind: string;
+  title: string;
+  contentUrl?: string;
+  text?: string;
+}) {
+  if (kind === "image" && contentUrl) {
+    return (
+      <div className="artifactMessageMedia">
+        <img alt={title} src={contentUrl} />
+      </div>
+    );
+  }
+  if (kind === "html" && contentUrl) {
+    return <iframe className="artifactMessageFrame" title={title} src={contentUrl} sandbox="" />;
+  }
+  if (text?.trim()) {
+    return <div className="artifactMessageText"><RichText text={text} /></div>;
+  }
+  return <small className="artifactMessageHint">产物已保存，可打开预览或在右侧 Artifacts 面板展开。</small>;
 }
 
 function LinkPreviewPart({
@@ -231,6 +308,15 @@ function copyText(text: string) {
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function numberMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function booleanMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  return metadata?.[key] === true;
 }
 
 function deployStatusClass(status: string) {

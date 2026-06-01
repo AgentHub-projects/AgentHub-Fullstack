@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { HubEventDto, HubEventType } from "@agenthub/shared";
+import type { HubArtifactDto, HubEventDto, HubEventType, HubMessagePartDto } from "@agenthub/shared";
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubContextService } from "./context.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -16,10 +16,12 @@ type MessageBuffer = {
   payload: Record<string, unknown>;
   startedAt: Date;
 };
+const RUN_ARTIFACT_PARTS_KEY = "__run_artifacts__";
 
 @Injectable()
 export class HubEventService {
   private readonly messageBuffers = new Map<string, Map<string, MessageBuffer>>();
+  private readonly artifactPartBuffers = new Map<string, Map<string, HubMessagePartDto[]>>();
   // key: runId -> Map<speakerAgentId, MessageBuffer>
 
   constructor(
@@ -138,6 +140,7 @@ export class HubEventService {
       });
       if (artifact) {
         this.gateway.emitArtifact(event.sessionId, artifact);
+        await this.attachArtifactPart(event, artifact);
       }
     }
 
@@ -171,6 +174,7 @@ export class HubEventService {
           importance: 30,
           metadata: { runId: event.runId, kind: artifact.kind },
         });
+        await this.attachArtifactPart(event, artifact);
       }
     }
 
@@ -247,11 +251,16 @@ export class HubEventService {
         role: "assistant",
         agentId: speakerAgentId,
         contentText: fullText,
-        contentJson: messageJsonWithParts(event.payload ?? {}, fullText) as any,
+        contentJson: messageJsonWithParts(
+          event.payload ?? {},
+          fullText,
+          this.takeBufferedArtifactParts(event.runId, speakerKey),
+        ) as any,
         tokenCount: this.context.estimateTokens(fullText),
         status: "completed",
       },
     });
+    this.gateway.emitMessage(mapMessage(message));
 
     await this.prisma.agentRun.update({
       where: { id: event.runId },
@@ -267,6 +276,70 @@ export class HubEventService {
       importance: 10,
       metadata: { runId: event.runId, agentId: speakerAgentId },
     });
+  }
+
+  private async attachArtifactPart(event: HubEventDto, artifact: HubArtifactDto) {
+    const part = artifactMessagePart(artifact);
+    const message = await this.findAssistantMessageForArtifact(event);
+    if (!message) {
+      this.bufferArtifactPart(event.runId, artifactBufferKey(event), part);
+      return;
+    }
+    const contentJson = asObject(message.contentJson);
+    const parts: Array<{ id?: string }> = Array.isArray(contentJson.parts)
+      ? contentJson.parts.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+      : messageJsonWithParts(contentJson, message.contentText ?? "").parts;
+    const nextParts = upsertPart(parts, part);
+    const updated = await this.prisma.message.update({
+      where: { id: message.id },
+      data: { contentJson: { ...contentJson, parts: nextParts } as any, updatedAt: new Date() },
+    });
+    this.gateway.emitMessage(mapMessage(updated));
+  }
+
+  private async findAssistantMessageForArtifact(event: HubEventDto) {
+    if (event.speakerAgentId) {
+      return this.prisma.message.findFirst({
+        where: {
+          sessionId: event.sessionId,
+          runId: event.runId,
+          role: "assistant",
+          agentId: event.speakerAgentId,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+
+    const run = await this.prisma.agentRun.findUnique({
+      where: { id: event.runId },
+      select: { assistantMessageId: true },
+    });
+    if (run?.assistantMessageId) {
+      return this.prisma.message.findUnique({ where: { id: run.assistantMessageId } });
+    }
+    return this.prisma.message.findFirst({
+      where: { sessionId: event.sessionId, runId: event.runId, role: "assistant" },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  private bufferArtifactPart(runId: string, key: string, part: HubMessagePartDto) {
+    let runParts = this.artifactPartBuffers.get(runId);
+    if (!runParts) {
+      runParts = new Map();
+      this.artifactPartBuffers.set(runId, runParts);
+    }
+    runParts.set(key, upsertPart(runParts.get(key) ?? [], part));
+  }
+
+  private takeBufferedArtifactParts(runId: string, speakerKey: string) {
+    const runParts = this.artifactPartBuffers.get(runId);
+    if (!runParts) return [];
+    const parts = [...(runParts.get(speakerKey) ?? []), ...(runParts.get(RUN_ARTIFACT_PARTS_KEY) ?? [])];
+    runParts.delete(speakerKey);
+    runParts.delete(RUN_ARTIFACT_PARTS_KEY);
+    if (runParts.size === 0) this.artifactPartBuffers.delete(runId);
+    return parts;
   }
 
   private async persistFileChange(event: HubEventDto) {
@@ -324,6 +397,42 @@ function stringValue(value: unknown): string | undefined {
 
 function speakerBufferKey(event: HubEventDto): string {
   return String(event.speakerAgentId ?? event.speakerName ?? stringValue(event.payload.speaker) ?? "orchestrator");
+}
+
+function artifactBufferKey(event: HubEventDto): string {
+  return event.speakerAgentId || event.speakerName || event.payload.speaker ? speakerBufferKey(event) : RUN_ARTIFACT_PARTS_KEY;
+}
+
+function artifactMessagePart(artifact: HubArtifactDto): HubMessagePartDto {
+  return {
+    id: `artifact_${artifact.id}`,
+    type: "artifact",
+    title: artifact.title,
+    text: artifactTextPreview(artifact),
+    metadata: {
+      artifactId: artifact.id,
+      artifactKey: artifact.artifactKey,
+      kind: artifact.kind,
+      mimeType: artifact.mimeType,
+      storageKind: artifact.storageKind,
+      final: artifact.final,
+      version: artifact.version,
+      sizeBytes: artifact.sizeBytes,
+      updatedAt: artifact.updatedAt,
+    },
+  };
+}
+
+function artifactTextPreview(artifact: HubArtifactDto) {
+  const text = artifact.textContent?.trim();
+  if (!text) return undefined;
+  return text.length > 1200 ? `${text.slice(0, 1200)}\n...` : text;
+}
+
+function upsertPart<T extends { id?: string }>(parts: T[], part: HubMessagePartDto): Array<T | HubMessagePartDto> {
+  const next = parts.filter((item) => item.id !== part.id);
+  next.push(part as T & HubMessagePartDto);
+  return next;
 }
 
 function normalizeChangeType(value: string) {
