@@ -24,6 +24,7 @@ import {
 } from "../mappers/hub.mappers";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
+import { messageJsonWithParts } from "../utils/message-parts";
 
 @Injectable()
 export class HubSessionService {
@@ -318,7 +319,7 @@ export class HubSessionService {
         role: "user",
         parentMessageId: input.parentMessageId,
         contentText: text,
-        contentJson: { mentionedAgentIds: mentionedAgents.map((agent) => agent.id) },
+        contentJson: messageJsonWithParts({ mentionedAgentIds: mentionedAgents.map((agent) => agent.id) }, text) as any,
         tokenCount: this.context.estimateTokens(text),
       },
     });

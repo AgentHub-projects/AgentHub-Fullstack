@@ -7,6 +7,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CodeOutlined,
+  CopyOutlined,
   FileDoneOutlined,
   LoadingOutlined,
   MessageOutlined,
@@ -22,7 +23,7 @@ import {
   runStageLabel,
 } from "../../lib/workbench/timeline";
 import { agentColor, formatElapsed, formatTime, initials, isRunning } from "../../lib/workbench/format";
-import { RichText } from "./rich-text";
+import { MessageParts, RichText } from "./rich-text";
 
 export function TimelineMessage({
   message,
@@ -89,8 +90,11 @@ function UserMessage({ message, onPin }: { message: HubMessageDto; onPin: (messa
           <button type="button" title={message.isPinned ? "取消 Pin" : "Pin 到上下文"} onClick={() => onPin(message)}>
             {message.isPinned ? <PushpinFilled /> : <PushpinOutlined />}
           </button>
+          <button type="button" title="复制消息" onClick={() => copyText(message.contentText)}>
+            <CopyOutlined />
+          </button>
         </div>
-        <RichText text={message.contentText} />
+        <MessageParts parts={message.parts} fallbackText={message.contentText} />
       </div>
     </article>
   );
@@ -108,8 +112,11 @@ function AgentReplyBlock({ block }: { block: AgentReplyBlockModel }) {
           <span>{block.name} · {formatTime(block.timestamp)}</span>
           {streaming && <small className="statusTag">生成中...</small>}
           {block.status === "failed" && <small className="statusTag error">失败</small>}
+          <button type="button" title="复制消息" onClick={() => copyText(block.text)}>
+            <CopyOutlined />
+          </button>
         </div>
-        <RichText text={block.text} />
+        {block.parts?.length ? <MessageParts parts={block.parts} fallbackText={block.text} /> : <RichText text={block.text} />}
       </div>
     </article>
   );
@@ -199,4 +206,8 @@ function activityTitle(event: HubEventDto) {
   if (event.eventType === "run.failed") return "Run 失败";
   if (event.eventType === "run.cancelled") return "Run 已取消";
   return payloadString(event.payload, "message") ?? payloadString(event.payload, "status") ?? event.eventType;
+}
+
+function copyText(text: string) {
+  void navigator.clipboard?.writeText(text);
 }

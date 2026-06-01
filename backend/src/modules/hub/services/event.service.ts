@@ -5,6 +5,7 @@ import { HubContextService } from "./context.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
+import { messageJsonWithParts } from "../utils/message-parts";
 
 // In-memory buffer for streaming messages (dual-track: real-time push + buffer for persistence)
 type MessageBuffer = {
@@ -213,7 +214,7 @@ export class HubEventService {
         role: "assistant",
         agentId: speakerAgentId,
         contentText: fullText,
-        contentJson: (event.payload ?? {}) as any,
+        contentJson: messageJsonWithParts(event.payload ?? {}, fullText) as any,
         tokenCount: this.context.estimateTokens(fullText),
         status: "completed",
       },

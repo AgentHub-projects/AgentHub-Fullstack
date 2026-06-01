@@ -6,6 +6,7 @@ import type {
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
+  HubMessagePartDto,
   HubRunDto,
   HubSessionDto,
   LongTermSummaryDto,
@@ -79,6 +80,8 @@ export function mapSession(row: Row): HubSessionDto {
 }
 
 export function mapMessage(row: Row): HubMessageDto {
+  const contentJson = asObject(row.contentJson);
+  const contentText = row.contentText ?? "";
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -87,13 +90,38 @@ export function mapMessage(row: Row): HubMessageDto {
     agentId: row.agentId ?? null,
     agentName: row.agent?.name ?? null,
     parentMessageId: row.parentMessageId ?? null,
-    contentText: row.contentText ?? "",
-    contentJson: asObject(row.contentJson),
+    contentText,
+    contentJson,
+    parts: messageParts(contentJson, contentText),
     tokenCount: row.tokenCount ?? 0,
     status: row.status ?? "completed",
     isPinned: Boolean(row.isPinned),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+  };
+}
+
+function messageParts(contentJson: Record<string, unknown>, contentText: string): HubMessagePartDto[] {
+  if (Array.isArray(contentJson.parts)) {
+    return contentJson.parts
+      .map((item, index) => normalizeMessagePart(item, index))
+      .filter((item): item is HubMessagePartDto => Boolean(item));
+  }
+  return [{ id: "part_1", type: "text", text: contentText }];
+}
+
+function normalizeMessagePart(value: unknown, index: number): HubMessagePartDto | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const type = typeof row.type === "string" ? row.type : "text";
+  return {
+    id: typeof row.id === "string" ? row.id : `part_${index + 1}`,
+    type,
+    text: typeof row.text === "string" ? row.text : undefined,
+    language: typeof row.language === "string" ? row.language : undefined,
+    title: typeof row.title === "string" ? row.title : undefined,
+    url: typeof row.url === "string" ? row.url : undefined,
+    metadata: asObject(row.metadata),
   };
 }
 

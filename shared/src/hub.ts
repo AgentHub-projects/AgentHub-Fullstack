@@ -95,11 +95,24 @@ export interface HubMessageDto {
   parentMessageId?: string | null;
   contentText: string;
   contentJson: Record<string, unknown>;
+  parts: HubMessagePartDto[];
   tokenCount: number;
   status: HubMessageStatus;
   isPinned: boolean;
   createdAt: ISODateString;
   updatedAt: ISODateString;
+}
+
+export type HubMessagePartType = "text" | "code" | "image" | "file" | "link_preview" | "diff" | "deploy_status";
+
+export interface HubMessagePartDto {
+  id: string;
+  type: HubMessagePartType | string;
+  text?: string;
+  language?: string;
+  title?: string;
+  url?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface HubRunDto {

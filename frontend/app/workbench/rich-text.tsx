@@ -1,4 +1,6 @@
 import type React from "react";
+import type { HubMessagePartDto } from "@agenthub/shared";
+import { CopyOutlined } from "@ant-design/icons";
 import { parseMarkdownBlocks, type MarkdownBlock } from "../../lib/workbench/markdown";
 
 export function RichText({ text }: { text: string }) {
@@ -11,31 +13,52 @@ export function RichText({ text }: { text: string }) {
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock, index: number): React.ReactNode {
+export function MessageParts({ parts, fallbackText }: { parts?: HubMessagePartDto[]; fallbackText: string }) {
+  if (!parts?.length) return <RichText text={fallbackText} />;
+  return (
+    <div className="richText">
+      {parts.flatMap((part, index) => renderMessagePart(part, index))}
+    </div>
+  );
+}
+
+function renderMessagePart(part: HubMessagePartDto, index: number): React.ReactNode[] {
+  if (part.type === "code") {
+    return [<CodeBlock key={part.id || index} text={part.text ?? ""} language={part.language} />];
+  }
+  if (part.type !== "text") {
+    return [
+      <div className="messageCardPart" key={part.id || index}>
+        <strong>{part.title ?? part.type}</strong>
+        {part.url && <span>{part.url}</span>}
+      </div>,
+    ];
+  }
+  return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
+    renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+  );
+}
+
+function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactNode {
   if (block.kind === "heading") {
     const Tag = block.level <= 1 ? "h2" : "h3";
-    return <Tag key={index}>{block.text}</Tag>;
+    return <Tag key={key}>{block.text}</Tag>;
   }
   if (block.kind === "code") {
-    return (
-      <div className="codeBlock" key={index}>
-        {block.language && <span>{block.language}</span>}
-        <pre>{block.text}</pre>
-      </div>
-    );
+    return <CodeBlock key={key} text={block.text} language={block.language} />;
   }
   if (block.kind === "ul") {
-    return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>;
+    return <ul key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>;
   }
   if (block.kind === "ol") {
-    return <ol key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ol>;
+    return <ol key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ol>;
   }
   if (block.kind === "quote") {
-    return <blockquote key={index}>{block.text}</blockquote>;
+    return <blockquote key={key}>{block.text}</blockquote>;
   }
   if (block.kind === "table") {
     return (
-      <div className="markdownTableWrap" key={index}>
+      <div className="markdownTableWrap" key={key}>
         <table>
           <thead>
             <tr>{block.headers.map((header, cellIndex) => <th key={cellIndex}>{header}</th>)}</tr>
@@ -51,5 +74,23 @@ function renderMarkdownBlock(block: MarkdownBlock, index: number): React.ReactNo
       </div>
     );
   }
-  return <p key={index}>{block.text}</p>;
+  return <p key={key}>{block.text}</p>;
+}
+
+function CodeBlock({ text, language }: { text: string; language?: string }) {
+  return (
+    <div className="codeBlock">
+      <div className="codeBlockHeader">
+        <span>{language || "code"}</span>
+        <button type="button" title="复制代码" onClick={() => copyText(text)}>
+          <CopyOutlined />
+        </button>
+      </div>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
+function copyText(text: string) {
+  void navigator.clipboard?.writeText(text);
 }

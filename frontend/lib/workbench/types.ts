@@ -2,6 +2,7 @@ import type {
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
+  HubMessagePartDto,
   HubRunDto,
 } from "@agenthub/shared";
 
@@ -39,6 +40,7 @@ export interface AgentReplyBlockModel {
   speakerId?: string | number | null;
   name: string;
   text: string;
+  parts?: HubMessagePartDto[];
   timestamp: string;
   status?: string;
 }

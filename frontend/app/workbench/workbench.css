@@ -635,6 +635,14 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.bubbleMeta > span:first-child {
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bubbleMeta code {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -908,18 +916,56 @@ textarea:focus-visible {
   background: #fbfcfe;
 }
 
-.codeBlock > span {
+.codeBlockHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-muted);
   color: var(--muted);
-  padding: 5px 9px;
+  padding: 4px 5px 4px 9px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.codeBlockHeader button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.codeBlockHeader button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .codeBlock pre {
   border: 0;
   border-radius: 0;
+}
+
+.messageCardPart {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 8px 10px;
+}
+
+.messageCardPart strong,
+.messageCardPart span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .markdownTableWrap {
