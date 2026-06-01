@@ -113,7 +113,7 @@ export default function WorkbenchPage() {
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
   const [composer, setComposer] = useState("");
   const [attachments, setAttachments] = useState<UploadedAttachmentDto[]>([]);
-  const [replyTarget, setReplyTarget] = useState<HubMessageDto | null>(null);
+  const [replyTargets, setReplyTargets] = useState<HubMessageDto[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -341,7 +341,7 @@ export default function WorkbenchPage() {
     setActiveSessionId(sessionId);
     setRenamingSession(false);
     setAttachments([]);
-    setReplyTarget(null);
+    setReplyTargets([]);
     const result = await getSessionDetail(sessionId);
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
@@ -498,8 +498,9 @@ export default function WorkbenchPage() {
         content: text,
         mentionedAgentIds: targetAgentIds,
         orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
-        parentMessageId: replyTarget?.id,
-        quotedMessageId: replyTarget?.id,
+        parentMessageId: replyTargets[0]?.id,
+        quotedMessageId: replyTargets[0]?.id,
+        references: replyTargets.map((message) => ({ messageId: message.id })),
         attachments: attachments.map((item) => ({ id: item.id })),
       });
       if (!result.ok) {
@@ -517,7 +518,7 @@ export default function WorkbenchPage() {
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
       setAttachments([]);
-      setReplyTarget(null);
+      setReplyTargets([]);
       setNotice(mode === "direct" ? "消息已发送给 Agent" : "消息已发送给 Orchestrator");
     } finally {
       setSending(false);
@@ -716,6 +717,13 @@ export default function WorkbenchPage() {
     ].join("\n");
     setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
     window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function addReplyTarget(message: HubMessageDto) {
+    setReplyTargets((current) => {
+      if (current.some((item) => item.id === message.id)) return current;
+      return [...current, message].slice(0, 5);
+    });
   }
 
   async function handleAttachmentFiles(files: FileList | null) {
@@ -1008,7 +1016,7 @@ export default function WorkbenchPage() {
                 message={item.message}
                 onPin={handlePin}
                 onPinPart={handlePinPart}
-                onReply={setReplyTarget}
+                onReply={addReplyTarget}
                 onRegenerate={(message) => void handleRegenerate(message)}
                 agents={agents}
               />
@@ -1030,10 +1038,10 @@ export default function WorkbenchPage() {
         </div>
 
         <footer className="composer">
-          {replyTarget && (
+          {replyTargets.length > 0 && (
             <div className="replyBanner">
-              <span>引用：{replyTarget.contentText.slice(0, 80)}</span>
-              <button type="button" onClick={() => setReplyTarget(null)}>
+              <span>引用 {replyTargets.length}/5：{replyTargets.map((message) => message.contentText.slice(0, 28)).join(" / ")}</span>
+              <button type="button" onClick={() => setReplyTargets([])}>
                 取消
               </button>
             </div>

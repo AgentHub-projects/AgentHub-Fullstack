@@ -111,7 +111,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(1);
     expect(params.sessionId).toBe("downstream-session-1");
-    expect(params.prompt).toEqual([{ text: "## User Message\n第二次需求", type: "text" }]);
+    expect(params.prompt).toEqual([{ text: "第二次需求", type: "text" }]);
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("摘要记忆");
   });

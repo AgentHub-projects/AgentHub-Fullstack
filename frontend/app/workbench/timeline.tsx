@@ -196,6 +196,7 @@ function UserMessage({
             <CopyOutlined />
           </button>
         </div>
+        {referenceCount(message) > 0 && <div className="messageReferenceHint">引用 {referenceCount(message)} 条上下文</div>}
         <MessageParts
           parts={message.parts}
           fallbackText={message.contentText}
@@ -332,4 +333,9 @@ function buildBeforeAfterPreview(change: HubFileChangeDto) {
   const before = change.beforeContent ? `--- before\n${change.beforeContent}` : "";
   const after = change.afterContent ? `+++ after\n${change.afterContent}` : "";
   return [before, after].filter(Boolean).join("\n\n") || "Diff 内容为空";
+}
+
+function referenceCount(message: HubMessageDto) {
+  const refs = message.contentJson.references;
+  return Array.isArray(refs) ? refs.length : message.contentJson.quotedMessageId ? 1 : 0;
 }

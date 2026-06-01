@@ -42,6 +42,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     runId: string;
     userMessageId: string;
     promptText: string;
+    messageContext?: Record<string, unknown>;
     orchestrator: AgentInstanceDto;
     mentionedAgents: AgentInstanceDto[];
   }) {
@@ -815,6 +816,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       runId: string;
       userMessageId: string;
       promptText: string;
+      messageContext?: Record<string, unknown>;
       orchestrator: AgentInstanceDto;
       mentionedAgents: AgentInstanceDto[];
       context?: HubContextSnapshotDto | null;
@@ -824,27 +826,35 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   ) {
     const snapshot = input.context?.snapshotJson;
 
-    // Build a comprehensive prompt that embeds all context
+    if (!bootstrap) {
+      return {
+        sessionId: downstreamSessionId,
+        runId: input.runId,
+        agentHubSessionId: input.sessionId,
+        prompt: [{ text: input.promptText, type: "text" }],
+        messageContext: input.messageContext ?? {},
+      };
+    }
+
+    // Bootstrap is the only time AgentHub expands controlled context into the prompt.
     const sections: string[] = [];
 
-    if (bootstrap) {
-      const systemPrompt = input.orchestrator.template?.systemPrompt;
-      if (systemPrompt) {
-        sections.push(`## System\n${systemPrompt}`);
-      }
+    const systemPrompt = input.orchestrator.template?.systemPrompt;
+    if (systemPrompt) {
+      sections.push(`## System\n${systemPrompt}`);
+    }
 
-      const agents = await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id);
-      if (agents.length > 0) {
-        sections.push(`## Available Agents\n${agents.map((a) => `- ${a.agentId}: ${a.description}`).join("\n")}`);
-      }
+    const agents = await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id);
+    if (agents.length > 0) {
+      sections.push(`## Available Agents\n${agents.map((a) => `- ${a.agentId}: ${a.description}`).join("\n")}`);
+    }
 
-      if (snapshot?.summary) {
-        sections.push(`## Context Summary\n${snapshot.summary}`);
-      }
+    if (snapshot?.summary) {
+      sections.push(`## Context Summary\n${snapshot.summary}`);
+    }
 
-      if (snapshot?.pins?.length) {
-        sections.push(`## Pinned\n${snapshot.pins.map((p) => `- [${p.kind}] ${p.text}`).join("\n")}`);
-      }
+    if (snapshot?.pins?.length) {
+      sections.push(`## Pinned\n${snapshot.pins.map((p) => `- [${p.kind}] ${p.text}`).join("\n")}`);
     }
 
     sections.push(`## User Message\n${input.promptText}`);
@@ -856,6 +866,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       runId: input.runId,
       agentHubSessionId: input.sessionId,
       prompt: [{ text: promptText, type: "text" }],
+      messageContext: input.messageContext ?? {},
     };
   }
 

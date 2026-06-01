@@ -299,6 +299,8 @@ export class HubSessionService {
     const text = input.content.trim();
     if (!text) throw new Error("Message content is required");
     if ((input.attachments?.length ?? 0) > 5) throw new BadRequestException("TOO_MANY_ATTACHMENTS");
+    const references = normalizeReferences(input);
+    if (references.length > 5) throw new BadRequestException("TOO_MANY_REFERENCES");
 
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
@@ -318,23 +320,26 @@ export class HubSessionService {
       : await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
     const attachmentParts = await this.loadAttachmentParts(sessionId, input.attachments?.map((item) => item.id) ?? []);
     const linkParts = await buildLinkPreviewParts(text);
-    const promptText = withAttachmentPrompt(text, [...attachmentParts, ...linkParts]);
+    const referenceBlocks = await this.loadReferenceBlocks(sessionId, references);
+    const contextText = withReferencePrompt(withAttachmentPrompt(text, [...attachmentParts, ...linkParts]), referenceBlocks);
     const message = await this.prisma.message.create({
       data: {
         sessionId,
         role: "user",
-        parentMessageId: input.parentMessageId,
+        parentMessageId: input.parentMessageId ?? references[0]?.messageId,
         contentText: text,
         contentJson: messageJsonWithParts(
           {
             mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
             attachmentIds: attachmentParts.map((part) => part.metadata?.artifactId),
-            quotedMessageId: input.quotedMessageId,
+            quotedMessageId: input.quotedMessageId ?? references[0]?.messageId,
+            quotedMessageIds: references.map((item) => item.messageId),
+            references,
           },
           text,
           [...attachmentParts, ...linkParts],
         ) as any,
-        tokenCount: this.context.estimateTokens(promptText),
+        tokenCount: this.context.estimateTokens(contextText),
       },
     });
 
@@ -343,7 +348,7 @@ export class HubSessionService {
       sourceType: "message",
       sourceId: message.id,
       kind: "message",
-      text: promptText,
+      text: contextText,
       importance: 20,
     });
 
@@ -390,7 +395,12 @@ export class HubSessionService {
       sessionId,
       runId: run.id,
       userMessageId: message.id,
-      promptText,
+      promptText: text,
+      messageContext: {
+        attachments: attachmentParts,
+        linkPreviews: linkParts,
+        references: referenceBlocks,
+      },
       orchestrator: runAgent,
       mentionedAgents,
     });
@@ -435,10 +445,20 @@ export class HubSessionService {
     const attachmentIds = Array.isArray(contentJson.attachmentIds)
       ? contentJson.attachmentIds.filter((item): item is string => typeof item === "string")
       : [];
+    const references = Array.isArray(contentJson.references)
+      ? contentJson.references
+          .map((item) => mergeMetadata(item, {}))
+          .map((item) => ({
+            messageId: typeof item.messageId === "string" ? item.messageId : "",
+            partId: typeof item.partId === "string" ? item.partId : undefined,
+          }))
+          .filter((item) => item.messageId)
+      : undefined;
     return this.sendMessage(sessionId, {
       content: message.contentText,
       parentMessageId: message.parentMessageId ?? undefined,
       quotedMessageId: typeof contentJson.quotedMessageId === "string" ? contentJson.quotedMessageId : undefined,
+      references,
       attachments: attachmentIds.map((id) => ({ id })),
     });
   }
@@ -548,6 +568,26 @@ export class HubSessionService {
     });
   }
 
+  private async loadReferenceBlocks(
+    sessionId: string,
+    references: Array<{ messageId: string; partId?: string }>,
+  ): Promise<Array<{ label: string; text: string }>> {
+    if (references.length === 0) return [];
+    const messageIds = [...new Set(references.map((item) => item.messageId))];
+    const messages = await this.prisma.message.findMany({
+      where: { sessionId, id: { in: messageIds } },
+      include: { agent: true },
+    });
+    if (messages.length !== messageIds.length) throw new BadRequestException("REFERENCE_NOT_FOUND");
+    return references.map((reference, index) => {
+      const message = messages.find((item) => item.id === reference.messageId)!;
+      const partText = reference.partId ? referencedPartText(message.contentJson, reference.partId) : null;
+      if (reference.partId && partText == null) throw new BadRequestException("REFERENCE_PART_NOT_FOUND");
+      const label = `${index + 1}. ${message.role}${message.agent?.name ? `:${message.agent.name}` : ""}`;
+      return { label, text: partText ?? message.contentText };
+    });
+  }
+
   private async upsertSessionAgent(sessionId: string, agentId: number, role: string, source: string) {
     await this.prisma.sessionAgent.upsert({
       where: { sessionId_agentId: { sessionId, agentId } },
@@ -633,6 +673,37 @@ function withAttachmentPrompt(text: string, parts: HubMessagePartDto[]) {
     })
     .join("\n");
   return `${text}\n\nAttachments:\n${attachmentText}`;
+}
+
+function withReferencePrompt(text: string, references: Array<{ label: string; text: string }>) {
+  if (references.length === 0) return text;
+  const quoted = references.map((item) => `### ${item.label}\n${item.text}`).join("\n\n");
+  return `${text}\n\nQuoted context:\n${quoted}`;
+}
+
+function normalizeReferences(input: SendHubMessageRequest) {
+  const references: Array<{ messageId: string; partId?: string }> = Array.isArray(input.references)
+    ? input.references
+        .filter((item) => item && typeof item.messageId === "string" && item.messageId.trim())
+        .map((item) => ({ messageId: item.messageId, partId: item.partId }))
+    : [];
+  if (references.length === 0 && input.quotedMessageId) {
+    references.push({ messageId: input.quotedMessageId });
+  }
+  const deduped = new Map<string, { messageId: string; partId?: string }>();
+  for (const reference of references) {
+    deduped.set(`${reference.messageId}:${reference.partId ?? ""}`, reference);
+  }
+  return [...deduped.values()];
+}
+
+function referencedPartText(contentJson: unknown, partId: string) {
+  const content = mergeMetadata(contentJson, {});
+  if (!Array.isArray(content.parts)) return null;
+  const part = content.parts
+    .map((item) => mergeMetadata(item, {}))
+    .find((item) => item.id === partId);
+  return typeof part?.text === "string" ? part.text : null;
 }
 
 function sessionMatchesQuery(
