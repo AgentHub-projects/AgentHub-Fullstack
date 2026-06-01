@@ -28,6 +28,7 @@ import {
   PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
+  RocketOutlined,
   SendOutlined,
   SearchOutlined,
   TeamOutlined,
@@ -52,6 +53,7 @@ import {
   loginWithAccessKey,
   pinSessionMessage,
   sendSessionMessage,
+  startDeployment,
   uploadSessionAttachment,
   updateSession,
   updateAgent,
@@ -116,6 +118,7 @@ export default function WorkbenchPage() {
   const [sending, setSending] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
+  const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
@@ -645,6 +648,24 @@ export default function WorkbenchPage() {
     }
   }
 
+  async function handleStartDeployment() {
+    if (!activeSessionId || deployingSessionId) return;
+    setDeployingSessionId(activeSessionId);
+    try {
+      const result = await startDeployment(activeSessionId);
+      if (!result.ok) {
+        setNotice(`部署失败：${result.error}`);
+        return;
+      }
+      setDetail((current) =>
+        current ? { ...current, messages: upsertById(current.messages, result.data.message).sort(sortMessage) } : current,
+      );
+      setNotice(`部署已触发：${result.data.deployment.commitSha.slice(0, 12)}`);
+    } finally {
+      setDeployingSessionId(null);
+    }
+  }
+
   async function handleAttachmentFiles(files: FileList | null) {
     if (!activeSessionId || !files?.length || uploadingAttachment) return;
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
@@ -888,6 +909,17 @@ export default function WorkbenchPage() {
             {activeSession && !renamingSession && (
               <button className="iconButton" type="button" title="重命名会话" onClick={beginRenameSession}>
                 <EditOutlined />
+              </button>
+            )}
+            {activeSession?.projectId && (
+              <button
+                className="ghostButton"
+                type="button"
+                disabled={deployingSessionId === activeSession.id}
+                onClick={() => void handleStartDeployment()}
+              >
+                {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
+                <span>部署</span>
               </button>
             )}
             {latestRun && <RunBadge run={latestRun} />}

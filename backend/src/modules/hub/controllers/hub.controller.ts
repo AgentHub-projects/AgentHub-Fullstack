@@ -31,6 +31,7 @@ import { PublicRoute } from "../auth/public.decorator";
 import { AgentRegistryService } from "../services/agent-registry.service";
 import { ArtifactStorageService } from "../services/artifact-storage.service";
 import { HubSessionService } from "../services/hub-session.service";
+import { DeploymentService } from "../services/deployment.service";
 import { PrismaService } from "../services/prisma.service";
 
 @Controller("sessions")
@@ -42,6 +43,8 @@ export class HubSessionController {
     private readonly prisma: PrismaService,
     @Inject(HubRealtimeGateway)
     private readonly gateway: HubRealtimeGateway,
+    @Inject(DeploymentService)
+    private readonly deployments: DeploymentService,
   ) {}
 
   @Get()
@@ -152,6 +155,11 @@ export class HubSessionController {
   @Post(":sessionId/file-changes/:fileChangeId/apply")
   applyFileChange(@Param("sessionId") sessionId: string, @Param("fileChangeId") fileChangeId: string) {
     return this.sessions.applyFileChange(sessionId, fileChangeId);
+  }
+
+  @Post(":sessionId/deployments")
+  startDeployment(@Param("sessionId") sessionId: string) {
+    return this.deployments.start(sessionId);
   }
 }
 

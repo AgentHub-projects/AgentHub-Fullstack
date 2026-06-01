@@ -125,6 +125,11 @@ export interface DeploymentDto {
   completedAt?: ISODateString | null;
 }
 
+export interface StartDeploymentResponse {
+  deployment: DeploymentDto;
+  message: HubMessageDto;
+}
+
 export interface HubMessageDto {
   id: string;
   sessionId: string;

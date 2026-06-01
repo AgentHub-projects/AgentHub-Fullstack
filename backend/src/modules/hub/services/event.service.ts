@@ -161,6 +161,27 @@ export class HubEventService {
         });
       }
     }
+
+    if (event.eventType === "git.push.completed") {
+      const commitSha = stringValue(payload.commitSha) ?? stringValue(payload.sha);
+      if (commitSha) {
+        const session = await this.prisma.session.findUnique({
+          where: { id: event.sessionId },
+          select: { metadata: true },
+        });
+        const metadata = asObject(session?.metadata);
+        await this.prisma.session.update({
+          where: { id: event.sessionId },
+          data: {
+            metadata: {
+              ...metadata,
+              latestSuccessfulPushCommitSha: commitSha,
+              latestSuccessfulPushRunId: event.runId,
+            } as any,
+          },
+        });
+      }
+    }
   }
 
   // ---- Message Buffer Management (dual-track) ----

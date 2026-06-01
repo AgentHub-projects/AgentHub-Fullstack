@@ -24,6 +24,7 @@ import type {
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
+  StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
   UpdateHubSessionRequest,
@@ -205,6 +206,13 @@ export function applyFileChange(sessionId: string, fileChangeId: string) {
     `/sessions/${encodeURIComponent(sessionId)}/file-changes/${encodeURIComponent(fileChangeId)}/apply`,
     { method: "POST", body: JSON.stringify({}) },
   );
+}
+
+export function startDeployment(sessionId: string) {
+  return requestJson<StartDeploymentResponse>(`/sessions/${encodeURIComponent(sessionId)}/deployments`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export function listAgents() {

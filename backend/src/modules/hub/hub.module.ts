@@ -20,6 +20,7 @@ import { ArtifactStorageService } from "./services/artifact-storage.service";
 import { BuilderService } from "./services/builder.service";
 import { HubContextService } from "./services/context.service";
 import { DownstreamOrchestratorService } from "./services/downstream-orchestrator.service";
+import { DeploymentService } from "./services/deployment.service";
 import { HubEventService } from "./services/event.service";
 import { HubSessionService } from "./services/hub-session.service";
 import { PrismaService } from "./services/prisma.service";
@@ -48,6 +49,7 @@ import { PrismaService } from "./services/prisma.service";
     HubRealtimeGateway,
     HubEventService,
     DownstreamOrchestratorService,
+    DeploymentService,
     HubSessionService,
   ],
 })
