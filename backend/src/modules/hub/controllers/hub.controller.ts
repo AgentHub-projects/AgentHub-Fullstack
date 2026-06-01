@@ -10,9 +10,10 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
 } from "@nestjs/common";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import type {
   AddParticipantRequest,
   CreateHubSessionRequest,
@@ -210,6 +211,38 @@ export class HubArtifactController {
   }
 }
 
+@Controller()
+export class HubUploadController {
+  constructor(@Inject(ArtifactStorageService) private readonly artifacts: ArtifactStorageService) {}
+
+  @Post("sessions/:sessionId/uploads")
+  async uploadAttachment(@Param("sessionId") sessionId: string, @Req() request: Request) {
+    const contentLength = Number(request.headers["content-length"] ?? 0);
+    if (!sessionId) throw new BadRequestException("SESSION_ID_REQUIRED");
+    if (contentLength > MAX_UPLOAD_BYTES) throw new BadRequestException("UPLOAD_TOO_LARGE");
+    const data = await readRequestBuffer(request, MAX_UPLOAD_BYTES);
+    if (data.length === 0) throw new BadRequestException("UPLOAD_EMPTY");
+    const name = decodeHeaderValue(headerString(request.headers["x-file-name"]) ?? "attachment");
+    const mimeType = headerString(request.headers["content-type"]) ?? "application/octet-stream";
+    return this.artifacts.createAttachment({ sessionId, name, mimeType, data });
+  }
+
+  @PublicRoute()
+  @Get("uploads/:artifactId/content")
+  async getUploadedContent(@Param("artifactId") artifactId: string, @Res() response: Response) {
+    const content = await this.artifacts.getUploadedContent(artifactId);
+    if (!content) {
+      response.status(404).json({ code: "NOT_FOUND", message: "Upload not found" });
+      return;
+    }
+    if ("redirectUrl" in content && content.redirectUrl) {
+      response.redirect(content.redirectUrl);
+      return;
+    }
+    response.type(content.contentType).send(content.body ?? "");
+  }
+}
+
 @PublicRoute()
 @Controller("downstream")
 export class DownstreamController {
@@ -230,5 +263,32 @@ export class HubHealthController {
   @Get()
   health() {
     return { ok: true, service: "agenthub-backend", ts: new Date().toISOString() };
+  }
+}
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+async function readRequestBuffer(request: Request, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of request as any as AsyncIterable<Buffer | string>) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > maxBytes) throw new BadRequestException("UPLOAD_TOO_LARGE");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+function headerString(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function decodeHeaderValue(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
 }

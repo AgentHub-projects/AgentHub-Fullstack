@@ -1,7 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Inject, Injectable } from "@nestjs/common";
-import type { HubArtifactDto, HubArtifactKind } from "@agenthub/shared";
+import type { HubArtifactDto, HubArtifactKind, UploadedAttachmentDto } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { asObject, mapArtifact } from "../mappers/hub.mappers";
 
@@ -14,6 +16,57 @@ type OssClient = {
 @Injectable()
 export class ArtifactStorageService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async createAttachment(input: {
+    sessionId: string;
+    name: string;
+    mimeType: string;
+    data: Buffer;
+  }): Promise<UploadedAttachmentDto> {
+    const artifactId = randomUUID();
+    const sha256 = sha256Buffer(input.data);
+    const sizeBytes = input.data.length;
+    const kind = inferKindFromMime(input.mimeType);
+    const textPreview = textPreviewFor(input.mimeType, input.data);
+    const uploaded = await this.uploadToOss(input.sessionId, "attachments", input.name, input.data, input.mimeType);
+    const localPath = uploaded ? null : await this.writeLocalUpload(artifactId, input.name, input.data);
+    const publicUrl = uploaded ? (await this.getSignedOssUrl(uploaded.uri)) ?? uploaded.uri : this.localUploadUrl(artifactId);
+
+    const artifact = await this.prisma.artifact.create({
+      data: {
+        id: artifactId,
+        sessionId: input.sessionId,
+        artifactKey: `attachment:${artifactId}`,
+        kind,
+        title: input.name,
+        mimeType: input.mimeType,
+        storageKind: uploaded ? "oss_object" : "remote_url",
+        storageUri: uploaded?.uri ?? publicUrl,
+        textContent: textPreview,
+        sha256,
+        sizeBytes: BigInt(sizeBytes),
+        final: true,
+        metadata: {
+          attachment: true,
+          originalName: input.name,
+          url: publicUrl,
+          localPath: uploaded ? undefined : localPath,
+          textPreview,
+        } as any,
+      },
+    });
+
+    return {
+      id: artifact.id,
+      name: artifact.title,
+      mimeType: artifact.mimeType,
+      sizeBytes,
+      sha256,
+      url: publicUrl ?? "",
+      textPreview,
+      createdAt: artifact.createdAt.toISOString(),
+    };
+  }
 
   async upsertArtifact(input: {
     sessionId: string;
@@ -191,6 +244,21 @@ export class ArtifactStorageService {
     };
   }
 
+  async getUploadedContent(artifactId: string) {
+    const artifact = await this.prisma.artifact.findUnique({ where: { id: artifactId } });
+    if (!artifact) return null;
+    const metadata = asObject(artifact.metadata);
+    const localPath = typeof metadata.localPath === "string" ? metadata.localPath : null;
+    if (localPath) {
+      return {
+        artifact: mapArtifact(artifact),
+        body: await readFile(localPath),
+        contentType: artifact.mimeType,
+      };
+    }
+    return this.getContent(artifactId);
+  }
+
   private async uploadToOss(
     sessionId: string,
     runId: string,
@@ -214,6 +282,19 @@ export class ArtifactStorageService {
       uri: `oss://${bucket}/${objectKey}`,
       sha256: sha256Buffer(data),
     };
+  }
+
+  private async writeLocalUpload(artifactId: string, fileName: string, data: Buffer) {
+    const dir = join(process.cwd(), ".uploads");
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, `${artifactId}-${safeKey(fileName)}`);
+    await writeFile(filePath, data);
+    return filePath;
+  }
+
+  private localUploadUrl(artifactId: string) {
+    const baseUrl = (process.env.AGENTHUB_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3001}/api`).replace(/\/$/, "");
+    return `${baseUrl}/uploads/${artifactId}/content`;
   }
 
   private async getSignedOssUrl(storageUri: string): Promise<string | undefined> {
@@ -271,6 +352,20 @@ function inferMimeType(kind: HubArtifactKind): string {
     other: "application/octet-stream",
   };
   return map[kind];
+}
+
+function inferKindFromMime(mimeType: string): HubArtifactKind {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.includes("wordprocessingml")) return "docx";
+  if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType.includes("xml")) return "text";
+  return "other";
+}
+
+function textPreviewFor(mimeType: string, data: Buffer) {
+  if (data.length > 20 * 1024) return null;
+  if (!mimeType.startsWith("text/") && !mimeType.includes("json") && !mimeType.includes("xml")) return null;
+  return data.toString("utf8");
 }
 
 function decodeBinary(payload: ArtifactPayload): Buffer | null {

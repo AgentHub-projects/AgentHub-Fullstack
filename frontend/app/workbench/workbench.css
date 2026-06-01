@@ -1149,6 +1149,47 @@ textarea:focus-visible {
   margin-top: 8px;
 }
 
+.hiddenFileInput {
+  display: none;
+}
+
+.attachmentTray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.attachmentChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 5px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attachmentChip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentChip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
 .inspector {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

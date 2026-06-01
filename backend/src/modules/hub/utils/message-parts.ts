@@ -25,10 +25,14 @@ export function parseMessageParts(contentText: string): HubMessagePartDto[] {
   return parts.length ? parts : [textPart(0, contentText)];
 }
 
-export function messageJsonWithParts(base: Record<string, unknown>, contentText: string) {
+export function messageJsonWithParts(
+  base: Record<string, unknown>,
+  contentText: string,
+  extraParts: HubMessagePartDto[] = [],
+) {
   return {
     ...base,
-    parts: parseMessageParts(contentText),
+    parts: [...parseMessageParts(contentText), ...extraParts],
   };
 }
 

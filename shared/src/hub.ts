@@ -115,6 +115,17 @@ export interface HubMessagePartDto {
   metadata?: Record<string, unknown>;
 }
 
+export interface UploadedAttachmentDto {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  url: string;
+  textPreview?: string | null;
+  createdAt: ISODateString;
+}
+
 export interface HubRunDto {
   id: string;
   sessionId: string;
@@ -281,6 +292,7 @@ export interface SendHubMessageRequest {
   mentionedAgentIds?: AgentId[];
   orchestratorAgentId?: AgentId;
   parentMessageId?: string;
+  attachments?: Array<{ id: string }>;
 }
 
 export interface SendHubMessageResponse {

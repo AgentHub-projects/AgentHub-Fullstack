@@ -10,6 +10,7 @@ import type {
   HubSessionDto,
   SessionDetailDto,
   UpdateAgentRequest,
+  UploadedAttachmentDto,
 } from "@agenthub/shared";
 import {
   BranchesOutlined,
@@ -21,6 +22,7 @@ import {
   LoadingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  PaperClipOutlined,
   PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -44,6 +46,7 @@ import {
   loginWithAccessKey,
   pinSessionMessage,
   sendSessionMessage,
+  uploadSessionAttachment,
   updateSession,
   updateAgent,
   upsertById,
@@ -97,6 +100,8 @@ export default function WorkbenchPage() {
   const [agents, setAgents] = useState<AgentInstanceDto[]>([]);
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
   const [composer, setComposer] = useState("");
+  const [attachments, setAttachments] = useState<UploadedAttachmentDto[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("diff");
@@ -135,6 +140,7 @@ export default function WorkbenchPage() {
   const [renamingSession, setRenamingSession] = useState(false);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
@@ -287,6 +293,7 @@ export default function WorkbenchPage() {
   async function loadSession(sessionId: string) {
     setActiveSessionId(sessionId);
     setRenamingSession(false);
+    setAttachments([]);
     const result = await getSessionDetail(sessionId);
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
@@ -443,6 +450,7 @@ export default function WorkbenchPage() {
         content: text,
         mentionedAgentIds: targetAgentIds,
         orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
+        attachments: attachments.map((item) => ({ id: item.id })),
       });
       if (!result.ok) {
         setNotice(`发送失败：${result.error}`);
@@ -458,6 +466,7 @@ export default function WorkbenchPage() {
         };
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
+      setAttachments([]);
       setNotice(mode === "direct" ? "消息已发送给 Agent" : "消息已发送给 Orchestrator");
     } finally {
       setSending(false);
@@ -577,6 +586,33 @@ export default function WorkbenchPage() {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(caret, caret);
     });
+  }
+
+  async function handleAttachmentFiles(files: FileList | null) {
+    if (!activeSessionId || !files?.length || uploadingAttachment) return;
+    const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
+    if (selected.length === 0) {
+      setNotice("单条消息最多 5 个附件");
+      return;
+    }
+    setUploadingAttachment(true);
+    try {
+      for (const file of selected) {
+        if (file.size > 50 * 1024 * 1024) {
+          setNotice(`${file.name} 超过 50MB`);
+          continue;
+        }
+        const result = await uploadSessionAttachment(activeSessionId, file);
+        if (result.ok) {
+          setAttachments((current) => [...current, result.data].slice(0, 5));
+        } else {
+          setNotice(`附件上传失败：${result.error}`);
+        }
+      }
+    } finally {
+      setUploadingAttachment(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   if (!authChecked) {
@@ -901,6 +937,22 @@ export default function WorkbenchPage() {
                   ? `群聊成员 ${composerAgents.length} 个 Agent`
                   : "默认由主 Orchestrator 协调"}
             </span>
+            <input
+              ref={fileInputRef}
+              className="hiddenFileInput"
+              type="file"
+              multiple
+              onChange={(event) => void handleAttachmentFiles(event.target.files)}
+            />
+            <button
+              className="iconButton"
+              type="button"
+              title="上传附件"
+              disabled={!activeSessionId || uploadingAttachment || attachments.length >= 5}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
+            </button>
             <button
               className="primaryButton"
               type="button"
@@ -911,6 +963,23 @@ export default function WorkbenchPage() {
               <span>发送</span>
             </button>
           </div>
+          {attachments.length > 0 && (
+            <div className="attachmentTray">
+              {attachments.map((attachment) => (
+                <span className="attachmentChip" key={attachment.id}>
+                  <PaperClipOutlined />
+                  <span>{attachment.name}</span>
+                  <button
+                    type="button"
+                    title="移除附件"
+                    onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </footer>
       </section>
 

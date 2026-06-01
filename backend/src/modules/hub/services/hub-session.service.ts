@@ -3,6 +3,7 @@ import type {
   AddParticipantRequest,
   AgentInstanceDto,
   CreateHubSessionRequest,
+  HubMessagePartDto,
   PinHubMessageRequest,
   SendHubMessageRequest,
   SendHubMessageResponse,
@@ -297,6 +298,7 @@ export class HubSessionService {
   async sendMessage(sessionId: string, input: SendHubMessageRequest): Promise<SendHubMessageResponse> {
     const text = input.content.trim();
     if (!text) throw new Error("Message content is required");
+    if ((input.attachments?.length ?? 0) > 5) throw new BadRequestException("TOO_MANY_ATTACHMENTS");
 
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
@@ -313,14 +315,23 @@ export class HubSessionService {
     const mentionedAgents = isDirect
       ? []
       : await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
+    const attachmentParts = await this.loadAttachmentParts(sessionId, input.attachments?.map((item) => item.id) ?? []);
+    const promptText = withAttachmentPrompt(text, attachmentParts);
     const message = await this.prisma.message.create({
       data: {
         sessionId,
         role: "user",
         parentMessageId: input.parentMessageId,
         contentText: text,
-        contentJson: messageJsonWithParts({ mentionedAgentIds: mentionedAgents.map((agent) => agent.id) }, text) as any,
-        tokenCount: this.context.estimateTokens(text),
+        contentJson: messageJsonWithParts(
+          {
+            mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
+            attachmentIds: attachmentParts.map((part) => part.metadata?.artifactId),
+          },
+          text,
+          attachmentParts,
+        ) as any,
+        tokenCount: this.context.estimateTokens(promptText),
       },
     });
 
@@ -329,7 +340,7 @@ export class HubSessionService {
       sourceType: "message",
       sourceId: message.id,
       kind: "message",
-      text,
+      text: promptText,
       importance: 20,
     });
 
@@ -376,7 +387,7 @@ export class HubSessionService {
       sessionId,
       runId: run.id,
       userMessageId: message.id,
-      promptText: text,
+      promptText,
       orchestrator: runAgent,
       mentionedAgents,
     });
@@ -455,6 +466,35 @@ export class HubSessionService {
     return ordered;
   }
 
+  private async loadAttachmentParts(sessionId: string, attachmentIds: string[]): Promise<HubMessagePartDto[]> {
+    if (attachmentIds.length === 0) return [];
+    const artifacts = await this.prisma.artifact.findMany({
+      where: { id: { in: attachmentIds }, sessionId },
+      orderBy: { createdAt: "asc" },
+    });
+    if (artifacts.length !== attachmentIds.length) throw new BadRequestException("ATTACHMENT_NOT_FOUND");
+    return attachmentIds.map((id, index) => {
+      const artifact = artifacts.find((item) => item.id === id)!;
+      const metadata = mergeMetadata(artifact.metadata, {});
+      const textPreview = typeof metadata.textPreview === "string" ? metadata.textPreview : null;
+      const url = typeof metadata.url === "string" ? metadata.url : artifact.storageUri ?? undefined;
+      return {
+        id: `attachment_${index + 1}`,
+        type: artifact.mimeType.startsWith("image/") ? "image" : "file",
+        title: artifact.title,
+        url,
+        text: textPreview ?? undefined,
+        metadata: {
+          artifactId: artifact.id,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes == null ? null : Number(artifact.sizeBytes),
+          sha256: artifact.sha256,
+          textPreview,
+        },
+      };
+    });
+  }
+
   private async upsertSessionAgent(sessionId: string, agentId: number, role: string, source: string) {
     await this.prisma.sessionAgent.upsert({
       where: { sessionId_agentId: { sessionId, agentId } },
@@ -528,6 +568,17 @@ function numberMetadataValue(value: unknown) {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return undefined;
+}
+
+function withAttachmentPrompt(text: string, parts: HubMessagePartDto[]) {
+  if (parts.length === 0) return text;
+  const attachmentText = parts
+    .map((part) => {
+      const preview = part.text ? `\ntextPreview:\n${part.text}` : "";
+      return `- ${part.title ?? part.id} (${part.metadata?.mimeType ?? part.type}, ${part.metadata?.sizeBytes ?? 0} bytes)\nurl: ${part.url ?? ""}${preview}`;
+    })
+    .join("\n");
+  return `${text}\n\nAttachments:\n${attachmentText}`;
 }
 
 function sessionMatchesQuery(

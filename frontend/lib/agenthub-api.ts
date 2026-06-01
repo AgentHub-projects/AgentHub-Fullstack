@@ -27,6 +27,7 @@ import type {
   UpdateHubSessionRequest,
   UpdateAgentRequest,
   UpdateAgentTemplateRequest,
+  UploadedAttachmentDto,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
 
@@ -124,6 +125,27 @@ export function sendSessionMessage(sessionId: string, body: SendHubMessageReques
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export async function uploadSessionAttachment(sessionId: string, file: File): Promise<ApiResult<UploadedAttachmentDto>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/uploads`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-File-Name": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, error: payload?.message ?? `HTTP ${response.status}` };
+    }
+    return { ok: true, data: (await response.json()) as UploadedAttachmentDto };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Upload failed" };
+  }
 }
 
 export function pinSessionMessage(sessionId: string, messageId: string, body: PinHubMessageRequest) {
