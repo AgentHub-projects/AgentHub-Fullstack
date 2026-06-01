@@ -67,6 +67,9 @@ function renderMessagePart(
   if (part.type === "link_preview") {
     return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
+  if (part.type === "image") {
+    return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type === "artifact") {
     return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onOpenArtifact={onOpenArtifact} />];
   }
@@ -88,6 +91,39 @@ function renderMessagePart(
   }
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+  );
+}
+
+function ImagePart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  return (
+    <div className="imageMessagePart">
+      <div className="imageMessageTop">
+        <strong>{part.title ?? "图片附件"}</strong>
+        <div>
+          {part.url && (
+            <a title="打开图片" href={part.url} target="_blank" rel="noreferrer">
+              <LinkOutlined />
+            </a>
+          )}
+          {onPinPart && (
+            <button type="button" title={part.pinned ? "取消 Pin 图片" : "Pin 图片"} onClick={() => onPinPart(part)}>
+              {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </button>
+          )}
+        </div>
+      </div>
+      {part.url ? (
+        <img alt={part.title ?? "图片附件"} src={part.url} />
+      ) : (
+        <small>{part.text ?? "图片已上传"}</small>
+      )}
+    </div>
   );
 }
 

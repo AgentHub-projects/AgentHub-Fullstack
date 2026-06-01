@@ -1293,6 +1293,68 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+.imageMessagePart {
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  padding: 8px;
+}
+
+.imageMessageTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.imageMessageTop strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageMessageTop > div {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.imageMessageTop a,
+.imageMessageTop button {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.imageMessageTop a:hover,
+.imageMessageTop button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.imageMessagePart img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  object-fit: contain;
+}
+
+.imageMessagePart small {
+  color: var(--muted);
+}
+
 .artifactMessagePart {
   display: grid;
   gap: 8px;
