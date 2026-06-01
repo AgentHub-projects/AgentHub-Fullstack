@@ -415,6 +415,7 @@ export class HubSessionService {
       source: "agenthub_backend",
       payload: { messageId, partId: input.partId, pinned: input.pinned },
     });
+    this.downstream.notifyPinUpdated(sessionId, { messageId, partId: input.partId, pinned: input.pinned });
     return mapped;
   }
 

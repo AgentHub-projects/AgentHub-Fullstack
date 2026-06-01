@@ -32,6 +32,7 @@ import { AgentRegistryService } from "../services/agent-registry.service";
 import { ArtifactStorageService } from "../services/artifact-storage.service";
 import { HubSessionService } from "../services/hub-session.service";
 import { DeploymentService } from "../services/deployment.service";
+import { DownstreamOrchestratorService } from "../services/downstream-orchestrator.service";
 import { PrismaService } from "../services/prisma.service";
 
 @Controller("sessions")
@@ -174,6 +175,7 @@ export class HubAgentController {
     @Inject(AgentRegistryService) private readonly agents: AgentRegistryService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(HubRealtimeGateway) private readonly gateway: HubRealtimeGateway,
+    @Inject(DownstreamOrchestratorService) private readonly downstream: DownstreamOrchestratorService,
   ) {}
 
   @Get()
@@ -192,6 +194,7 @@ export class HubAgentController {
 
   @Post()
   async createAgent(@Body() body: CreateSessionAgentRequest) {
+    await assertSessionHasNoActiveRun(this.prisma, body.sessionId);
     const agent = await this.agents.createAgentFromTemplate(
       body.sessionId,
       body.templateId,
@@ -206,6 +209,10 @@ export class HubAgentController {
     if (session) {
       this.gateway.emitSession(mapSession(session));
     }
+    this.downstream.notifyMemberAdded(body.sessionId, {
+      agentId: agent.id,
+      description: agent.description || agent.template?.description || "",
+    });
     return agent;
   }
 
@@ -227,6 +234,9 @@ export class HubAgentController {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
     const links = await this.prisma.sessionAgent.findMany({ where: { agentId } });
+    for (const link of links) {
+      await assertSessionHasNoActiveRun(this.prisma, link.sessionId);
+    }
     await this.agents.deleteAgent(agentId);
     for (const link of links) {
       const session = await this.prisma.session.findUnique({
@@ -234,6 +244,7 @@ export class HubAgentController {
         include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
       });
       if (session) this.gateway.emitSession(mapSession(session));
+      this.downstream.notifyMemberDeleted(link.sessionId, { agentId });
     }
     return { ok: true };
   }
@@ -370,6 +381,18 @@ export class HubHealthController {
 }
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const ACTIVE_RUN_STATUSES = ["queued", "context_building", "connecting", "running"] as const;
+
+async function assertSessionHasNoActiveRun(prisma: PrismaService, sessionId: string) {
+  const activeRun = await prisma.agentRun.findFirst({
+    where: {
+      sessionId,
+      status: { in: [...ACTIVE_RUN_STATUSES] },
+    },
+    select: { id: true },
+  });
+  if (activeRun) throw new BadRequestException("SESSION_HAS_ACTIVE_RUN");
+}
 
 async function readRequestBuffer(request: Request, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];

@@ -213,6 +213,35 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
   }
 
+  notifyPinUpdated(sessionId: string, payload: { messageId: string; partId?: string; pinned: boolean }) {
+    this.sendSessionDelta(sessionId, "pin.updated", payload);
+  }
+
+  notifyMemberAdded(sessionId: string, payload: { agentId: AgentId; description: string }) {
+    this.sendSessionDelta(sessionId, "member.added", payload);
+  }
+
+  notifyMemberDeleted(sessionId: string, payload: { agentId: AgentId }) {
+    this.sendSessionDelta(sessionId, "member.deleted", payload);
+  }
+
+  private sendSessionDelta(sessionId: string, type: string, payload: Record<string, unknown>) {
+    const record = this.connections.get(sessionId);
+    if (!record?.socket.connected) return;
+    record.socket.emit("acp:message", {
+      jsonrpc: "2.0",
+      id: record.nextId++,
+      method: "session/context_delta",
+      params: {
+        sessionId: record.downstreamSessionId,
+        agentHubSessionId: sessionId,
+        type,
+        ...payload,
+      },
+    });
+    this.markDownstreamActivity(record);
+  }
+
   private async ensureConnection(
     sessionId: string,
     downstreamUrl: string,
