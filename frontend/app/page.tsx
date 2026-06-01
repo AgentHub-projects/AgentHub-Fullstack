@@ -501,7 +501,6 @@ export default function WorkbenchPage() {
     try {
       const result = await createSession({
         mode: "direct",
-        title: template.name,
         directTemplateId: template.id,
         directProvider: template.defaultProvider,
         directName: template.name,

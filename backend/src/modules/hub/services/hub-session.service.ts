@@ -682,10 +682,15 @@ export class HubSessionService {
   }
 }
 
-function deriveTitle(current: string, text: string, metadata: unknown) {
+export function deriveTitle(current: string, text: string, metadata: unknown) {
   if (mergeMetadata(metadata, {}).titleSource === "manual") return current;
-  if (current && current !== "新 Agent 群聊" && current !== "Untitled Session") return current;
-  return text.replace(/\s+/g, " ").slice(0, 42) || "新 Agent 群聊";
+  if (current && !isAutoTitlePlaceholder(current)) return current;
+  const fallback = mergeMetadata(metadata, {}).mode === "direct" ? "新单聊" : "新 Agent 群聊";
+  return text.replace(/\s+/g, " ").slice(0, 42) || fallback;
+}
+
+function isAutoTitlePlaceholder(value: string) {
+  return value === "新单聊" || value === "新 Agent 群聊" || value === "Untitled Session";
 }
 
 function mergeMetadata(value: unknown, patch: Record<string, unknown>) {
