@@ -1273,6 +1273,17 @@ textarea:focus-visible {
   background: #fbfcfe;
 }
 
+.artifactMessagePart.clickable {
+  cursor: pointer;
+}
+
+.artifactMessagePart.clickable:hover,
+.artifactMessagePart.clickable:focus-visible {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 3px rgba(36, 87, 214, 0.08);
+  outline: none;
+}
+
 .artifactMessageTop {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;

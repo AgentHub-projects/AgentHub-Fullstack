@@ -64,7 +64,7 @@ import {
   updateAgent,
   upsertById,
 } from "../lib/agenthub-api";
-import { ArtifactPanel, DiffPanel } from "./workbench/inspector";
+import { ArtifactPanel, ArtifactViewerLayer, DiffPanel } from "./workbench/inspector";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
@@ -128,6 +128,7 @@ export default function WorkbenchPage() {
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
   const [deploymentMenuOpen, setDeploymentMenuOpen] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [creatingContactTemplateId, setCreatingContactTemplateId] = useState<number | null>(null);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
@@ -164,6 +165,9 @@ export default function WorkbenchPage() {
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeArtifactViewer = activeArtifactViewerId
+    ? (detail?.artifacts.find((artifact) => artifact.id === activeArtifactViewerId) ?? null)
+    : null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const mode = sessionMode(activeSession);
   const directAgentId = readDirectAgentId(activeSession);
@@ -752,6 +756,14 @@ export default function WorkbenchPage() {
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
+  function openArtifactViewer(artifactId: string) {
+    if (!detail?.artifacts.some((artifact) => artifact.id === artifactId)) {
+      setNotice("产物还没有同步到本地列表，请稍后再展开");
+      return;
+    }
+    setActiveArtifactViewerId(artifactId);
+  }
+
   function addReplyTarget(message: HubMessageDto) {
     setReplyTargets((current) => {
       if (current.some((item) => item.id === message.id)) return current;
@@ -1117,6 +1129,7 @@ export default function WorkbenchPage() {
                 onPinPart={handlePinPart}
                 onReply={addReplyTarget}
                 onRegenerate={(message) => void handleRegenerate(message)}
+                onOpenArtifact={openArtifactViewer}
                 agents={agents}
               />
             ) : (
@@ -1131,6 +1144,7 @@ export default function WorkbenchPage() {
                 onReply={addReplyTarget}
                 onRegenerate={(message) => void handleRegenerate(message)}
                 onApplyFileChange={handleApplyFileChange}
+                onOpenArtifact={openArtifactViewer}
                 applyingFileChangeId={applyingFileChangeId}
               />
             ),
@@ -1324,6 +1338,14 @@ export default function WorkbenchPage() {
           </>
         )}
       </aside>
+
+      {activeArtifactViewer && (
+        <ArtifactViewerLayer
+          artifact={activeArtifactViewer}
+          onClose={() => setActiveArtifactViewerId(null)}
+          onUseSelection={handleArtifactSelection}
+        />
+      )}
 
       {groupDialogOpen && (
         <div className="dialogLayer" role="presentation" onMouseDown={closeGroupDialog}>

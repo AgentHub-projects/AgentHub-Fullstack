@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CopyOutlined,
+  ExpandOutlined,
   FileDoneOutlined,
   LinkOutlined,
   LoadingOutlined,
@@ -28,15 +29,17 @@ export function MessageParts({
   parts,
   fallbackText,
   onPinPart,
+  onOpenArtifact,
 }: {
   parts?: HubMessagePartDto[];
   fallbackText: string;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onOpenArtifact?: (artifactId: string) => void;
 }) {
   if (!parts?.length) return <RichText text={fallbackText} />;
   return (
     <div className="richText">
-      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart))}
+      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onOpenArtifact))}
     </div>
   );
 }
@@ -45,6 +48,7 @@ function renderMessagePart(
   part: HubMessagePartDto,
   index: number,
   onPinPart?: (part: HubMessagePartDto) => void,
+  onOpenArtifact?: (artifactId: string) => void,
 ): React.ReactNode[] {
   if (part.type === "code") {
     return [
@@ -64,7 +68,7 @@ function renderMessagePart(
     return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
   if (part.type === "artifact") {
-    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onOpenArtifact={onOpenArtifact} />];
   }
   if (part.type !== "text") {
     return [
@@ -90,9 +94,11 @@ function renderMessagePart(
 function ArtifactPart({
   part,
   onPinPart,
+  onOpenArtifact,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onOpenArtifact?: (artifactId: string) => void;
 }) {
   const artifactId = stringMetadata(part.metadata, "artifactId");
   const kind = stringMetadata(part.metadata, "kind") ?? "artifact";
@@ -101,8 +107,26 @@ function ArtifactPart({
   const final = booleanMetadata(part.metadata, "final");
   const contentUrl = artifactId ? artifactContentUrl(artifactId) : part.url;
   const title = part.title ?? "Artifact";
+  const canExpand = Boolean(artifactId && onOpenArtifact);
+  const openArtifact = () => {
+    if (artifactId && onOpenArtifact) onOpenArtifact(artifactId);
+  };
   return (
-    <div className={`artifactMessagePart ${kind}`}>
+    <div
+      className={`artifactMessagePart ${kind} ${canExpand ? "clickable" : ""}`}
+      role={canExpand ? "button" : undefined}
+      tabIndex={canExpand ? 0 : undefined}
+      onClick={canExpand ? openArtifact : undefined}
+      onKeyDown={
+        canExpand
+          ? (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              openArtifact();
+            }
+          : undefined
+      }
+    >
       <div className="artifactMessageTop">
         <span className="artifactMessageIcon"><FileDoneOutlined /></span>
         <div>
@@ -113,7 +137,12 @@ function ArtifactPart({
             {final ? " · final" : ""}
           </small>
         </div>
-        <div className="artifactMessageActions">
+        <div className="artifactMessageActions" onClick={(event) => event.stopPropagation()}>
+          {canExpand && (
+            <button type="button" title="展开预览" onClick={openArtifact}>
+              <ExpandOutlined />
+            </button>
+          )}
           {contentUrl && (
             <a title="打开预览" href={contentUrl} target="_blank" rel="noreferrer">
               <LinkOutlined />

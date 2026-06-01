@@ -129,26 +129,6 @@ export function ArtifactPanel({
   onUseSelection?: (artifact: HubArtifactDto, selectedText: string) => void;
 }) {
   const [activeArtifact, setActiveArtifact] = useState<HubArtifactDto | null>(null);
-  const [viewerMode, setViewerMode] = useState<"preview" | "code">("preview");
-  const [selectedText, setSelectedText] = useState("");
-  const [versions, setVersions] = useState<HubArtifactVersionDto[]>([]);
-  const [activeVersion, setActiveVersion] = useState<HubArtifactVersionDto | null>(null);
-
-  useEffect(() => {
-    if (!activeArtifact) {
-      setVersions([]);
-      setActiveVersion(null);
-      return;
-    }
-    let cancelled = false;
-    void listArtifactVersions(activeArtifact.id).then((result) => {
-      if (cancelled) return;
-      if (result.ok) setVersions(result.data.items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeArtifact]);
 
   if (artifacts.length === 0) return <PanelEmpty icon={<FileDoneOutlined />} text="暂无 artifact" />;
   return (
@@ -167,9 +147,6 @@ export function ArtifactPanel({
                 type="button"
                 onClick={() => {
                   setActiveArtifact(artifact);
-                  setActiveVersion(null);
-                  setViewerMode("preview");
-                  setSelectedText("");
                 }}
               >
                 <ExpandOutlined />
@@ -183,107 +160,150 @@ export function ArtifactPanel({
         </article>
       ))}
       {activeArtifact && (
-        <div className="artifactViewerLayer" role="presentation" onMouseDown={() => setActiveArtifact(null)}>
-          {(() => {
-            const displayedArtifact = activeVersion ? artifactFromVersion(activeArtifact, activeVersion) : activeArtifact;
-            return (
-          <section
-            className="artifactViewer"
-            role="dialog"
-            aria-modal="true"
-            aria-label={activeArtifact.title}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <strong>{displayedArtifact.title}</strong>
-                <span>{displayedArtifact.kind} · {displayedArtifact.mimeType} · v{displayedArtifact.version}</span>
-              </div>
-              <div className="artifactViewerActions">
-                <button
-                  className={viewerMode === "preview" ? "active" : ""}
-                  type="button"
-                  onClick={() => setViewerMode("preview")}
-                >
-                  <FileDoneOutlined />
-                  <span>预览</span>
+        <ArtifactViewerLayer
+          artifact={activeArtifact}
+          onClose={() => setActiveArtifact(null)}
+          onUseSelection={onUseSelection}
+        />
+      )}
+    </div>
+  );
+}
+
+export function ArtifactViewerLayer({
+  artifact,
+  onClose,
+  onUseSelection,
+}: {
+  artifact: HubArtifactDto;
+  onClose: () => void;
+  onUseSelection?: (artifact: HubArtifactDto, selectedText: string) => void;
+}) {
+  const [viewerMode, setViewerMode] = useState<"preview" | "code">("preview");
+  const [selectedText, setSelectedText] = useState("");
+  const [versions, setVersions] = useState<HubArtifactVersionDto[]>([]);
+  const [activeVersion, setActiveVersion] = useState<HubArtifactVersionDto | null>(null);
+
+  useEffect(() => {
+    setViewerMode("preview");
+    setSelectedText("");
+    setActiveVersion(null);
+    setVersions([]);
+  }, [artifact.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listArtifactVersions(artifact.id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setVersions(result.data.items);
+      else setVersions([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact.id]);
+
+  const displayedArtifact = activeVersion ? artifactFromVersion(artifact, activeVersion) : artifact;
+
+  return (
+    <div className="artifactViewerLayer" role="presentation" onMouseDown={onClose}>
+      <section
+        className="artifactViewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={artifact.title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <strong>{displayedArtifact.title}</strong>
+            <span>{displayedArtifact.kind} · {displayedArtifact.mimeType} · v{displayedArtifact.version}</span>
+          </div>
+          <div className="artifactViewerActions">
+            <button
+              className={viewerMode === "preview" ? "active" : ""}
+              type="button"
+              onClick={() => setViewerMode("preview")}
+            >
+              <FileDoneOutlined />
+              <span>预览</span>
+            </button>
+            <button
+              className={viewerMode === "code" ? "active" : ""}
+              type="button"
+              disabled={!displayedArtifact.textContent}
+              onClick={() => setViewerMode("code")}
+            >
+              <CodeOutlined />
+              <span>代码</span>
+            </button>
+            <a href={artifactContentUrl(artifact.id)} target="_blank" rel="noreferrer">
+              <LinkOutlined />
+            </a>
+            <button type="button" title="关闭" onClick={onClose}>
+              ×
+            </button>
+          </div>
+        </header>
+        {versions.length > 0 && (
+          <div className="artifactVersionBar">
+            <span>版本历史</span>
+            <button className={!activeVersion ? "active" : ""} type="button" onClick={() => setActiveVersion(null)}>
+              当前 v{artifact.version}
+            </button>
+            {versions.map((version) => (
+              <button
+                className={activeVersion?.id === version.id ? "active" : ""}
+                key={version.id}
+                type="button"
+                onClick={() => {
+                  setActiveVersion(version);
+                  setSelectedText("");
+                }}
+              >
+                v{version.version}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="artifactViewerBody">
+          {viewerMode === "code" && displayedArtifact.textContent ? (
+            <div className="artifactCodeEditor">
+              <textarea
+                spellCheck={false}
+                value={displayedArtifact.textContent}
+                readOnly
+                onSelect={(event) =>
+                  setSelectedText(
+                    event.currentTarget.value.slice(event.currentTarget.selectionStart, event.currentTarget.selectionEnd),
+                  )
+                }
+              />
+              <div className="artifactCodeBar">
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(displayedArtifact.textContent ?? "")}>
+                  <CopyOutlined />
+                  <span>复制全部</span>
                 </button>
-                <button
-                  className={viewerMode === "code" ? "active" : ""}
-                  type="button"
-                  disabled={!displayedArtifact.textContent}
-                  onClick={() => setViewerMode("code")}
-                >
-                  <CodeOutlined />
-                  <span>代码</span>
-                </button>
-                <a href={artifactContentUrl(activeArtifact.id)} target="_blank" rel="noreferrer">
-                  <LinkOutlined />
-                </a>
-                <button type="button" title="关闭" onClick={() => setActiveArtifact(null)}>
-                  ×
-                </button>
-              </div>
-            </header>
-            {versions.length > 0 && (
-              <div className="artifactVersionBar">
-                <span>版本历史</span>
-                <button className={!activeVersion ? "active" : ""} type="button" onClick={() => setActiveVersion(null)}>
-                  当前 v{activeArtifact.version}
-                </button>
-                {versions.map((version) => (
+                {onUseSelection && (
                   <button
-                    className={activeVersion?.id === version.id ? "active" : ""}
-                    key={version.id}
                     type="button"
+                    disabled={!selectedText.trim()}
                     onClick={() => {
-                      setActiveVersion(version);
-                      setSelectedText("");
+                      onUseSelection(displayedArtifact, selectedText.trim());
+                      onClose();
                     }}
                   >
-                    v{version.version}
+                    <SelectOutlined />
+                    <span>引用选区</span>
                   </button>
-                ))}
+                )}
               </div>
-            )}
-            <div className="artifactViewerBody">
-              {viewerMode === "code" && displayedArtifact.textContent ? (
-                <div className="artifactCodeEditor">
-                  <textarea
-                    spellCheck={false}
-                    value={displayedArtifact.textContent}
-                    readOnly
-                    onSelect={(event) => setSelectedText(event.currentTarget.value.slice(event.currentTarget.selectionStart, event.currentTarget.selectionEnd))}
-                  />
-                  <div className="artifactCodeBar">
-                    <button type="button" onClick={() => void navigator.clipboard?.writeText(displayedArtifact.textContent ?? "")}>
-                      <CopyOutlined />
-                      <span>复制全部</span>
-                    </button>
-                    {onUseSelection && (
-                      <button
-                        type="button"
-                        disabled={!selectedText.trim()}
-                        onClick={() => {
-                          onUseSelection(displayedArtifact, selectedText.trim());
-                          setActiveArtifact(null);
-                        }}
-                      >
-                        <SelectOutlined />
-                        <span>引用选区</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <ArtifactPreview artifact={displayedArtifact} expanded />
-              )}
             </div>
-          </section>
-            );
-          })()}
+          ) : (
+            <ArtifactPreview artifact={displayedArtifact} expanded />
+          )}
         </div>
-      )}
+      </section>
     </div>
   );
 }
