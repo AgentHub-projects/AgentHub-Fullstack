@@ -148,7 +148,7 @@
           <tr><td>GET</td><td class="route">/api/sessions/:sessionId</td><td>无</td><td>SessionDetailDto</td><td>读取会话快照：messages、runs、events、artifacts、fileChanges、context。</td></tr>
           <tr><td>POST</td><td class="route">/api/sessions/:sessionId/messages</td><td>SendHubMessageRequest</td><td>SendHubMessageResponse</td><td>保存用户消息、创建 run、构造 context snapshot，并异步启动云 Agent。</td></tr>
           <tr><td>POST</td><td class="route">/api/sessions/:sessionId/messages/:messageId/pin</td><td>{pinned: boolean}</td><td>HubMessageDto</td><td>pin 或取消 pin 消息。</td></tr>
-          <tr><td>POST</td><td class="route">/api/sessions/:sessionId/participants</td><td>{agentId: string}</td><td>{session, agent}</td><td>把 Agent 加入当前会话。</td></tr>
+          <tr><td>POST</td><td class="route">/api/sessions/:sessionId/participants</td><td>{agentId: number}</td><td>{session, agent}</td><td>兼容旧接口；第一版新增成员主路径是 <code>POST /api/agents</code>，按模板创建当前会话独占的 Agent 实例。</td></tr>
           <tr><td>POST</td><td class="route">/api/sessions/:sessionId/runs/:runId/cancel</td><td>{}</td><td>{runId, status}</td><td>取消 run，并向云 Agent 发送 <code>session/cancel</code>。</td></tr>
           <tr><td>GET</td><td class="route">/api/sessions/:sessionId/events</td><td>无</td><td>{items: HubEventDto[]}</td><td>回放持久化事件，最多 1000 条。</td></tr>
           <tr><td>GET</td><td class="route">/api/sessions/:sessionId/artifacts</td><td>无</td><td>{items: HubArtifactDto[]}</td><td>列出 artifact。</td></tr>
@@ -169,14 +169,15 @@
           <tr><td>POST</td><td class="route">/api/agent-templates/build/:buildId/messages</td><td>SendBuildMessageRequest</td><td>SendBuildMessageResponse</td><td>继续与 Builder 对话。</td></tr>
           <tr><td>POST</td><td class="route">/api/agent-templates/build/:buildId/confirm</td><td>ConfirmBuildRequest</td><td>ConfirmBuildResponse</td><td>确认并创建 Agent 模板。</td></tr>
           <tr><td>GET</td><td class="route">/api/artifacts/:artifactId/content</td><td>无</td><td>原始内容或 redirect</td><td>读取 artifact 内容。</td></tr>
+          <tr><td>GET</td><td class="route">/api/artifacts/:artifactId/versions</td><td>无</td><td>{items: HubArtifactVersionDto[]}</td><td>读取 artifact 版本历史。</td></tr>
         </tbody>
       </table>
 
       <h3>发送消息请求示例</h3>
       <pre><code>{
   "content": "@frontend-agent 请实现登录页",
-  "mentionedAgentIds": ["10000000-0000-4000-8000-000000000002"],
-  "orchestratorAgentId": "10000000-0000-4000-8000-000000000001",
+  "mentionedAgentIds": [2],
+  "orchestratorAgentId": 1,
   "parentMessageId": null
 }</code></pre>
 

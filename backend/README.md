@@ -156,7 +156,7 @@ pnpm acceptance
 | `PATCH` | `/api/projects/:projectId` | Update project metadata |
 | `DELETE` | `/api/projects/:projectId` | Logically delete a project |
 | `GET` | `/api/artifacts/:artifactId/content` | Read or redirect artifact content |
-| `GET` | `/api/:artifactId/versions` | List artifact versions |
+| `GET` | `/api/artifacts/:artifactId/versions` | List artifact versions |
 
 Frontend-facing routes are protected by the `agenthub_session` cookie. The downstream config route is intentionally public for the local downstream runtime and relies on parameter validation instead of a shared secret.
 
