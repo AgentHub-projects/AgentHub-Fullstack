@@ -57,6 +57,7 @@ export class AgentTemplateService {
         description: input.description,
         defaultProviderId: providerId,
         systemPrompt: input.systemPrompt,
+        defaultCapabilities: tools,
         promptConfig: input.tools !== undefined ? { tools } : undefined,
         status: "enabled",
       },
@@ -73,6 +74,7 @@ export class AgentTemplateService {
     if (input.defaultProvider !== undefined) {
       providerId = await this.resolveProviderId(input.defaultProvider);
     }
+    const tools = input.tools !== undefined ? normalizeTools(input.tools) : undefined;
 
     const item = await this.prisma.agentTemplate.update({
       where: { id },
@@ -81,10 +83,11 @@ export class AgentTemplateService {
         ...(input.description !== undefined && { description: input.description }),
         ...(providerId !== undefined && { defaultProviderId: providerId }),
         ...(input.systemPrompt !== undefined && { systemPrompt: input.systemPrompt }),
-        ...(input.tools !== undefined && {
+        ...(tools !== undefined && {
+          defaultCapabilities: tools,
           promptConfig: {
             ...objectValue(existing.promptConfig),
-            tools: normalizeTools(input.tools),
+            tools,
           },
         }),
       },
