@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AgentInstanceDto, HubEventDto, HubMessageDto, HubMessagePartDto, HubRunDto } from "@agenthub/shared";
+import type {
+  AgentInstanceDto,
+  HubEventDto,
+  HubFileChangeDto,
+  HubMessageDto,
+  HubMessagePartDto,
+  HubRunDto,
+} from "@agenthub/shared";
 import {
   ApiOutlined,
+  BranchesOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   CodeOutlined,
@@ -51,15 +59,21 @@ export function TimelineMessage({
 export function RunThread({
   run,
   events,
+  fileChanges,
   messages,
   agents,
   onPinPart,
+  onApplyFileChange,
+  applyingFileChangeId,
 }: {
   run: HubRunDto;
   events: HubEventDto[];
+  fileChanges: HubFileChangeDto[];
   messages: HubMessageDto[];
   agents: AgentInstanceDto[];
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
+  onApplyFileChange?: (change: HubFileChangeDto) => void;
+  applyingFileChangeId?: string | null;
 }) {
   const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
   const hasPersistedReplies = persistedReplies.length > 0 && !isRunning(run.status);
@@ -84,10 +98,57 @@ export function RunThread({
           }}
         />
       ))}
+      {fileChanges.length > 0 && (
+        <RunDiffCards
+          changes={fileChanges}
+          applyingId={applyingFileChangeId}
+          onApply={onApplyFileChange}
+        />
+      )}
       {activityEvents.length > 0 && <RunActivityTimeline events={activityEvents} defaultOpen={isRunning(run.status)} />}
       {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
       {run.status === "failed" && <RunFailureBlock run={run} events={events} />}
     </section>
+  );
+}
+
+function RunDiffCards({
+  changes,
+  applyingId,
+  onApply,
+}: {
+  changes: HubFileChangeDto[];
+  applyingId?: string | null;
+  onApply?: (change: HubFileChangeDto) => void;
+}) {
+  return (
+    <div className="runDiffCards">
+      {changes.map((change) => (
+        <details className="runDiffCard" key={change.id}>
+          <summary>
+            <span>
+              <BranchesOutlined />
+              <strong>{change.path}</strong>
+            </span>
+            <code>{change.changeType}</code>
+          </summary>
+          <div className="runDiffBody">
+            <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
+            {onApply && (
+              <button
+                className="ghostButton"
+                type="button"
+                disabled={applyingId === change.id}
+                onClick={() => onApply(change)}
+              >
+                <CheckCircleOutlined />
+                <span>{applyingId === change.id ? "应用中" : "应用 Diff"}</span>
+              </button>
+            )}
+          </div>
+        </details>
+      ))}
+    </div>
   );
 }
 
@@ -265,4 +326,10 @@ function activityTitle(event: HubEventDto) {
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+function buildBeforeAfterPreview(change: HubFileChangeDto) {
+  const before = change.beforeContent ? `--- before\n${change.beforeContent}` : "";
+  const after = change.afterContent ? `+++ after\n${change.afterContent}` : "";
+  return [before, after].filter(Boolean).join("\n\n") || "Diff 内容为空";
 }

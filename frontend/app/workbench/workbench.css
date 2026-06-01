@@ -876,6 +876,69 @@ textarea:focus-visible {
   background: #fffafa;
 }
 
+.runDiffCards {
+  display: grid;
+  gap: 8px;
+}
+
+.runDiffCard {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.runDiffCard summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  cursor: pointer;
+  padding: 0 11px;
+}
+
+.runDiffCard summary > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.runDiffCard summary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runDiffCard summary code {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.runDiffBody {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 9px 11px 11px;
+}
+
+.runDiffBody pre {
+  max-height: 260px;
+}
+
+.runDiffBody .ghostButton {
+  justify-self: end;
+}
+
 .richText {
   display: grid;
   gap: 7px;

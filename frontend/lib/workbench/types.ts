@@ -33,6 +33,7 @@ export type ConversationItem =
       run: HubRunDto;
       events: HubEventDto[];
       messages: HubMessageDto[];
+      fileChanges: HubFileChangeDto[];
     };
 
 export interface AgentReplyBlockModel {

@@ -1017,9 +1017,12 @@ export default function WorkbenchPage() {
                 key={item.id}
                 run={item.run}
                 events={item.events}
+                fileChanges={item.fileChanges}
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}
+                onApplyFileChange={handleApplyFileChange}
+                applyingFileChangeId={applyingFileChangeId}
               />
             ),
           )}

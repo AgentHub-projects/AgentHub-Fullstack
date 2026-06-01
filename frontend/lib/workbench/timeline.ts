@@ -6,7 +6,7 @@ import type {
   SessionDetailDto,
 } from "@agenthub/shared";
 import type { AgentReplyBlockModel, ConversationItem } from "./types";
-import { isRunning, sortEvent, sortMessage, sortRun } from "./format";
+import { isRunning, sortEvent, sortFileChange, sortMessage, sortRun } from "./format";
 
 export function buildConversationItems(detail: SessionDetailDto | null): ConversationItem[] {
   if (!detail) return [];
@@ -14,6 +14,7 @@ export function buildConversationItems(detail: SessionDetailDto | null): Convers
   const messages = [...detail.messages].sort(sortMessage);
   const runs = [...detail.runs].sort(sortRun);
   const eventsByRun = new Map<string, HubEventDto[]>();
+  const fileChangesByRun = new Map<string, typeof detail.fileChanges>();
   const messagesById = new Map(messages.map((message) => [message.id, message]));
   const claimedMessageIds = new Set<string>();
   const items: ConversationItem[] = [];
@@ -24,6 +25,12 @@ export function buildConversationItems(detail: SessionDetailDto | null): Convers
     eventsByRun.set(event.runId, current);
   }
 
+  for (const change of detail.fileChanges) {
+    const current = fileChangesByRun.get(change.runId) ?? [];
+    current.push(change);
+    fileChangesByRun.set(change.runId, current);
+  }
+
   for (const run of runs) {
     const associatedMessages = messages.filter((message) => message.runId === run.id);
     const userMessage =
@@ -31,7 +38,9 @@ export function buildConversationItems(detail: SessionDetailDto | null): Convers
       associatedMessages.find((message) => message.role === "user");
     const runMessages = associatedMessages.filter((message) => message.id !== userMessage?.id);
     const runEvents = [...(eventsByRun.get(run.id) ?? [])].sort(sortEvent);
-    const shouldShowRun = runMessages.length > 0 || runEvents.length > 0 || isRunning(run.status) || run.status === "failed";
+    const runFileChanges = [...(fileChangesByRun.get(run.id) ?? [])].sort(sortFileChange);
+    const shouldShowRun =
+      runMessages.length > 0 || runEvents.length > 0 || runFileChanges.length > 0 || isRunning(run.status) || run.status === "failed";
 
     if (userMessage) {
       claimedMessageIds.add(userMessage.id);
@@ -46,6 +55,7 @@ export function buildConversationItems(detail: SessionDetailDto | null): Convers
         run,
         events: runEvents,
         messages: runMessages,
+        fileChanges: runFileChanges,
       });
     }
   }
