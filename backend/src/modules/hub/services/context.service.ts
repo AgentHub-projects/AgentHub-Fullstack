@@ -98,6 +98,50 @@ export class HubContextService {
     return message;
   }
 
+  async setMessagePartPinned(sessionId: string, messageId: string, partId: string, pinned: boolean) {
+    const message = await this.prisma.message.findFirst({ where: { id: messageId, sessionId } });
+    if (!message) throw new Error("Message not found");
+    const contentJson = objectValue(message.contentJson);
+    const parts = Array.isArray(contentJson.parts) ? contentJson.parts : [];
+    const part = parts.find((item) => objectValue(item).id === partId);
+    if (!part) throw new Error("Message part not found");
+    const partObject = objectValue(part);
+    const text = partText(partObject);
+
+    const existing = await this.prisma.contextItem.findMany({
+      where: { sessionId, sourceType: "message_part", sourceId: messageId },
+    });
+    for (const item of existing) {
+      if (objectValue(item.metadata).partId === partId) {
+        await this.prisma.contextItem.update({ where: { id: item.id }, data: { pinned } });
+      }
+    }
+    if (pinned && !existing.some((item) => objectValue(item.metadata).partId === partId)) {
+      await this.recordContextItem({
+        sessionId,
+        sourceType: "message_part",
+        sourceId: messageId,
+        kind: "manual_pin",
+        text,
+        pinned: true,
+        importance: 100,
+        metadata: { messageId, partId, partType: partObject.type },
+      });
+    }
+
+    const pinnedPartIds = new Set(
+      Array.isArray(contentJson.pinnedPartIds)
+        ? contentJson.pinnedPartIds.filter((item): item is string => typeof item === "string")
+        : [],
+    );
+    if (pinned) pinnedPartIds.add(partId);
+    else pinnedPartIds.delete(partId);
+    return this.prisma.message.update({
+      where: { id: messageId },
+      data: { contentJson: { ...contentJson, pinnedPartIds: [...pinnedPartIds] } as any },
+    });
+  }
+
   async buildSnapshot(input: {
     sessionId: string;
     runId?: string;
@@ -433,4 +477,17 @@ function renderContextPrompt(snapshot: ContextSnapshotPayload): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function partText(part: Record<string, unknown>) {
+  const title = typeof part.title === "string" ? part.title : "";
+  const url = typeof part.url === "string" ? part.url : "";
+  const text = typeof part.text === "string" ? part.text : "";
+  const metadata = objectValue(part.metadata);
+  const description = typeof metadata.description === "string" ? metadata.description : "";
+  return [title, url, description, text].filter(Boolean).join("\n").slice(0, 20000);
 }

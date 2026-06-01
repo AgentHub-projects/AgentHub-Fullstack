@@ -404,14 +404,16 @@ export class HubSessionService {
   }
 
   async pinMessage(sessionId: string, messageId: string, input: PinHubMessageRequest) {
-    const message = await this.context.setMessagePinned(sessionId, messageId, input.pinned);
+    const message = input.partId
+      ? await this.context.setMessagePartPinned(sessionId, messageId, input.partId, input.pinned)
+      : await this.context.setMessagePinned(sessionId, messageId, input.pinned);
     const mapped = mapMessage(message);
     await this.events.append({
       sessionId,
       runId: message.runId ?? (await this.getLatestRunId(sessionId)),
       eventType: "context.updated",
       source: "agenthub_backend",
-      payload: { messageId, pinned: input.pinned },
+      payload: { messageId, partId: input.partId, pinned: input.pinned },
     });
     return mapped;
   }

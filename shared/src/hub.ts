@@ -357,6 +357,7 @@ export interface ApplyFileChangeResponse {
 
 export interface PinHubMessageRequest {
   pinned: boolean;
+  partId?: string;
 }
 
 export interface AddParticipantRequest {
