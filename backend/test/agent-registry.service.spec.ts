@@ -37,6 +37,28 @@ describe("AgentRegistryService session member metadata", () => {
       }),
     }));
   });
+
+  it("rejects creating session agents from disabled templates", async () => {
+    const template = templateRow({ status: "disabled" });
+    const prisma = {
+      agentTemplate: {
+        findUnique: vi.fn(async () => template),
+      },
+      agent: {
+        create: vi.fn(),
+      },
+      sessionAgent: {
+        create: vi.fn(),
+      },
+    };
+    const service = new AgentRegistryService(prisma as any);
+
+    await expect(service.createAgentFromTemplate("session-1", template.id, undefined, undefined, "member"))
+      .rejects.toThrow("Template disabled");
+
+    expect(prisma.agent.create).not.toHaveBeenCalled();
+    expect(prisma.sessionAgent.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("AgentRegistryService downstream config", () => {

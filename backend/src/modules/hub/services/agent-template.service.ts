@@ -32,6 +32,7 @@ export class AgentTemplateService {
   async list(): Promise<AgentTemplateDto[]> {
     const [items, providerNames] = await Promise.all([
       this.prisma.agentTemplate.findMany({
+        where: { status: { not: "disabled" } },
         orderBy: { createdAt: "asc" },
       }),
       this.loadProviderNames(),
@@ -99,7 +100,7 @@ export class AgentTemplateService {
   async delete(id: number): Promise<{ ok: boolean }> {
     const existing = await this.prisma.agentTemplate.findUnique({ where: { id } });
     if (!existing) throw new Error("AgentTemplate not found");
-    await this.prisma.agentTemplate.delete({ where: { id } });
+    await this.prisma.agentTemplate.update({ where: { id }, data: { status: "disabled" } });
     return { ok: true };
   }
 }

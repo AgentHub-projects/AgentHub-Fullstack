@@ -26,6 +26,18 @@ describe("AgentTemplateService tools", () => {
     expect(result.defaultCapabilities).toEqual(["shell", "git"]);
   });
 
+  it("hides disabled templates from the template list", async () => {
+    const prisma = createPrisma();
+    prisma.agentTemplate.findMany.mockResolvedValue([templateRow()]);
+    const service = new AgentTemplateService(prisma as any);
+
+    await service.list();
+
+    expect(prisma.agentTemplate.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: { not: "disabled" } },
+    }));
+  });
+
   it("keeps template capabilities aligned when tools are updated", async () => {
     const prisma = createPrisma();
     prisma.agentTemplate.findUnique.mockResolvedValue(templateRow({ promptConfig: { tools: ["shell"] } }));
@@ -44,6 +56,21 @@ describe("AgentTemplateService tools", () => {
       }),
     }));
   });
+
+  it("logically disables templates instead of physically deleting them", async () => {
+    const prisma = createPrisma();
+    prisma.agentTemplate.findUnique.mockResolvedValue(templateRow());
+    prisma.agentTemplate.update.mockResolvedValue(templateRow({ status: "disabled" }));
+    const service = new AgentTemplateService(prisma as any);
+
+    await expect(service.delete(10)).resolves.toEqual({ ok: true });
+
+    expect(prisma.agentTemplate.update).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: { status: "disabled" },
+    });
+    expect(prisma.agentTemplate.delete).not.toHaveBeenCalled();
+  });
 });
 
 function createPrisma() {
@@ -54,8 +81,10 @@ function createPrisma() {
     },
     agentTemplate: {
       create: vi.fn(),
+      findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
     },
   };
 }

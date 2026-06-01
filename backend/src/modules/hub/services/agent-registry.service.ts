@@ -97,6 +97,7 @@ export class AgentRegistryService implements OnModuleInit {
       where: { id: templateId },
     });
     if (!tpl) throw new Error("Template not found");
+    if (tpl.status === "disabled") throw new Error("Template disabled");
 
     const providerId = provider ? await this.resolveProviderId(provider) : tpl.defaultProviderId;
     const agentName = await this.nextAgentName(name?.trim() || tpl.name);
