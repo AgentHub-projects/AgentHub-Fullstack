@@ -5,6 +5,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   CreateSessionAgentRequest,
+  HubArtifactDto,
   HubFileChangeDto,
   HubMessageDto,
   HubMessagePartDto,
@@ -703,6 +704,20 @@ export default function WorkbenchPage() {
     }
   }
 
+  function handleArtifactSelection(artifact: HubArtifactDto, selectedText: string) {
+    const prompt = [
+      `请修改产物「${artifact.title}」中的选中内容：`,
+      "",
+      "```",
+      selectedText,
+      "```",
+      "",
+      "修改要求：",
+    ].join("\n");
+    setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   async function handleAttachmentFiles(files: FileList | null) {
     if (!activeSessionId || !files?.length || uploadingAttachment) return;
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
@@ -1190,7 +1205,9 @@ export default function WorkbenchPage() {
                 onApply={handleApplyFileChange}
               />
             )}
-            {inspectorTab === "artifacts" && <ArtifactPanel artifacts={detail?.artifacts ?? []} />}
+            {inspectorTab === "artifacts" && (
+              <ArtifactPanel artifacts={detail?.artifacts ?? []} onUseSelection={handleArtifactSelection} />
+            )}
           </>
         )}
       </aside>

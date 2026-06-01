@@ -1740,7 +1740,7 @@ textarea:focus-visible {
   color: var(--green);
 }
 
-.artifactTop div {
+.artifactTop > div:not(.artifactActions) {
   min-width: 0;
   flex: 1;
 }
@@ -1754,11 +1754,19 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.artifactTop a {
+.artifactActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.artifactTop a,
+.artifactActions button,
+.artifactViewerActions a,
+.artifactViewerActions button {
   display: grid;
   width: 30px;
   height: 30px;
-  flex: 0 0 30px;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -1767,7 +1775,15 @@ textarea:focus-visible {
   text-decoration: none;
 }
 
-.artifactTop a:hover {
+.artifactActions button,
+.artifactViewerActions button {
+  padding: 0;
+}
+
+.artifactTop a:hover,
+.artifactActions button:hover,
+.artifactViewerActions a:hover,
+.artifactViewerActions button:hover {
   border-color: var(--line-strong);
   background: var(--surface-hover);
   color: var(--ink);
@@ -1794,6 +1810,10 @@ textarea:focus-visible {
   background: var(--surface-muted);
 }
 
+.documentFrame.expanded {
+  min-height: 100%;
+}
+
 .mediaPreview {
   display: grid;
   place-items: center;
@@ -1808,6 +1828,143 @@ textarea:focus-visible {
   max-width: 100%;
   max-height: 420px;
   object-fit: contain;
+}
+
+.mediaPreview.expanded {
+  min-height: 100%;
+}
+
+.mediaPreview.expanded img {
+  max-height: calc(100vh - 190px);
+}
+
+.artifactViewerLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.32);
+  padding: 22px;
+}
+
+.artifactViewer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1180px, 100%);
+  height: min(780px, calc(100vh - 44px));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.artifactViewer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+}
+
+.artifactViewer header > div:first-child {
+  min-width: 0;
+}
+
+.artifactViewer header strong,
+.artifactViewer header span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifactViewer header span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.artifactViewerActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.artifactViewerActions button:not(:last-child) {
+  width: auto;
+  gap: 6px;
+  padding: 0 9px;
+}
+
+.artifactViewerActions button.active {
+  border-color: #c9d6f5;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.artifactViewerBody {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.artifactViewerBody > .richText,
+.artifactViewerBody > pre {
+  min-height: 100%;
+}
+
+.artifactCodeEditor {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+}
+
+.artifactCodeEditor textarea {
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  color: #263242;
+  padding: 12px;
+  font-family: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.artifactCodeBar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.artifactCodeBar button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  color: var(--ink-soft);
+  padding: 0 12px;
+  font-weight: 760;
+}
+
+.artifactCodeBar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .documentFallback {

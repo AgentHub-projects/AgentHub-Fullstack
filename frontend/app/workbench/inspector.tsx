@@ -13,9 +13,12 @@ import {
   BranchesOutlined,
   CheckCircleOutlined,
   CodeOutlined,
+  CopyOutlined,
+  ExpandOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
   LinkOutlined,
+  SelectOutlined,
 } from "@ant-design/icons";
 import { artifactContentUrl } from "../../lib/agenthub-api";
 import {
@@ -117,7 +120,17 @@ export function DiffPanel({
   );
 }
 
-export function ArtifactPanel({ artifacts }: { artifacts: HubArtifactDto[] }) {
+export function ArtifactPanel({
+  artifacts,
+  onUseSelection,
+}: {
+  artifacts: HubArtifactDto[];
+  onUseSelection?: (artifact: HubArtifactDto, selectedText: string) => void;
+}) {
+  const [activeArtifact, setActiveArtifact] = useState<HubArtifactDto | null>(null);
+  const [viewerMode, setViewerMode] = useState<"preview" | "code">("preview");
+  const [selectedText, setSelectedText] = useState("");
+
   if (artifacts.length === 0) return <PanelEmpty icon={<FileDoneOutlined />} text="暂无 artifact" />;
   return (
     <div className="panelScroll">
@@ -129,13 +142,102 @@ export function ArtifactPanel({ artifacts }: { artifacts: HubArtifactDto[] }) {
               <strong>{artifact.title}</strong>
               <small>{artifact.kind} · {artifact.mimeType} · v{artifact.version} · {artifact.final ? "final" : "draft"}</small>
             </div>
-            <a title="打开内容" href={artifactContentUrl(artifact.id)} target="_blank" rel="noreferrer">
-              <LinkOutlined />
-            </a>
+            <div className="artifactActions">
+              <button
+                title="展开预览"
+                type="button"
+                onClick={() => {
+                  setActiveArtifact(artifact);
+                  setViewerMode("preview");
+                  setSelectedText("");
+                }}
+              >
+                <ExpandOutlined />
+              </button>
+              <a title="打开内容" href={artifactContentUrl(artifact.id)} target="_blank" rel="noreferrer">
+                <LinkOutlined />
+              </a>
+            </div>
           </div>
           <ArtifactPreview artifact={artifact} />
         </article>
       ))}
+      {activeArtifact && (
+        <div className="artifactViewerLayer" role="presentation" onMouseDown={() => setActiveArtifact(null)}>
+          <section
+            className="artifactViewer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={activeArtifact.title}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong>{activeArtifact.title}</strong>
+                <span>{activeArtifact.kind} · {activeArtifact.mimeType} · v{activeArtifact.version}</span>
+              </div>
+              <div className="artifactViewerActions">
+                <button
+                  className={viewerMode === "preview" ? "active" : ""}
+                  type="button"
+                  onClick={() => setViewerMode("preview")}
+                >
+                  <FileDoneOutlined />
+                  <span>预览</span>
+                </button>
+                <button
+                  className={viewerMode === "code" ? "active" : ""}
+                  type="button"
+                  disabled={!activeArtifact.textContent}
+                  onClick={() => setViewerMode("code")}
+                >
+                  <CodeOutlined />
+                  <span>代码</span>
+                </button>
+                <a href={artifactContentUrl(activeArtifact.id)} target="_blank" rel="noreferrer">
+                  <LinkOutlined />
+                </a>
+                <button type="button" title="关闭" onClick={() => setActiveArtifact(null)}>
+                  ×
+                </button>
+              </div>
+            </header>
+            <div className="artifactViewerBody">
+              {viewerMode === "code" && activeArtifact.textContent ? (
+                <div className="artifactCodeEditor">
+                  <textarea
+                    spellCheck={false}
+                    value={activeArtifact.textContent}
+                    readOnly
+                    onSelect={(event) => setSelectedText(event.currentTarget.value.slice(event.currentTarget.selectionStart, event.currentTarget.selectionEnd))}
+                  />
+                  <div className="artifactCodeBar">
+                    <button type="button" onClick={() => void navigator.clipboard?.writeText(activeArtifact.textContent ?? "")}>
+                      <CopyOutlined />
+                      <span>复制全部</span>
+                    </button>
+                    {onUseSelection && (
+                      <button
+                        type="button"
+                        disabled={!selectedText.trim()}
+                        onClick={() => {
+                          onUseSelection(activeArtifact, selectedText.trim());
+                          setActiveArtifact(null);
+                        }}
+                      >
+                        <SelectOutlined />
+                        <span>引用选区</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <ArtifactPreview artifact={activeArtifact} expanded />
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -162,22 +264,22 @@ export function InlineArtifact({ event }: { event: HubEventDto }) {
   );
 }
 
-function ArtifactPreview({ artifact }: { artifact: HubArtifactDto }) {
+function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifactDto; expanded?: boolean }) {
   const contentUrl = artifactContentUrl(artifact.id);
   if (artifact.kind === "image") {
     return (
-      <div className="mediaPreview">
+      <div className={`mediaPreview ${expanded ? "expanded" : ""}`}>
         <img alt={artifact.title} src={contentUrl} />
       </div>
     );
   }
 
   if (artifact.kind === "pdf") {
-    return <iframe className="documentFrame" title={artifact.title} src={contentUrl} />;
+    return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} src={contentUrl} />;
   }
 
   if (artifact.kind === "html" && artifact.textContent) {
-    return <iframe className="documentFrame" title={artifact.title} srcDoc={artifact.textContent} sandbox="" />;
+    return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} srcDoc={artifact.textContent} sandbox="" />;
   }
 
   if (artifact.kind === "docx") {
