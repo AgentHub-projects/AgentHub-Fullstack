@@ -1280,6 +1280,12 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
+.messageCardActions {
+  display: inline-flex;
+  gap: 2px;
+  overflow: visible;
+}
+
 .messageCardPart strong,
 .messageCardPart span,
 .messageCardPart small {
@@ -1291,6 +1297,12 @@ textarea:focus-visible {
 
 .messageCardPart small {
   color: var(--muted);
+}
+
+.messageCardPart .messageCardActions {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .fileMessagePart {
@@ -1710,6 +1722,11 @@ textarea:focus-visible {
   text-decoration: none;
 }
 
+.deployStatusActions {
+  display: inline-flex;
+  gap: 2px;
+}
+
 .deployStatusPart button {
   display: grid;
   width: 26px;
@@ -1761,6 +1778,11 @@ textarea:focus-visible {
   color: var(--brand);
   font-size: 12px;
   text-decoration: none;
+}
+
+.linkPreviewActions {
+  display: inline-flex;
+  gap: 2px;
 }
 
 .linkPreviewPart button {

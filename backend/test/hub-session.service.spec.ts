@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveTitle, parseDeploymentCommandTarget } from "../src/modules/hub/services/hub-session.service";
+import {
+  deriveTitle,
+  parseDeploymentCommandTarget,
+  referencedPartText,
+} from "../src/modules/hub/services/hub-session.service";
 
 describe("HubSessionService deployment command parsing", () => {
   it("maps chat deployment commands to deployment targets", () => {
@@ -20,5 +24,32 @@ describe("HubSessionService title derivation", () => {
   it("does not overwrite manual or already-derived titles", () => {
     expect(deriveTitle("手动标题", "新的用户消息", { titleSource: "manual" })).toBe("手动标题");
     expect(deriveTitle("首条消息标题", "第二条消息", { titleSource: "auto" })).toBe("首条消息标题");
+  });
+});
+
+describe("HubSessionService part references", () => {
+  it("builds reference text for non-text message parts", () => {
+    const text = referencedPartText({
+      parts: [
+        {
+          id: "file_1",
+          type: "file",
+          title: "需求文档.pdf",
+          url: "https://oss.example/requirements.pdf",
+          metadata: { mimeType: "application/pdf", sizeBytes: 1024 },
+        },
+      ],
+    }, "file_1");
+
+    expect(text).toContain("type: file");
+    expect(text).toContain("title: 需求文档.pdf");
+    expect(text).toContain("url: https://oss.example/requirements.pdf");
+    expect(text).toContain("mimeType: application/pdf");
+  });
+
+  it("keeps code/text part content in references", () => {
+    expect(referencedPartText({
+      parts: [{ id: "code_1", type: "code", language: "ts", text: "const ok = true;" }],
+    }, "code_1")).toContain("const ok = true;");
   });
 });

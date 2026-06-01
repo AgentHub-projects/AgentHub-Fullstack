@@ -49,6 +49,7 @@ export function TimelineMessage({
   onPin,
   onPinPart,
   onReply,
+  onReferencePart,
   onRegenerate,
   onOpenArtifact,
   agents,
@@ -57,6 +58,7 @@ export function TimelineMessage({
   onPin: (message: HubMessageDto) => void;
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
+  onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   agents: AgentInstanceDto[];
@@ -68,6 +70,7 @@ export function TimelineMessage({
         onPin={onPin}
         onPinPart={onPinPart}
         onReply={onReply}
+        onReferencePart={onReferencePart}
         onRegenerate={onRegenerate}
         onOpenArtifact={onOpenArtifact}
       />
@@ -78,6 +81,7 @@ export function TimelineMessage({
     <AgentReplyBlock
       block={messageToReplyBlock(message, agents)}
       onPinPart={(part) => onPinPart?.(message, part)}
+      onReferencePart={(part) => onReferencePart?.(message, part)}
       onReply={onReply ? () => onReply(message) : undefined}
       onRegenerate={canRegenerate && onRegenerate ? () => onRegenerate(message) : undefined}
       onOpenArtifact={onOpenArtifact}
@@ -93,6 +97,7 @@ export function RunThread({
   agents,
   onPinPart,
   onReply,
+  onReferencePart,
   onRegenerate,
   onApplyFileChange,
   onOpenArtifact,
@@ -105,6 +110,7 @@ export function RunThread({
   agents: AgentInstanceDto[];
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
+  onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   onApplyFileChange?: (change: HubFileChangeDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
@@ -131,6 +137,9 @@ export function RunThread({
             block={block}
             onPinPart={(part) => {
               if (message) onPinPart?.(message, part);
+            }}
+            onReferencePart={(part) => {
+              if (message) onReferencePart?.(message, part);
             }}
             onReply={message && onReply ? () => onReply(message) : undefined}
             onRegenerate={message && canRegenerateMessage(message) && onRegenerate ? () => onRegenerate(message) : undefined}
@@ -223,6 +232,7 @@ function UserMessage({
   onPin,
   onPinPart,
   onReply,
+  onReferencePart,
   onRegenerate,
   onOpenArtifact,
 }: {
@@ -230,6 +240,7 @@ function UserMessage({
   onPin: (message: HubMessageDto) => void;
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
+  onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
 }) {
@@ -260,6 +271,7 @@ function UserMessage({
           parts={message.parts}
           fallbackText={message.contentText}
           onPinPart={onPinPart ? (part) => onPinPart(message, part) : undefined}
+          onReferencePart={onReferencePart ? (part) => onReferencePart(message, part) : undefined}
           onOpenArtifact={onOpenArtifact}
         />
       </div>
@@ -270,12 +282,14 @@ function UserMessage({
 function AgentReplyBlock({
   block,
   onPinPart,
+  onReferencePart,
   onReply,
   onRegenerate,
   onOpenArtifact,
 }: {
   block: AgentReplyBlockModel;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
   onReply?: () => void;
   onRegenerate?: () => void;
   onOpenArtifact?: (artifactId: string) => void;
@@ -310,6 +324,7 @@ function AgentReplyBlock({
             parts={block.parts}
             fallbackText={block.text}
             onPinPart={block.messageId ? onPinPart : undefined}
+            onReferencePart={block.messageId ? onReferencePart : undefined}
             onOpenArtifact={onOpenArtifact}
           />
         ) : (

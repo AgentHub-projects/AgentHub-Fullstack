@@ -9,6 +9,7 @@ import {
   FileDoneOutlined,
   LinkOutlined,
   LoadingOutlined,
+  CommentOutlined,
   PushpinFilled,
   PushpinOutlined,
   RocketOutlined,
@@ -32,17 +33,19 @@ export function MessageParts({
   parts,
   fallbackText,
   onPinPart,
+  onReferencePart,
   onOpenArtifact,
 }: {
   parts?: HubMessagePartDto[];
   fallbackText: string;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
 }) {
   if (!parts?.length) return <RichText text={fallbackText} />;
   return (
     <div className="richText">
-      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onOpenArtifact))}
+      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onReferencePart, onOpenArtifact))}
     </div>
   );
 }
@@ -51,6 +54,7 @@ function renderMessagePart(
   part: HubMessagePartDto,
   index: number,
   onPinPart?: (part: HubMessagePartDto) => void,
+  onReferencePart?: (part: HubMessagePartDto) => void,
   onOpenArtifact?: (artifactId: string) => void,
 ): React.ReactNode[] {
   if (part.type === "code") {
@@ -61,37 +65,45 @@ function renderMessagePart(
         language={part.language}
         pinned={part.pinned}
         onPin={onPinPart ? () => onPinPart(part) : undefined}
+        onReference={onReferencePart ? () => onReferencePart(part) : undefined}
       />,
     ];
   }
   if (part.type === "deploy_status") {
-    return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
   }
   if (part.type === "link_preview") {
-    return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
   }
   if (part.type === "image") {
-    return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<ImagePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
   }
   if (part.type === "file") {
-    return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
   }
   if (part.type === "diff") {
-    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} />];
   }
   if (part.type === "artifact") {
-    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onOpenArtifact={onOpenArtifact} />];
+    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenArtifact={onOpenArtifact} />];
   }
   if (part.type !== "text") {
     return [
       <div className="messageCardPart" key={part.id || index}>
         <div>
           <strong>{part.title ?? part.type}</strong>
-          {onPinPart && (
-            <button type="button" title={part.pinned ? "取消 Pin 这个 part" : "Pin 这个 part"} onClick={() => onPinPart(part)}>
-              {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-            </button>
-          )}
+          <span className="messageCardActions">
+            {onPinPart && (
+              <button type="button" title={part.pinned ? "取消 Pin 这个 part" : "Pin 这个 part"} onClick={() => onPinPart(part)}>
+                {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+              </button>
+            )}
+            {onReferencePart && (
+              <button type="button" title="引用这个 part" onClick={() => onReferencePart(part)}>
+                <CommentOutlined />
+              </button>
+            )}
+          </span>
         </div>
         {part.url && <span>{part.url}</span>}
         {part.text && <small>{part.text}</small>}
@@ -106,9 +118,11 @@ function renderMessagePart(
 function DiffPart({
   part,
   onPinPart,
+  onReferencePart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
 }) {
   const path = stringMetadata(part.metadata, "path") ?? part.title ?? "Diff";
   const changeType = stringMetadata(part.metadata, "changeType");
@@ -135,6 +149,11 @@ function DiffPart({
           {onPinPart && (
             <button type="button" title={part.pinned ? "取消 Pin Diff" : "Pin Diff"} onClick={() => onPinPart(part)}>
               {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </button>
+          )}
+          {onReferencePart && (
+            <button type="button" title="引用 Diff" onClick={() => onReferencePart(part)}>
+              <CommentOutlined />
             </button>
           )}
         </div>
@@ -171,9 +190,11 @@ function beforeAfterLines(before: string, after: string): DiffLine[] {
 function FilePart({
   part,
   onPinPart,
+  onReferencePart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
 }) {
   const mimeType = stringMetadata(part.metadata, "mimeType");
   const sizeBytes = numberMetadata(part.metadata, "sizeBytes");
@@ -201,6 +222,11 @@ function FilePart({
                 {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
               </button>
             )}
+            {onReferencePart && (
+              <button type="button" title="引用文件" onClick={() => onReferencePart(part)}>
+                <CommentOutlined />
+              </button>
+            )}
           </div>
         </div>
         {part.text?.trim() && <pre>{part.text}</pre>}
@@ -212,9 +238,11 @@ function FilePart({
 function ImagePart({
   part,
   onPinPart,
+  onReferencePart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
 }) {
   return (
     <div className="imageMessagePart">
@@ -231,6 +259,11 @@ function ImagePart({
               {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
             </button>
           )}
+          {onReferencePart && (
+            <button type="button" title="引用图片" onClick={() => onReferencePart(part)}>
+              <CommentOutlined />
+            </button>
+          )}
         </div>
       </div>
       {part.url ? (
@@ -245,10 +278,12 @@ function ImagePart({
 function ArtifactPart({
   part,
   onPinPart,
+  onReferencePart,
   onOpenArtifact,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
 }) {
   const artifactId = stringMetadata(part.metadata, "artifactId");
@@ -304,6 +339,11 @@ function ArtifactPart({
               {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
             </button>
           )}
+          {onReferencePart && (
+            <button type="button" title="引用 artifact" onClick={() => onReferencePart(part)}>
+              <CommentOutlined />
+            </button>
+          )}
         </div>
       </div>
       <ArtifactInlinePreview kind={kind} title={title} contentUrl={contentUrl} text={part.text} />
@@ -341,9 +381,11 @@ function ArtifactInlinePreview({
 function LinkPreviewPart({
   part,
   onPinPart,
+  onReferencePart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
 }) {
   const description = stringMetadata(part.metadata, "description") ?? part.text ?? "";
   return (
@@ -357,11 +399,18 @@ function LinkPreviewPart({
           </a>
         )}
       </div>
-      {onPinPart && (
-        <button type="button" title={part.pinned ? "取消 Pin 网页预览" : "Pin 网页预览"} onClick={() => onPinPart(part)}>
-          {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-        </button>
-      )}
+      <div className="linkPreviewActions">
+        {onPinPart && (
+          <button type="button" title={part.pinned ? "取消 Pin 网页预览" : "Pin 网页预览"} onClick={() => onPinPart(part)}>
+            {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+          </button>
+        )}
+        {onReferencePart && (
+          <button type="button" title="引用网页预览" onClick={() => onReferencePart(part)}>
+            <CommentOutlined />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -369,9 +418,11 @@ function LinkPreviewPart({
 function DeployStatusPart({
   part,
   onPinPart,
+  onReferencePart,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
+  onReferencePart?: (part: HubMessagePartDto) => void;
 }) {
   const status = stringMetadata(part.metadata, "status") ?? "queued";
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
@@ -403,11 +454,18 @@ function DeployStatusPart({
         )}
         {status === "failed" && errorMessage && <small>{errorMessage}</small>}
       </div>
-      {onPinPart && (
-        <button type="button" title={part.pinned ? "取消 Pin 部署状态" : "Pin 部署状态"} onClick={() => onPinPart(part)}>
-          {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
-        </button>
-      )}
+      <div className="deployStatusActions">
+        {onPinPart && (
+          <button type="button" title={part.pinned ? "取消 Pin 部署状态" : "Pin 部署状态"} onClick={() => onPinPart(part)}>
+            {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+          </button>
+        )}
+        {onReferencePart && (
+          <button type="button" title="引用部署状态" onClick={() => onReferencePart(part)}>
+            <CommentOutlined />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -455,11 +513,13 @@ function CodeBlock({
   language,
   pinned,
   onPin,
+  onReference,
 }: {
   text: string;
   language?: string;
   pinned?: boolean;
   onPin?: () => void;
+  onReference?: () => void;
 }) {
   return (
     <div className="codeBlock">
@@ -474,6 +534,11 @@ function CodeBlock({
           <button type="button" title="复制代码" onClick={() => copyText(text)}>
             <CopyOutlined />
           </button>
+          {onReference && (
+            <button type="button" title="引用代码" onClick={onReference}>
+              <CommentOutlined />
+            </button>
+          )}
         </div>
       </div>
       <pre>{text}</pre>

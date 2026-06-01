@@ -783,13 +783,42 @@ export function parseDeploymentCommandTarget(text: string): DeploymentTarget | n
   return "static";
 }
 
-function referencedPartText(contentJson: unknown, partId: string) {
+export function referencedPartText(contentJson: unknown, partId: string) {
   const content = mergeMetadata(contentJson, {});
   if (!Array.isArray(content.parts)) return null;
   const part = content.parts
     .map((item) => mergeMetadata(item, {}))
     .find((item) => item.id === partId);
-  return typeof part?.text === "string" ? part.text : null;
+  if (!part) return null;
+  return summarizePartForReference(part);
+}
+
+function summarizePartForReference(part: Record<string, unknown>) {
+  const metadata = mergeMetadata(part.metadata, {});
+  const lines = [
+    stringLine("type", part.type),
+    stringLine("title", part.title),
+    stringLine("url", part.url),
+    stringLine("language", part.language),
+    stringLine("mimeType", metadata.mimeType),
+    stringLine("sizeBytes", metadata.sizeBytes),
+    stringLine("description", metadata.description),
+    stringLine("artifactId", metadata.artifactId),
+    stringLine("kind", metadata.kind),
+    stringLine("deploymentId", metadata.deploymentId),
+    stringLine("status", metadata.status),
+    stringLine("target", metadata.target),
+    stringLine("commitSha", metadata.commitSha),
+    stringLine("sourceArchiveUrl", metadata.sourceArchiveUrl),
+    typeof part.text === "string" && part.text.trim() ? `text:\n${part.text}` : "",
+  ].filter(Boolean);
+  return lines.join("\n").slice(0, 20000) || null;
+}
+
+function stringLine(label: string, value: unknown) {
+  if (typeof value === "string" && value.trim()) return `${label}: ${value}`;
+  if (typeof value === "number" && Number.isFinite(value)) return `${label}: ${value}`;
+  return "";
 }
 
 function sessionMatchesQuery(

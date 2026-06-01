@@ -99,6 +99,12 @@ const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
   fileChanges: [],
 };
 
+type ReplyTarget = {
+  message: HubMessageDto;
+  partId?: string;
+  preview: string;
+};
+
 export default function WorkbenchPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
@@ -117,7 +123,7 @@ export default function WorkbenchPage() {
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
   const [composer, setComposer] = useState("");
   const [attachments, setAttachments] = useState<UploadedAttachmentDto[]>([]);
-  const [replyTargets, setReplyTargets] = useState<HubMessageDto[]>([]);
+  const [replyTargets, setReplyTargets] = useState<ReplyTarget[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -541,9 +547,9 @@ export default function WorkbenchPage() {
         content: text,
         mentionedAgentIds: targetAgentIds,
         orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
-        parentMessageId: replyTargets[0]?.id,
-        quotedMessageId: replyTargets[0]?.id,
-        references: replyTargets.map((message) => ({ messageId: message.id })),
+        parentMessageId: replyTargets[0]?.message.id,
+        quotedMessageId: replyTargets[0]?.message.id,
+        references: replyTargets.map((target) => ({ messageId: target.message.id, partId: target.partId })),
         attachments: attachments.map((item) => ({ id: item.id })),
       });
       if (!result.ok) {
@@ -778,8 +784,17 @@ export default function WorkbenchPage() {
   function addReplyTarget(message: HubMessageDto) {
     if (!sessionWritable) return;
     setReplyTargets((current) => {
-      if (current.some((item) => item.id === message.id)) return current;
-      return [...current, message].slice(0, 5);
+      if (current.some((item) => item.message.id === message.id && !item.partId)) return current;
+      return [...current, { message, preview: message.contentText.slice(0, 48) || message.role }].slice(0, 5);
+    });
+  }
+
+  function addReplyPartTarget(message: HubMessageDto, part: HubMessagePartDto) {
+    if (!sessionWritable) return;
+    setReplyTargets((current) => {
+      if (current.some((item) => item.message.id === message.id && item.partId === part.id)) return current;
+      const preview = part.title ?? part.text?.slice(0, 48) ?? part.type;
+      return [...current, { message, partId: part.id, preview }].slice(0, 5);
     });
   }
 
@@ -1164,6 +1179,7 @@ export default function WorkbenchPage() {
                 onPin={handlePin}
                 onPinPart={handlePinPart}
                 onReply={sessionWritable ? addReplyTarget : undefined}
+                onReferencePart={sessionWritable ? addReplyPartTarget : undefined}
                 onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 agents={agents}
@@ -1178,6 +1194,7 @@ export default function WorkbenchPage() {
                 agents={agents}
                 onPinPart={handlePinPart}
                 onReply={sessionWritable ? addReplyTarget : undefined}
+                onReferencePart={sessionWritable ? addReplyPartTarget : undefined}
                 onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
                 onApplyFileChange={sessionWritable ? handleApplyFileChange : undefined}
                 onOpenArtifact={openArtifactViewer}
@@ -1191,7 +1208,10 @@ export default function WorkbenchPage() {
         <footer className="composer">
           {replyTargets.length > 0 && (
             <div className="replyBanner">
-              <span>引用 {replyTargets.length}/5：{replyTargets.map((message) => message.contentText.slice(0, 28)).join(" / ")}</span>
+              <span>
+                引用 {replyTargets.length}/5：
+                {replyTargets.map((target) => `${target.partId ? "片段 " : ""}${target.preview.slice(0, 28)}`).join(" / ")}
+              </span>
               <button type="button" onClick={() => setReplyTargets([])}>
                 取消
               </button>
