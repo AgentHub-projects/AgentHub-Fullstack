@@ -26,6 +26,8 @@ const shortTermBuffers = new Map<string, { events: string[]; tokenCount: number 
 const SHORT_TERM_EVENT_LIMIT = 20;
 const SHORT_TERM_TOKEN_LIMIT = 2000;
 const PINNED_PART_TEXT_LIMIT = 20_000;
+const RECENT_CODE_PART_LIMIT = 3;
+const RECENT_CODE_PART_TEXT_LIMIT = 2_000;
 
 @Injectable()
 export class HubContextService {
@@ -180,15 +182,18 @@ export class HubContextService {
     const recent = this.selectWithinBudget(
       recentMessages
         .reverse()
-        .map((message) => ({
-          id: message.id,
-          kind: "message" as const,
-          text: `${message.role}${message.agentId ? `:${message.agentId}` : ""}: ${message.contentText}`,
-          tokenCount: message.tokenCount || this.estimateTokens(message.contentText),
-          importance: message.isPinned ? 100 : 0,
-          pinned: message.isPinned,
-          createdAt: message.createdAt.toISOString(),
-        })),
+        .map((message) => {
+          const text = snapshotMessageContextText(message);
+          return {
+            id: message.id,
+            kind: "message" as const,
+            text,
+            tokenCount: this.estimateTokens(text),
+            importance: message.isPinned ? 100 : 0,
+            pinned: message.isPinned,
+            createdAt: message.createdAt.toISOString(),
+          };
+        }),
       this.recentTokenBudget,
       selectedIds,
       (count) => { total += count; },
@@ -513,6 +518,41 @@ export function messagePartContextText(part: Record<string, unknown>) {
     contextBlock("afterContent", metadata.afterContent),
   ].filter(Boolean);
   return lines.join("\n").slice(0, PINNED_PART_TEXT_LIMIT);
+}
+
+export function snapshotMessageContextText(message: {
+  role?: unknown;
+  agentId?: unknown;
+  contentText?: unknown;
+  contentJson?: unknown;
+}) {
+  const role = typeof message.role === "string" && message.role ? message.role : "message";
+  const agentId =
+    typeof message.agentId === "number" || typeof message.agentId === "string" ? `:${message.agentId}` : "";
+  const contentText = typeof message.contentText === "string" ? message.contentText : "";
+  const base = `${role}${agentId}: ${contentText}`;
+  const codeBlocks = recentCodePartSummaries(objectValue(message.contentJson), contentText);
+  return [base, ...codeBlocks].filter((item) => item.trim()).join("\n\n");
+}
+
+function recentCodePartSummaries(contentJson: Record<string, unknown>, contentText: string) {
+  const parts = Array.isArray(contentJson.parts) ? contentJson.parts : [];
+  return parts
+    .map(objectValue)
+    .filter((part) => part.type === "code")
+    .filter((part) => typeof part.text === "string" && part.text.trim())
+    .filter((part) => !contentText.includes((part.text as string).trim()))
+    .slice(0, RECENT_CODE_PART_LIMIT)
+    .map((part, index) => {
+      const code = (part.text as string).trim();
+      const language = typeof part.language === "string" && part.language ? `, language: ${part.language}` : "";
+      const title = typeof part.title === "string" && part.title ? `, title: ${part.title}` : "";
+      const preview =
+        code.length > RECENT_CODE_PART_TEXT_LIMIT
+          ? `${code.slice(0, RECENT_CODE_PART_TEXT_LIMIT)}\n[truncated: ${code.length - RECENT_CODE_PART_TEXT_LIMIT} chars omitted]`
+          : code;
+      return `code part ${index + 1}${language}${title}, chars: ${code.length}:\n${preview}`;
+    });
 }
 
 function contextLine(label: string, value: unknown) {
