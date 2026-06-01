@@ -1380,6 +1380,89 @@ textarea:focus-visible {
   white-space: pre-wrap;
 }
 
+.diffMessagePart {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.diffMessageTop {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 8px;
+}
+
+.diffMessageIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--brand);
+}
+
+.diffMessageTop > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.diffMessageTop strong,
+.diffMessageTop span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffMessageTop span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diffMessageTop > div:last-child {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.diffMessageTop a,
+.diffMessageTop button {
+  display: grid;
+  width: 28px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.diffMessageTop a:hover,
+.diffMessageTop button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.diffMessagePart .unifiedDiff {
+  max-height: 280px;
+}
+
+.diffMessagePart > pre {
+  max-height: 220px;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+}
+
 .imageMessagePart {
   display: grid;
   gap: 8px;

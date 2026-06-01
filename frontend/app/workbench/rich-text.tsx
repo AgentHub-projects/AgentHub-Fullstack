@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CopyOutlined,
+  BranchesOutlined,
   ExpandOutlined,
   FileDoneOutlined,
   LinkOutlined,
@@ -13,7 +14,9 @@ import {
   RocketOutlined,
 } from "@ant-design/icons";
 import { artifactContentUrl } from "../../lib/agenthub-api";
+import { diffMarker, parseUnifiedPatch } from "../../lib/workbench/diff";
 import { parseMarkdownBlocks, type MarkdownBlock } from "../../lib/workbench/markdown";
+import type { DiffLine } from "../../lib/workbench/types";
 
 export function RichText({ text }: { text: string }) {
   if (!text) return null;
@@ -73,6 +76,9 @@ function renderMessagePart(
   if (part.type === "file") {
     return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
+  if (part.type === "diff") {
+    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type === "artifact") {
     return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onOpenArtifact={onOpenArtifact} />];
   }
@@ -95,6 +101,71 @@ function renderMessagePart(
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
   );
+}
+
+function DiffPart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  const path = stringMetadata(part.metadata, "path") ?? part.title ?? "Diff";
+  const changeType = stringMetadata(part.metadata, "changeType");
+  const patch = part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
+  const before = stringMetadata(part.metadata, "beforeContent");
+  const after = stringMetadata(part.metadata, "afterContent");
+  const lines = patch.trim() ? parseUnifiedPatch(patch) : before || after ? beforeAfterLines(before ?? "", after ?? "") : [];
+  return (
+    <div className="diffMessagePart">
+      <div className="diffMessageTop">
+        <span className="diffMessageIcon">
+          <BranchesOutlined />
+        </span>
+        <div>
+          <strong>{path}</strong>
+          <span>{changeType ?? "diff"}</span>
+        </div>
+        <div>
+          {part.url && (
+            <a title="打开 Diff" href={part.url} target="_blank" rel="noreferrer">
+              <LinkOutlined />
+            </a>
+          )}
+          {onPinPart && (
+            <button type="button" title={part.pinned ? "取消 Pin Diff" : "Pin Diff"} onClick={() => onPinPart(part)}>
+              {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </button>
+          )}
+        </div>
+      </div>
+      {lines.length ? <DiffLines lines={lines} /> : <pre>{JSON.stringify(part.metadata ?? {}, null, 2)}</pre>}
+    </div>
+  );
+}
+
+function DiffLines({ lines }: { lines: DiffLine[] }) {
+  return (
+    <div className="unifiedDiff" role="table">
+      {lines.map((line, index) => (
+        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
+          <span className="lineNo">{line.oldLine ?? ""}</span>
+          <span className="lineNo">{line.newLine ?? ""}</span>
+          <span className="lineMarker">{diffMarker(line.kind)}</span>
+          <code>{line.text || " "}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function beforeAfterLines(before: string, after: string): DiffLine[] {
+  return [
+    { kind: "meta", text: "--- before" },
+    ...before.replace(/\r\n/g, "\n").split("\n").map((text, index) => ({ kind: "remove" as const, oldLine: index + 1, text })),
+    { kind: "meta", text: "+++ after" },
+    ...after.replace(/\r\n/g, "\n").split("\n").map((text, index) => ({ kind: "add" as const, newLine: index + 1, text })),
+  ];
 }
 
 function FilePart({
