@@ -57,6 +57,9 @@ function renderMessagePart(
   if (part.type === "deploy_status") {
     return [<DeployStatusPart key={part.id || index} part={part} onPinPart={onPinPart} />];
   }
+  if (part.type === "link_preview") {
+    return [<LinkPreviewPart key={part.id || index} part={part} onPinPart={onPinPart} />];
+  }
   if (part.type !== "text") {
     return [
       <div className="messageCardPart" key={part.id || index}>
@@ -75,6 +78,34 @@ function renderMessagePart(
   }
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
     renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+  );
+}
+
+function LinkPreviewPart({
+  part,
+  onPinPart,
+}: {
+  part: HubMessagePartDto;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
+  const description = stringMetadata(part.metadata, "description") ?? part.text ?? "";
+  return (
+    <div className="linkPreviewPart">
+      <div>
+        <strong>{part.title ?? part.url ?? "网页预览"}</strong>
+        {description && <span>{description}</span>}
+        {part.url && (
+          <a href={part.url} target="_blank" rel="noreferrer">
+            {part.url}
+          </a>
+        )}
+      </div>
+      {onPinPart && (
+        <button type="button" title={part.pinned ? "取消 Pin 网页预览" : "Pin 网页预览"} onClick={() => onPinPart(part)}>
+          {part.pinned ? <PushpinFilled /> : <PushpinOutlined />}
+        </button>
+      )}
+    </div>
   );
 }
 

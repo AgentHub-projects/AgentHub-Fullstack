@@ -1098,6 +1098,59 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
+.linkPreviewPart {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.linkPreviewPart > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.linkPreviewPart strong,
+.linkPreviewPart span,
+.linkPreviewPart a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkPreviewPart span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.linkPreviewPart a {
+  color: var(--brand);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.linkPreviewPart button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.linkPreviewPart button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .markdownTableWrap {
   min-width: 0;
   overflow: auto;
