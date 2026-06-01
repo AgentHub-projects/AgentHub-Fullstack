@@ -25,6 +25,7 @@ const shortTermBuffers = new Map<string, { events: string[]; tokenCount: number 
 
 const SHORT_TERM_EVENT_LIMIT = 20;
 const SHORT_TERM_TOKEN_LIMIT = 2000;
+const PINNED_PART_TEXT_LIMIT = 20_000;
 
 @Injectable()
 export class HubContextService {
@@ -484,10 +485,42 @@ function objectValue(value: unknown): Record<string, unknown> {
 }
 
 function partText(part: Record<string, unknown>) {
-  const title = typeof part.title === "string" ? part.title : "";
-  const url = typeof part.url === "string" ? part.url : "";
-  const text = typeof part.text === "string" ? part.text : "";
+  return messagePartContextText(part);
+}
+
+export function messagePartContextText(part: Record<string, unknown>) {
   const metadata = objectValue(part.metadata);
-  const description = typeof metadata.description === "string" ? metadata.description : "";
-  return [title, url, description, text].filter(Boolean).join("\n").slice(0, 20000);
+  const lines = [
+    contextLine("type", part.type),
+    contextLine("title", part.title),
+    contextLine("url", part.url),
+    contextLine("language", part.language),
+    contextLine("mimeType", metadata.mimeType),
+    contextLine("sizeBytes", metadata.sizeBytes),
+    contextLine("description", metadata.description),
+    contextLine("artifactId", metadata.artifactId),
+    contextLine("kind", metadata.kind),
+    contextLine("path", metadata.path),
+    contextLine("changeType", metadata.changeType),
+    contextLine("deploymentId", metadata.deploymentId),
+    contextLine("status", metadata.status),
+    contextLine("target", metadata.target),
+    contextLine("commitSha", metadata.commitSha),
+    contextLine("sourceArchiveUrl", metadata.sourceArchiveUrl),
+    contextBlock("text", part.text),
+    contextBlock("patch", metadata.patch),
+    contextBlock("beforeContent", metadata.beforeContent),
+    contextBlock("afterContent", metadata.afterContent),
+  ].filter(Boolean);
+  return lines.join("\n").slice(0, PINNED_PART_TEXT_LIMIT);
+}
+
+function contextLine(label: string, value: unknown) {
+  if (typeof value === "string" && value.trim()) return `${label}: ${value}`;
+  if (typeof value === "number" && Number.isFinite(value)) return `${label}: ${value}`;
+  return "";
+}
+
+function contextBlock(label: string, value: unknown) {
+  return typeof value === "string" && value.trim() ? `${label}:\n${value}` : "";
 }
