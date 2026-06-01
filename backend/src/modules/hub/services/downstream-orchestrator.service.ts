@@ -11,6 +11,7 @@ import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../uti
 
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
+const RECOVERY_TIMEOUT_MS = 3000;
 
 @Injectable()
 export class DownstreamOrchestratorService implements OnModuleDestroy {
@@ -30,6 +31,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   onModuleDestroy() {
     for (const record of this.connections.values()) {
       this.clearIdleTimer(record);
+      record.closing = true;
       record.socket.disconnect();
     }
     this.connections.clear();
@@ -63,7 +65,10 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     try {
-      const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator);
+      const reusableDownstreamSessionId = await this.findReusableDownstreamSessionId(input.sessionId);
+      const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
+        downstreamSessionId: reusableDownstreamSessionId,
+      });
       const downstreamSessionId = await connection.downstreamReady;
       const needsBootstrap = connection.needsBootstrap;
       const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
@@ -86,7 +91,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
       await this.prisma.agentRun.update({
         where: { id: input.runId },
-        data: { status: "running", startedAt: new Date() },
+        data: {
+          status: "running",
+          startedAt: new Date(),
+          downstreamSessionId,
+          downstreamRunId: input.runId,
+        },
       });
       const session = await this.prisma.session.update({
         where: { id: input.sessionId },
@@ -123,6 +133,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       data: { status: "cancelled", completedAt: new Date() },
     });
     const record = this.connections.get(sessionId);
+    if (record?.activeRunId === runId) record.activeRunId = undefined;
     record?.socket.emit("acp:message", {
       jsonrpc: "2.0",
       id: record.nextId++,
@@ -138,12 +149,18 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       source: "agenthub_backend",
       payload: { status: "cancelled" },
     });
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    if (session) this.gateway.emitSession(mapSession(session));
   }
 
   async closeSession(sessionId: string) {
     const record = this.connections.get(sessionId);
     if (!record) return;
     this.clearIdleTimer(record);
+    record.closing = true;
     record.socket.disconnect();
     this.connections.delete(sessionId);
   }
@@ -200,6 +217,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     sessionId: string,
     downstreamUrl: string,
     _orchestrator: AgentInstanceDto,
+    options: { downstreamSessionId?: string | null; activeRunId?: string; activeOrchestratorAgentId?: AgentId } = {},
   ): Promise<ConnectionRecord> {
     const existing = this.connections.get(sessionId);
     if (existing?.socket.connected) {
@@ -207,6 +225,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     if (existing) {
+      existing.closing = true;
       existing.socket.disconnect();
       this.connections.delete(sessionId);
     }
@@ -217,25 +236,31 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     let resolveReady!: (id: string) => void;
-    const downstreamReady = new Promise<string>((resolve) => {
+    let rejectReady!: (error: Error) => void;
+    const downstreamReady = new Promise<string>((resolve, reject) => {
       resolveReady = resolve;
+      rejectReady = reject;
     });
 
     const record: ConnectionRecord = {
       key: sessionId,
       socket,
       sessionId,
+      downstreamSessionId: options.downstreamSessionId ?? undefined,
       downstreamReady,
       resolveDownstreamReady: resolveReady,
+      rejectDownstreamReady: rejectReady,
+      activeRunId: options.activeRunId,
+      activeOrchestratorAgentId: options.activeOrchestratorAgentId,
       idleTimer: null,
       lastActivityAt: Date.now(),
-      needsBootstrap: true,
+      needsBootstrap: !options.downstreamSessionId,
       nextId: 1,
+      pendingRequests: new Map(),
     };
     this.connections.set(sessionId, record);
 
     socket.on("connect", () => {
-      record.needsBootstrap = true;
       // ACP v1 initialize
       socket.emit("acp:message", {
         jsonrpc: "2.0",
@@ -246,36 +271,75 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
         },
       });
-      // ACP v1 session/new
-      socket.emit("acp:message", {
-        jsonrpc: "2.0",
-        id: record.nextId++,
-        method: "session/new",
-        params: {
-          _meta: { agentId: "orchestrator" },
-          mcpServers: [],
-        },
-      });
+      const loadSessionId = record.downstreamSessionId;
+      void this.requestDownstream(
+        record,
+        loadSessionId ? "session/load" : "session/new",
+        loadSessionId
+          ? { sessionId: loadSessionId }
+          : {
+              _meta: { agentId: "orchestrator" },
+              mcpServers: [],
+            },
+      )
+        .then((result) => {
+          const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
+          if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
+          record.downstreamSessionId = resultSessionId;
+          record.needsBootstrap = !loadSessionId;
+          record.loadedActiveRun = readActiveRun(result);
+          record.resolveDownstreamReady?.(resultSessionId);
+        })
+        .catch((error) => {
+          if (loadSessionId && !record.activeRunId) {
+            record.downstreamSessionId = undefined;
+            record.needsBootstrap = true;
+            void this.requestDownstream(record, "session/new", {
+              _meta: { agentId: "orchestrator" },
+              mcpServers: [],
+            })
+              .then((result) => {
+                const resultSessionId = stringValue(result.sessionId);
+                if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
+                record.downstreamSessionId = resultSessionId;
+                record.loadedActiveRun = undefined;
+                record.resolveDownstreamReady?.(resultSessionId);
+              })
+              .catch((fallbackError) => {
+                record.rejectDownstreamReady?.(
+                  fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)),
+                );
+              });
+            return;
+          }
+          record.rejectDownstreamReady?.(error instanceof Error ? error : new Error(String(error)));
+        });
       this.markDownstreamActivity(record);
     });
 
-    // Capture session/new response to get downstream session ID
     socket.on("acp:message", (msg: DownstreamEnvelope) => {
-      if (msg.result?.sessionId) {
-        record.downstreamSessionId = stringValue(msg.result.sessionId);
-        if (record.downstreamSessionId) {
-          record.resolveDownstreamReady?.(record.downstreamSessionId);
-        }
-        return;
-      }
       void this.handleDownstreamEvent(record, msg);
     });
 
     socket.on("disconnect", () => {
       this.clearIdleTimer(record);
       record.needsBootstrap = true;
+      for (const [id, pending] of record.pendingRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("DOWNSTREAM_DISCONNECTED"));
+        record.pendingRequests.delete(id);
+      }
       if (this.connections.get(sessionId) === record) {
         this.connections.delete(sessionId);
+      }
+      if (record.activeRunId && !record.closing) {
+        void this.recoverActiveRunAfterDisconnect({
+          sessionId,
+          runId: record.activeRunId,
+          orchestratorAgentId: record.activeOrchestratorAgentId ?? 1,
+          downstreamSessionId: record.downstreamSessionId,
+          downstreamUrl,
+        });
       }
     });
 
@@ -308,6 +372,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
   private closeIfIdle(record: ConnectionRecord) {
     if (this.connections.get(record.key) !== record) return;
+    if (record.activeRunId) {
+      this.clearIdleTimer(record);
+      record.idleTimer = setTimeout(() => {
+        this.closeIfIdle(record);
+      }, IDLE_RECHECK_MS);
+      return;
+    }
     const idleFor = Date.now() - record.lastActivityAt;
     if (idleFor >= IDLE_TIMEOUT_MS && !this.gateway.hasSessionSubscribers(record.sessionId)) {
       record.socket.disconnect();
@@ -328,8 +399,44 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  private requestDownstream(
+    record: ConnectionRecord,
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = RECOVERY_TIMEOUT_MS,
+  ): Promise<Record<string, unknown>> {
+    const id = record.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        record.pendingRequests.delete(id);
+        reject(new Error(`${method.toUpperCase()}_TIMEOUT`));
+      }, timeoutMs);
+      record.pendingRequests.set(id, { resolve, reject, timer });
+      record.socket.emit("acp:message", {
+        jsonrpc: "2.0",
+        id,
+        method,
+        params,
+      });
+    });
+  }
+
   private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
     this.markDownstreamActivity(record);
+
+    const requestId = typeof envelope.id === "number" ? envelope.id : typeof envelope.id === "string" ? Number(envelope.id) : null;
+    if (requestId && record.pendingRequests.has(requestId)) {
+      const pending = record.pendingRequests.get(requestId)!;
+      record.pendingRequests.delete(requestId);
+      clearTimeout(pending.timer);
+      if (envelope.error) {
+        const message = typeof envelope.error === "string" ? envelope.error : envelope.error.message ?? "DOWNSTREAM_REQUEST_FAILED";
+        pending.reject(new Error(message));
+      } else {
+        pending.resolve(asRecord(envelope.result));
+      }
+      return;
+    }
 
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
 
@@ -527,6 +634,112 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
+  private async findReusableDownstreamSessionId(sessionId: string) {
+    const agentRunModel = this.prisma.agentRun as any;
+    if (typeof agentRunModel.findFirst !== "function") return null;
+    const run = await agentRunModel.findFirst({
+      where: {
+        sessionId,
+        downstreamSessionId: { not: null },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { downstreamSessionId: true },
+    });
+    return run?.downstreamSessionId ?? null;
+  }
+
+  private async recoverActiveRunAfterDisconnect(input: {
+    sessionId: string;
+    runId: string;
+    orchestratorAgentId: AgentId;
+    downstreamSessionId?: string;
+    downstreamUrl: string;
+  }) {
+    const agentRunModel = this.prisma.agentRun as any;
+    if (typeof agentRunModel.findUnique !== "function") return;
+    const run = await agentRunModel.findUnique({ where: { id: input.runId } });
+    if (!run || !isActiveRunStatus(run.status)) return;
+    if (!input.downstreamSessionId) {
+      await this.failRun(
+        input.sessionId,
+        input.runId,
+        input.orchestratorAgentId,
+        "DOWNSTREAM_DISCONNECTED",
+        "downstream disconnected without a reusable session",
+      );
+      return;
+    }
+
+    try {
+      const record = await this.ensureConnection(
+        input.sessionId,
+        input.downstreamUrl,
+        { id: input.orchestratorAgentId } as AgentInstanceDto,
+        {
+          downstreamSessionId: input.downstreamSessionId,
+          activeRunId: input.runId,
+          activeOrchestratorAgentId: input.orchestratorAgentId,
+        },
+      );
+      await record.downstreamReady;
+      const status = await this.readRecoveredRunStatus(record, input.runId);
+      if (status === "completed" || status === "ready" || status === "success") {
+        await this.completeRun(input.sessionId, input.runId, input.orchestratorAgentId, {
+          status: "completed",
+          recovered: true,
+        });
+        return;
+      }
+      if (status === "failed" || status === "error") {
+        await this.failRun(
+          input.sessionId,
+          input.runId,
+          input.orchestratorAgentId,
+          "DOWNSTREAM_RUN_FAILED",
+          "downstream run failed during recovery",
+        );
+        return;
+      }
+      await this.prisma.agentRun.update({
+        where: { id: input.runId },
+        data: { status: "running", downstreamSessionId: input.downstreamSessionId },
+      });
+      await this.events.append({
+        sessionId: input.sessionId,
+        runId: input.runId,
+        eventType: "run.status",
+        speakerAgentId: input.orchestratorAgentId,
+        source: "agenthub_backend",
+        payload: { status: "running", downstream: "recovered" },
+      });
+      const session = await this.prisma.session.findUnique({
+        where: { id: input.sessionId },
+        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+      });
+      if (session) this.gateway.emitSession(mapSession(session));
+    } catch (error) {
+      await this.failRun(
+        input.sessionId,
+        input.runId,
+        input.orchestratorAgentId,
+        "DOWNSTREAM_DISCONNECTED",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private async readRecoveredRunStatus(record: ConnectionRecord, runId: string) {
+    if (record.loadedActiveRun?.runId) {
+      if (record.loadedActiveRun.runId !== runId) throw new Error("DOWNSTREAM_ACTIVE_RUN_MISMATCH");
+      return record.loadedActiveRun.status ?? "running";
+    }
+    const result = await this.requestDownstream(record, "run/status", { runId });
+    const statusRun = asRecord(result.run ?? result.activeRun ?? result);
+    const statusRunId = stringValue(statusRun.runId) ?? stringValue(statusRun.id);
+    if (statusRunId && statusRunId !== runId) throw new Error("DOWNSTREAM_RUN_STATUS_MISMATCH");
+    return stringValue(statusRun.status) ?? "running";
+  }
+
   private async isRunCancelled(runId: string): Promise<boolean> {
     const run = await this.prisma.agentRun.findUnique({
       where: { id: runId },
@@ -611,6 +824,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     return {
       sessionId: downstreamSessionId,
+      runId: input.runId,
+      agentHubSessionId: input.sessionId,
       prompt: [{ text: promptText, type: "text" }],
     };
   }
@@ -639,6 +854,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: runId },
       data: { status: "completed", completedAt: new Date() },
     });
+    const record = this.connections.get(sessionId);
+    if (record?.activeRunId === runId) record.activeRunId = undefined;
     const session = await this.prisma.session.update({
       where: { id: sessionId },
       data: { updatedAt: new Date() },
@@ -659,6 +876,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: runId },
       data: { status: "failed", errorCode: code, errorMessage: message, completedAt: new Date() },
     });
+    const record = this.connections.get(sessionId);
+    if (record?.activeRunId === runId) record.activeRunId = undefined;
     await this.events.append({
       sessionId,
       runId,
@@ -666,6 +885,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       speakerAgentId,
       payload: { code, message },
     });
+    if (typeof this.prisma.session.findUnique === "function") {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+      });
+      if (session) this.gateway.emitSession(mapSession(session));
+    }
   }
 }
 
@@ -673,4 +899,19 @@ function agentIdValue(value: unknown): AgentId | undefined {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return undefined;
+}
+
+function isActiveRunStatus(status: string) {
+  return status === "queued" || status === "context_building" || status === "connecting" || status === "running";
+}
+
+function readActiveRun(result: Record<string, unknown>) {
+  const activeRun = asRecord(result.activeRun ?? result.run);
+  const runId =
+    stringValue(activeRun.runId) ??
+    stringValue(activeRun.id) ??
+    stringValue(result.activeRunId) ??
+    stringValue(result.runId);
+  const status = stringValue(activeRun.status) ?? stringValue(result.activeRunStatus) ?? stringValue(result.status);
+  return runId || status ? { runId, status } : undefined;
 }

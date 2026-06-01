@@ -137,6 +137,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 
     gateway.hasSessionSubscribers.mockReturnValue(true);
     await startRunWithDownstreamSession(service, createRunInput("run-1", "保持连接"), "downstream-session-1");
+    socketMock.sockets[0].trigger("acp:message", { jsonrpc: "2.0", id: 99, result: { stopReason: "end_turn" } });
+    await flushMicrotasks();
 
     await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS);
     expect(socketMock.sockets[0].disconnect).not.toHaveBeenCalled();
