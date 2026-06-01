@@ -187,11 +187,15 @@ export class HubAgentController {
 
   @Get(":id/detail")
   async getAgentDetail(@Param("id") id: string) {
-    const agent = await this.agents.getAgent(Number(id));
-    if (!agent) {
+    const agentId = Number(id);
+    const [agent, config] = await Promise.all([
+      this.agents.getAgent(agentId),
+      this.agents.getDownstreamConfig(agentId),
+    ]);
+    if (!agent || !config) {
       throw Object.assign(new Error("Agent not found"), { statusCode: 404 });
     }
-    return { agent, template: agent.template ?? null };
+    return { agent, template: agent.template ?? null, config };
   }
 
   @Post()

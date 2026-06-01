@@ -39,7 +39,39 @@ describe("AgentRegistryService session member metadata", () => {
   });
 });
 
-function templateRow() {
+describe("AgentRegistryService downstream config", () => {
+  it("returns a minimal executable agent config", async () => {
+    const template = templateRow({
+      promptConfig: { temperature: 0.2 },
+      defaultCapabilities: ["frontend", "git"],
+      defaultModelConfig: { model: "claude-sonnet" },
+      metadata: { tools: ["shell"] },
+    });
+    const prisma = {
+      provider: {
+        findMany: vi.fn(async () => [{ id: 1, name: "claude-code" }]),
+      },
+      agent: {
+        findUnique: vi.fn(async () => agentRow({ id: 7, name: "frontend-agent", providerId: 1, template })),
+      },
+    };
+    const service = new AgentRegistryService(prisma as any);
+
+    await expect(service.getDownstreamConfig(7)).resolves.toMatchObject({
+      agentId: 7,
+      templateId: template.id,
+      name: "frontend-agent",
+      provider: "claude-code",
+      systemPrompt: "system",
+      promptConfig: { temperature: 0.2 },
+      capabilities: ["frontend", "git"],
+      modelConfig: { model: "claude-sonnet" },
+      metadata: { tools: ["shell"], agentStatus: "enabled", templateStatus: "enabled" },
+    });
+  });
+});
+
+function templateRow(overrides: Record<string, any> = {}) {
   return {
     id: 10,
     name: "Frontend Agent 模板",
@@ -53,6 +85,7 @@ function templateRow() {
     status: "enabled",
     createdAt: now,
     updatedAt: now,
+    ...overrides,
   };
 }
 
