@@ -152,6 +152,7 @@ export class DeploymentService {
     const contentJson = asObject(existing.contentJson);
     const statusText = deploymentStatusText(deployment.status);
     const contentText = `${statusText}：${deployment.project.name}@${deployment.commitSha.slice(0, 12)}`;
+    const sourceArchiveUrl = githubArchiveUrl(deployment.project.githubUrl, deployment.commitSha);
     const message = await this.prisma.message.update({
       where: { id: existing.id },
       data: {
@@ -169,10 +170,12 @@ export class DeploymentService {
                 deploymentId: deployment.id,
                 projectId: deployment.projectId,
                 projectName: deployment.project.name,
+                githubUrl: deployment.project.githubUrl,
                 commitSha: deployment.commitSha,
                 status: deployment.status,
                 jobId: deployment.deployServiceJobId,
                 errorMessage: deployment.errorMessage,
+                sourceArchiveUrl,
               },
             },
           ],
@@ -208,4 +211,19 @@ function deploymentStatusText(status: string) {
   if (status === "failed") return "部署失败";
   if (status === "running") return "部署中";
   return "部署排队";
+}
+
+function githubArchiveUrl(githubUrl: string, commitSha: string) {
+  const normalized = githubUrl.replace(/\.git$/, "");
+  const ssh = /^git@github\.com:([^/]+)\/(.+)$/.exec(normalized);
+  if (ssh) return `https://github.com/${ssh[1]}/${ssh[2]}/archive/${commitSha}.zip`;
+  try {
+    const url = new URL(normalized);
+    if (url.hostname !== "github.com") return null;
+    const [owner, repo] = url.pathname.replace(/^\/|\/$/g, "").split("/");
+    if (!owner || !repo) return null;
+    return `https://github.com/${owner}/${repo}/archive/${commitSha}.zip`;
+  } catch {
+    return null;
+  }
 }

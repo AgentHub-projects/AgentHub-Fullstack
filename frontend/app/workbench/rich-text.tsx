@@ -120,6 +120,7 @@ function DeployStatusPart({
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
   const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
   const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
+  const sourceArchiveUrl = stringMetadata(part.metadata, "sourceArchiveUrl");
   const shortSha = commitSha ? commitSha.slice(0, 12) : "";
   return (
     <div className={`deployStatusPart ${deployStatusClass(status)}`}>
@@ -132,7 +133,12 @@ function DeployStatusPart({
         </span>
         {part.url && (
           <a href={part.url} target="_blank" rel="noreferrer">
-            {part.url}
+            预览地址：{part.url}
+          </a>
+        )}
+        {sourceArchiveUrl && (
+          <a href={sourceArchiveUrl} target="_blank" rel="noreferrer">
+            下载源码包
           </a>
         )}
         {status === "failed" && errorMessage && <small>{errorMessage}</small>}
