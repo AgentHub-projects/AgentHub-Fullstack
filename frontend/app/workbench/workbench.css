@@ -1136,6 +1136,23 @@ textarea:focus-visible {
   flex: 0 0 auto;
 }
 
+.runDiffSummaryBadges button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.runDiffSummaryBadges button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .runDiffBody {
   display: grid;
   gap: 8px;
@@ -2616,6 +2633,10 @@ textarea:focus-visible {
   box-shadow: var(--shadow-soft);
 }
 
+.fileChangeViewer {
+  width: min(1120px, 100%);
+}
+
 .artifactViewer {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -2696,6 +2717,11 @@ textarea:focus-visible {
   font-weight: 760;
 }
 
+.messagePartViewerActions button:disabled {
+  opacity: 0.54;
+  cursor: not-allowed;
+}
+
 .artifactViewerActions button:not(:last-child) {
   width: auto;
   gap: 6px;
@@ -2753,6 +2779,21 @@ textarea:focus-visible {
 
 .messagePartViewerBody {
   display: grid;
+}
+
+.fileChangeViewerBody {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+}
+
+.fileChangeViewerBody .diffStats {
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.fileChangeViewerBody .messagePartDiffPreview {
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
 
 .artifactViewerBody > .richText,

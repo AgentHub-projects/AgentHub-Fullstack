@@ -17,6 +17,7 @@ import {
   CodeOutlined,
   CommentOutlined,
   CopyOutlined,
+  ExpandOutlined,
   FileDoneOutlined,
   LoadingOutlined,
   MessageOutlined,
@@ -25,6 +26,8 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { AgentReplyBlockModel } from "../../lib/workbench/types";
+import type { DiffLine } from "../../lib/workbench/types";
+import { buildDiffLines, countChangeLines, diffMarker } from "../../lib/workbench/diff";
 import {
   buildAgentReplyBlocks,
   eventText,
@@ -177,50 +180,161 @@ function RunDiffCards({
   applyingId?: string | null;
   onApply?: (change: HubFileChangeDto) => void;
 }) {
+  const [activeChange, setActiveChange] = useState<HubFileChangeDto | null>(null);
   return (
-    <div className="runDiffCards">
-      {changes.map((change) => {
-        const status = fileChangeApplyStatus(change);
-        const message = fileChangeApplyMessage(change);
-        const applyLocked = status === "queued" || status === "applied";
-        return (
-          <details className="runDiffCard" key={change.id}>
-            <summary>
-              <span>
-                <BranchesOutlined />
-                <strong>{change.path}</strong>
-              </span>
-              <span className="runDiffSummaryBadges">
-                {status && <span className={`applyStatus ${status}`}>{fileChangeApplyLabel(status)}</span>}
-                <code>{change.changeType}</code>
-              </span>
-            </summary>
-            <div className="runDiffBody">
-              {message && <div className={`diffApplyMessage ${status ?? ""}`}>{message}</div>}
-              <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
-              {onApply && (
-                <button
-                  className="ghostButton"
-                  type="button"
-                  disabled={applyingId === change.id || applyLocked}
-                  onClick={() => onApply(change)}
-                >
-                  <CheckCircleOutlined />
-                  <span>
-                    {applyingId === change.id
-                      ? "应用中"
-                      : status === "queued"
-                        ? "等待结果"
-                        : status === "applied"
-                          ? "已应用"
-                          : "应用 Diff"}
-                  </span>
-                </button>
-              )}
-            </div>
-          </details>
-        );
-      })}
+    <>
+      <div className="runDiffCards">
+        {changes.map((change) => {
+          const status = fileChangeApplyStatus(change);
+          const message = fileChangeApplyMessage(change);
+          const applyLocked = status === "queued" || status === "applied";
+          return (
+            <details className="runDiffCard" key={change.id}>
+              <summary>
+                <span>
+                  <BranchesOutlined />
+                  <strong>{change.path}</strong>
+                </span>
+                <span className="runDiffSummaryBadges">
+                  {status && <span className={`applyStatus ${status}`}>{fileChangeApplyLabel(status)}</span>}
+                  <code>{change.changeType}</code>
+                  <button
+                    type="button"
+                    title="展开 Diff"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setActiveChange(change);
+                    }}
+                  >
+                    <ExpandOutlined />
+                  </button>
+                </span>
+              </summary>
+              <div className="runDiffBody">
+                {message && <div className={`diffApplyMessage ${status ?? ""}`}>{message}</div>}
+                <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
+                {onApply && (
+                  <button
+                    className="ghostButton"
+                    type="button"
+                    disabled={applyingId === change.id || applyLocked}
+                    onClick={() => onApply(change)}
+                  >
+                    <CheckCircleOutlined />
+                    <span>
+                      {applyingId === change.id
+                        ? "应用中"
+                        : status === "queued"
+                          ? "等待结果"
+                          : status === "applied"
+                            ? "已应用"
+                            : "应用 Diff"}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+      {activeChange && (
+        <FileChangeViewerLayer
+          change={activeChange}
+          applyingId={applyingId}
+          onApply={onApply}
+          onClose={() => setActiveChange(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function FileChangeViewerLayer({
+  change,
+  applyingId,
+  onApply,
+  onClose,
+}: {
+  change: HubFileChangeDto;
+  applyingId?: string | null;
+  onApply?: (change: HubFileChangeDto) => void;
+  onClose: () => void;
+}) {
+  const status = fileChangeApplyStatus(change);
+  const message = fileChangeApplyMessage(change);
+  const applyLocked = status === "queued" || status === "applied";
+  const additions = countChangeLines(change, "add");
+  const deletions = countChangeLines(change, "remove");
+  return (
+    <div className="messagePartViewerLayer" role="presentation" onMouseDown={onClose}>
+      <section
+        className="messagePartViewer fileChangeViewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={change.path}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <strong>{change.path}</strong>
+            <span>{change.oldPath ? `${change.oldPath} -> ${change.path}` : change.changeType}</span>
+          </div>
+          <div className="messagePartViewerActions">
+            <button type="button" title="复制 Diff" onClick={() => copyText(change.patch ?? buildBeforeAfterPreview(change))}>
+              <CopyOutlined />
+              <span>复制</span>
+            </button>
+            {onApply && (
+              <button
+                type="button"
+                disabled={applyingId === change.id || applyLocked}
+                onClick={() => onApply(change)}
+              >
+                <CheckCircleOutlined />
+                <span>
+                  {applyingId === change.id
+                    ? "应用中"
+                    : status === "queued"
+                      ? "等待结果"
+                      : status === "applied"
+                        ? "已应用"
+                        : "应用 Diff"}
+                </span>
+              </button>
+            )}
+            <button type="button" title="关闭" onClick={onClose}>
+              ×
+            </button>
+          </div>
+        </header>
+        <div className="messagePartViewerBody fileChangeViewerBody">
+          <div className="diffStats">
+            <span className="add">+{additions}</span>
+            <span className="remove">-{deletions}</span>
+            {change.afterTruncated || change.beforeTruncated ? <span>内容已截断</span> : null}
+            {message ? <span className={`diffApplyMessage ${status ?? ""}`}>{message}</span> : null}
+          </div>
+          <div className="messagePartDiffPreview">
+            <TimelineDiffLines lines={buildDiffLines(change)} />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TimelineDiffLines({ lines }: { lines: DiffLine[] }) {
+  return (
+    <div className="unifiedDiff" role="table">
+      {lines.map((line, index) => (
+        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
+          <span className="lineNo">{line.oldLine ?? ""}</span>
+          <span className="lineNo">{line.newLine ?? ""}</span>
+          <span className="lineMarker">{diffMarker(line.kind)}</span>
+          <code>{line.text || " "}</code>
+        </div>
+      ))}
     </div>
   );
 }
