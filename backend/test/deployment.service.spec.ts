@@ -57,6 +57,10 @@ describe("DeploymentService deployment targets", () => {
       }),
     }));
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(prisma.session.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "session-1" },
+      data: { updatedAt: expect.any(Date) },
+    }));
     expect(result.message.contentText).toContain("源码包已生成");
     expect(result.message.parts[0]?.metadata).toMatchObject({ target: "source_archive", sourceArchiveUrl });
   });
@@ -107,7 +111,7 @@ describe("DeploymentService deployment targets", () => {
 
 function createService() {
   const prisma = {
-    session: { findUnique: vi.fn() },
+    session: { findUnique: vi.fn(), update: vi.fn(async () => sessionRow()) },
     message: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     deployment: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   };

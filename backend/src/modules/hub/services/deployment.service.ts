@@ -69,7 +69,12 @@ export class DeploymentService {
       },
     });
     const syncedMessage = await this.syncDeploymentMessage(deployment.id);
-    this.gateway.emitSession(mapSession(session));
+    const updatedSession = await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { updatedAt: new Date() },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    this.gateway.emitSession(mapSession(updatedSession));
     if (target !== "source_archive") void this.runDeployJob(deployment.id);
     return { deployment: mapDeployment(deployment), message: syncedMessage ?? mapMessage(message) };
   }
