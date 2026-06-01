@@ -65,6 +65,7 @@ import { DownstreamOrchestratorService } from "../src/modules/hub/services/downs
 const now = new Date("2026-05-28T08:00:00.000Z");
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const IDLE_RECHECK_MS = 60 * 1000;
+type StartRunInput = Parameters<DownstreamOrchestratorService["startRun"]>[0];
 
 describe("DownstreamOrchestratorService prompt transfer", () => {
   const originalUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
@@ -94,6 +95,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.agenthubSessionId).toBe("session-1");
     expect(params.promptMode).toBe("bootstrap");
     expect(params.prompt).toEqual([{ text: "请实现登录页", type: "text" }]);
+    expect(params.mentionedAgentIds).toEqual([]);
     expect(params.messageId).toBe("message-run-1");
     expect(params.agentId).toBe(1);
     expect(params.contextSnapshotId).toBe("context-id");
@@ -127,6 +129,28 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     );
 
     expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 9 });
+  });
+
+  it("passes mentioned agent ids to the downstream prompt", async () => {
+    const service = createService();
+    const frontendAgent = {
+      ...orchestrator,
+      id: 2,
+      name: "frontend-agent",
+      description: "前端成员",
+      isDefaultOrchestrator: false,
+    };
+
+    await startRunWithDownstreamSession(
+      service,
+      {
+        ...createRunInput("run-1", "@frontend-agent 实现页面"),
+        mentionedAgents: [frontendAgent],
+      },
+      "downstream-session-1",
+    );
+
+    expect(lastPromptParams().mentionedAgentIds).toEqual([2]);
   });
 
   it("sends only the current prompt while the downstream connection is alive", async () => {
@@ -400,7 +424,7 @@ const context: HubContextSnapshotDto = {
   },
 };
 
-function createRunInput(runId: string, promptText: string) {
+function createRunInput(runId: string, promptText: string): StartRunInput {
   return {
     sessionId: "session-1",
     runId,
@@ -408,7 +432,6 @@ function createRunInput(runId: string, promptText: string) {
     promptText,
     orchestrator,
     mentionedAgents: [],
-    context: { ...context, runId },
   };
 }
 
@@ -482,7 +505,7 @@ function createGateway() {
 
 async function startRunWithDownstreamSession(
   service: DownstreamOrchestratorService,
-  input: ReturnType<typeof createRunInput>,
+  input: StartRunInput,
   downstreamSessionId: string,
 ) {
   const pending = service.startRun(input);

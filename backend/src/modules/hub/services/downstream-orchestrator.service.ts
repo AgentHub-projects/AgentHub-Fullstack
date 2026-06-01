@@ -922,6 +922,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       messageId: input.userMessageId,
       agentId: input.orchestrator.id,
       prompt: [{ text: input.promptText, type: "text" }],
+      mentionedAgentIds: input.mentionedAgents.map((agent) => agent.id),
       messageContext: input.messageContext ?? {},
     };
 

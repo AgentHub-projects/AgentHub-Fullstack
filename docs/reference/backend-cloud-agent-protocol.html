@@ -260,6 +260,7 @@
           <tr><td><code>agentId</code></td><td>string</td><td>本轮主 Orchestrator 的 Agent 实例 id。</td></tr>
           <tr><td><code>mode</code></td><td><code>bootstrap</code> / <code>incremental</code></td><td>新连接或断线重连后是 <code>bootstrap</code>；同一连接存活时后续 run 是 <code>incremental</code>。</td></tr>
           <tr><td><code>prompt</code></td><td>string</td><td>用户当前输入文本。</td></tr>
+          <tr><td><code>mentionedAgentIds</code></td><td>number[]</td><td>本轮用户显式 @ 或后端简单规则解析出的目标 Agent 实例 id 列表。</td></tr>
           <tr><td><code>pins</code></td><td>ContextSnapshotItem[]</td><td>始终发送，来自 context snapshot 的 pinned 项。</td></tr>
           <tr><td><code>metadata</code></td><td>object</td><td>包含 <code>source: "agenthub"</code> 和 <code>contextSnapshotId</code>。</td></tr>
           <tr><td><code>orchestratorSystemPrompt</code></td><td>string</td><td>仅 <code>bootstrap</code> 时发送。</td></tr>
@@ -280,6 +281,7 @@
     "agentId": "orchestrator-id",
     "mode": "bootstrap",
     "prompt": "请实现登录页",
+    "mentionedAgentIds": [2],
     "pins": [
       {
         "id": "pin-1",

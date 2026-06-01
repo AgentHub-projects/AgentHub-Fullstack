@@ -32,6 +32,7 @@ export interface DownstreamPromptInput {
   agentId: AgentId;
   promptMode: DownstreamPromptMode;
   prompt: DownstreamPromptPart[];
+  mentionedAgentIds?: AgentId[];
   pins?: ContextSnapshotItem[];
   memory?: DownstreamPromptMemory;
   orchestratorSystemPrompt?: string;
