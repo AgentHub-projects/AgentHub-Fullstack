@@ -4,40 +4,46 @@ import { PublicRoute } from "../auth/public.decorator";
 import {
   AUTH_COOKIE_NAME,
   AUTH_MAX_AGE_MS,
-  authCookieValue,
-  isAccessKeyConfigured,
-  isAccessKeyValid,
-  isCookieHeaderAuthenticated,
 } from "../auth/auth.utils";
+import { AuthSessionService } from "../auth/auth-session.service";
 
 @PublicRoute()
 @Controller("auth")
 export class AuthController {
+  constructor(private readonly authSessions: AuthSessionService) {}
+
   @Get("me")
-  me(@Req() request: Request) {
+  async me(@Req() request: Request) {
+    const user = await this.authSessions.authenticateCookie(request.headers.cookie);
     return {
-      authenticated: isCookieHeaderAuthenticated(request.headers.cookie),
-      configured: isAccessKeyConfigured(),
+      authenticated: Boolean(user),
+      configured: true,
+      user,
     };
   }
 
   @Post("login")
-  login(@Body() body: { accessKey?: string }, @Res({ passthrough: true }) response: Response) {
-    if (!isAccessKeyConfigured() || !isAccessKeyValid(body?.accessKey)) {
-      throw new UnauthorizedException("ACCESS_KEY_INVALID");
-    }
+  async login(
+    @Body() body: { username?: string; password?: string },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const username = body?.username?.trim();
+    const password = body?.password ?? "";
+    if (!username || !password) throw new UnauthorizedException("USERNAME_OR_PASSWORD_INVALID");
+    const result = await this.authSessions.login(username, password);
 
-    response.cookie(AUTH_COOKIE_NAME, authCookieValue(), {
+    response.cookie(AUTH_COOKIE_NAME, result.token, {
       httpOnly: true,
       sameSite: "lax",
       maxAge: AUTH_MAX_AGE_MS,
       path: "/",
     });
-    return { authenticated: true };
+    return { authenticated: true, user: result.user };
   }
 
   @Post("logout")
-  logout(@Res({ passthrough: true }) response: Response) {
+  async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    await this.authSessions.logout(request.headers.cookie);
     response.clearCookie(AUTH_COOKIE_NAME, { path: "/" });
     return { authenticated: false };
   }

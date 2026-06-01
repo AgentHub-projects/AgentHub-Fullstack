@@ -52,7 +52,7 @@ import {
   listAgentTemplates,
   listProjects,
   listSessions,
-  loginWithAccessKey,
+  loginWithCredentials,
   pinSessionMessage,
   regenerateSessionMessage,
   sendSessionMessage,
@@ -100,7 +100,8 @@ const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
 export default function WorkbenchPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
-  const [accessKey, setAccessKey] = useState("");
+  const [authUsername, setAuthUsername] = useState("admin");
+  const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
@@ -250,7 +251,7 @@ export default function WorkbenchPage() {
     } else {
       setAuthenticated(false);
       if (result.ok && !result.data.configured) {
-        setAuthError("后端未配置访问密钥");
+        setAuthError("后端未完成用户初始化");
       }
     }
     setAuthChecked(true);
@@ -258,18 +259,18 @@ export default function WorkbenchPage() {
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const key = accessKey.trim();
-    if (!key || authSubmitting) return;
+    const username = authUsername.trim();
+    if (!username || !authPassword || authSubmitting) return;
     setAuthSubmitting(true);
     setAuthError("");
     try {
-      const result = await loginWithAccessKey(key);
+      const result = await loginWithCredentials(username, authPassword);
       if (!result.ok) {
-        setAuthError("密钥无效");
+        setAuthError("账号或密码无效");
         return;
       }
       setAuthenticated(true);
-      setAccessKey("");
+      setAuthPassword("");
       await bootstrap();
     } finally {
       setAuthSubmitting(false);
@@ -782,18 +783,25 @@ export default function WorkbenchPage() {
         <form className="authPanel" onSubmit={(event) => void handleLogin(event)}>
           <div>
             <strong>AgentHub</strong>
-            <span>输入访问密钥后继续</span>
+            <span>使用管理员账号登录</span>
           </div>
           <input
-            aria-label="访问密钥"
+            aria-label="账号"
             autoFocus
+            type="text"
+            value={authUsername}
+            onChange={(event) => setAuthUsername(event.target.value)}
+            placeholder="账号"
+          />
+          <input
+            aria-label="密码"
             type="password"
-            value={accessKey}
-            onChange={(event) => setAccessKey(event.target.value)}
-            placeholder="访问密钥"
+            value={authPassword}
+            onChange={(event) => setAuthPassword(event.target.value)}
+            placeholder="密码"
           />
           {authError && <small className="authError">{authError}</small>}
-          <button className="primaryButton" type="submit" disabled={!accessKey.trim() || authSubmitting}>
+          <button className="primaryButton" type="submit" disabled={!authUsername.trim() || !authPassword || authSubmitting}>
             {authSubmitting ? <LoadingOutlined /> : null}
             <span>进入</span>
           </button>

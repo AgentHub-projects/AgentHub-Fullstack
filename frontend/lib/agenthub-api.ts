@@ -74,13 +74,15 @@ export function listArtifactVersions(artifactId: string) {
 }
 
 export function getAuthState() {
-  return requestJson<{ authenticated: boolean; configured: boolean }>("/auth/me");
+  return requestJson<{ authenticated: boolean; configured: boolean; user?: { userId: string; username: string } | null }>(
+    "/auth/me",
+  );
 }
 
-export function loginWithAccessKey(accessKey: string) {
-  return requestJson<{ authenticated: boolean }>("/auth/login", {
+export function loginWithCredentials(username: string, password: string) {
+  return requestJson<{ authenticated: boolean; user: { userId: string; username: string } }>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ accessKey }),
+    body: JSON.stringify({ username, password }),
   });
 }
 

@@ -1,3 +1,4 @@
+import { Optional } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -18,7 +19,7 @@ import type {
   HubMessageDto,
   HubSessionDto,
 } from "@agenthub/shared";
-import { isCookieHeaderAuthenticated } from "../auth/auth.utils";
+import { AuthSessionService } from "../auth/auth-session.service";
 
 @WebSocketGateway({
   cors: { origin: true, credentials: true },
@@ -30,8 +31,10 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   private readonly clientSessions = new Map<string, Set<string>>();
   private readonly sessionSubscriberCounts = new Map<string, number>();
 
-  handleConnection(client: Socket) {
-    if (!isCookieHeaderAuthenticated(client.handshake.headers.cookie)) {
+  constructor(@Optional() private readonly authSessions?: AuthSessionService) {}
+
+  async handleConnection(client: Socket) {
+    if (!this.authSessions || !(await this.authSessions.authenticateCookie(client.handshake.headers.cookie))) {
       client.emit("auth.required", { message: "AUTH_REQUIRED" });
       client.disconnect(true);
       return;

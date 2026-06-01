@@ -1,13 +1,16 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
-import { isCookieHeaderAuthenticated } from "./auth.utils";
+import { AuthSessionService } from "./auth-session.service";
 
 @Injectable()
 export class AgentHubAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly authSessions: AuthSessionService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_ROUTE, [
       context.getHandler(),
       context.getClass(),
@@ -20,7 +23,7 @@ export class AgentHubAuthGuard implements CanActivate {
       headers?: { cookie?: string | string[] };
     }>();
     if (request.path?.startsWith("/api/downstream/")) return true;
-    if (isCookieHeaderAuthenticated(request.headers?.cookie)) return true;
+    if (await this.authSessions.authenticateCookie(request.headers?.cookie)) return true;
     throw new UnauthorizedException("AUTH_REQUIRED");
   }
 }

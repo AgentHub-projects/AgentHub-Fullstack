@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { randomBytes, scryptSync } from "node:crypto";
 
 const prisma = new PrismaClient();
 
@@ -14,6 +15,16 @@ const IDS = {
 };
 
 async function main() {
+  await prisma.user.upsert({
+    where: { username: "admin" },
+    create: {
+      username: "admin",
+      passwordHash: hashSeedPassword(process.env.AGENTHUB_ADMIN_PASSWORD ?? "2195@0505"),
+      status: "active",
+    },
+    update: { status: "active" },
+  });
+
   // Seed providers table first
   const claudeProvider = await prisma.provider.upsert({
     where: { name: "claude-code" },
@@ -141,7 +152,7 @@ async function main() {
     update: { status: "enabled" },
   });
 
-  console.log("Seed complete: AgentTemplate and Agent defaults are ready.");
+  console.log("Seed complete: admin user, AgentTemplate and Agent defaults are ready.");
 }
 
 main()
@@ -150,3 +161,9 @@ main()
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());
+
+function hashSeedPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+}

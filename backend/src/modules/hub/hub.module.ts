@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { AgentHubAuthGuard } from "./auth/auth.guard";
+import { AuthSessionService } from "./auth/auth-session.service";
 import { AuthController } from "./controllers/auth.controller";
 import { AgentTemplateController } from "./controllers/agent-template.controller";
 import { BuilderController } from "./controllers/builder.controller";
@@ -41,6 +42,7 @@ import { PrismaService } from "./services/prisma.service";
   providers: [
     { provide: APP_GUARD, useClass: AgentHubAuthGuard },
     PrismaService,
+    AuthSessionService,
     AgentRegistryService,
     AgentTemplateService,
     BuilderService,

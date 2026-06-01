@@ -1,34 +1,29 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 
 export const AUTH_COOKIE_NAME = "agenthub_session";
 export const AUTH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const AUTH_MAX_AGE_SECONDS = AUTH_MAX_AGE_MS / 1000;
 
-export function configuredAccessKey() {
-  return process.env.AGENTHUB_ACCESS_KEY?.trim() ?? "";
+const scrypt = promisify(scryptCallback);
+
+export function authCookieToken(cookieHeader: string | string[] | undefined) {
+  return parseCookieHeader(cookieHeader)[AUTH_COOKIE_NAME] ?? null;
 }
 
-export function authCookieValue(accessKey = configuredAccessKey()) {
-  return createHash("sha256").update(`agenthub:${accessKey}`).digest("hex");
+export async function hashPassword(password: string, salt = randomBytes(16).toString("hex")) {
+  const derived = (await scrypt(password, salt, 64)) as Buffer;
+  return `scrypt$${salt}$${derived.toString("hex")}`;
 }
 
-export function isAccessKeyConfigured() {
-  return configuredAccessKey().length > 0;
+export async function verifyPassword(password: string, storedHash: string) {
+  const [scheme, salt, hash] = storedHash.split("$");
+  if (scheme !== "scrypt" || !salt || !hash) return false;
+  const candidate = await hashPassword(password, salt);
+  return safeEqual(candidate, storedHash);
 }
 
-export function isAccessKeyValid(value: unknown) {
-  const accessKey = configuredAccessKey();
-  if (!accessKey || typeof value !== "string") return false;
-  return safeEqual(value, accessKey);
-}
-
-export function isCookieHeaderAuthenticated(cookieHeader: string | string[] | undefined) {
-  const accessKey = configuredAccessKey();
-  if (!accessKey) return false;
-  const cookieValue = parseCookieHeader(cookieHeader)[AUTH_COOKIE_NAME];
-  return Boolean(cookieValue) && safeEqual(cookieValue, authCookieValue(accessKey));
-}
-
-function parseCookieHeader(cookieHeader: string | string[] | undefined) {
+export function parseCookieHeader(cookieHeader: string | string[] | undefined) {
   const cookies: Record<string, string> = {};
   const header = Array.isArray(cookieHeader) ? cookieHeader.join(";") : cookieHeader;
   if (!header) return cookies;
