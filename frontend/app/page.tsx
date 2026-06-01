@@ -644,7 +644,7 @@ export default function WorkbenchPage() {
     });
     setDeleteConfirmOpen(false);
     setDeleteTarget(null);
-    setNotice(`Agent "${deleteTarget.name}" 已移除`);
+    setNotice(`Agent "${deleteTarget.name}" 已删除`);
   }
 
   function openAgentTemplateDialog() {
@@ -1677,7 +1677,7 @@ export default function WorkbenchPage() {
                 setContextMenu(null);
               }}
             >
-              <DeleteOutlined /> 从群聊中移除
+              <DeleteOutlined /> 从群聊中删除
             </button>
           </div>
         </div>
@@ -1853,18 +1853,18 @@ export default function WorkbenchPage() {
           >
             <header>
               <div>
-                <strong id="delete-agent-title">确认移除</strong>
+                <strong id="delete-agent-title">确认删除</strong>
               </div>
             </header>
             <p className="deleteConfirmText">
-              确定要从群聊中移除 <strong>{deleteTarget.name}</strong> 吗？此操作不可撤销。
+              确定要从群聊中删除 <strong>{deleteTarget.name}</strong> 吗？此操作不可撤销。
             </p>
             <footer>
               <button className="ghostButton" type="button" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
                 取消
               </button>
               <button className="dangerButton" type="button" disabled={!sessionWritable} onClick={() => void handleDeleteAgent()}>
-                确认移除
+                确认删除
               </button>
             </footer>
           </section>
