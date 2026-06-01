@@ -6,6 +6,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   HubArtifactDto,
+  HubArtifactVersionDto,
   HubEventDto,
   HubFileChangeDto,
 } from "@agenthub/shared";
@@ -20,7 +21,7 @@ import {
   LinkOutlined,
   SelectOutlined,
 } from "@ant-design/icons";
-import { artifactContentUrl } from "../../lib/agenthub-api";
+import { artifactContentUrl, listArtifactVersions } from "../../lib/agenthub-api";
 import {
   buildDiffLines,
   buildFileTreeRows,
@@ -130,6 +131,24 @@ export function ArtifactPanel({
   const [activeArtifact, setActiveArtifact] = useState<HubArtifactDto | null>(null);
   const [viewerMode, setViewerMode] = useState<"preview" | "code">("preview");
   const [selectedText, setSelectedText] = useState("");
+  const [versions, setVersions] = useState<HubArtifactVersionDto[]>([]);
+  const [activeVersion, setActiveVersion] = useState<HubArtifactVersionDto | null>(null);
+
+  useEffect(() => {
+    if (!activeArtifact) {
+      setVersions([]);
+      setActiveVersion(null);
+      return;
+    }
+    let cancelled = false;
+    void listArtifactVersions(activeArtifact.id).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setVersions(result.data.items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeArtifact]);
 
   if (artifacts.length === 0) return <PanelEmpty icon={<FileDoneOutlined />} text="暂无 artifact" />;
   return (
@@ -148,6 +167,7 @@ export function ArtifactPanel({
                 type="button"
                 onClick={() => {
                   setActiveArtifact(artifact);
+                  setActiveVersion(null);
                   setViewerMode("preview");
                   setSelectedText("");
                 }}
@@ -164,6 +184,9 @@ export function ArtifactPanel({
       ))}
       {activeArtifact && (
         <div className="artifactViewerLayer" role="presentation" onMouseDown={() => setActiveArtifact(null)}>
+          {(() => {
+            const displayedArtifact = activeVersion ? artifactFromVersion(activeArtifact, activeVersion) : activeArtifact;
+            return (
           <section
             className="artifactViewer"
             role="dialog"
@@ -173,8 +196,8 @@ export function ArtifactPanel({
           >
             <header>
               <div>
-                <strong>{activeArtifact.title}</strong>
-                <span>{activeArtifact.kind} · {activeArtifact.mimeType} · v{activeArtifact.version}</span>
+                <strong>{displayedArtifact.title}</strong>
+                <span>{displayedArtifact.kind} · {displayedArtifact.mimeType} · v{displayedArtifact.version}</span>
               </div>
               <div className="artifactViewerActions">
                 <button
@@ -188,7 +211,7 @@ export function ArtifactPanel({
                 <button
                   className={viewerMode === "code" ? "active" : ""}
                   type="button"
-                  disabled={!activeArtifact.textContent}
+                  disabled={!displayedArtifact.textContent}
                   onClick={() => setViewerMode("code")}
                 >
                   <CodeOutlined />
@@ -202,17 +225,38 @@ export function ArtifactPanel({
                 </button>
               </div>
             </header>
+            {versions.length > 0 && (
+              <div className="artifactVersionBar">
+                <span>版本历史</span>
+                <button className={!activeVersion ? "active" : ""} type="button" onClick={() => setActiveVersion(null)}>
+                  当前 v{activeArtifact.version}
+                </button>
+                {versions.map((version) => (
+                  <button
+                    className={activeVersion?.id === version.id ? "active" : ""}
+                    key={version.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveVersion(version);
+                      setSelectedText("");
+                    }}
+                  >
+                    v{version.version}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="artifactViewerBody">
-              {viewerMode === "code" && activeArtifact.textContent ? (
+              {viewerMode === "code" && displayedArtifact.textContent ? (
                 <div className="artifactCodeEditor">
                   <textarea
                     spellCheck={false}
-                    value={activeArtifact.textContent}
+                    value={displayedArtifact.textContent}
                     readOnly
                     onSelect={(event) => setSelectedText(event.currentTarget.value.slice(event.currentTarget.selectionStart, event.currentTarget.selectionEnd))}
                   />
                   <div className="artifactCodeBar">
-                    <button type="button" onClick={() => void navigator.clipboard?.writeText(activeArtifact.textContent ?? "")}>
+                    <button type="button" onClick={() => void navigator.clipboard?.writeText(displayedArtifact.textContent ?? "")}>
                       <CopyOutlined />
                       <span>复制全部</span>
                     </button>
@@ -221,7 +265,7 @@ export function ArtifactPanel({
                         type="button"
                         disabled={!selectedText.trim()}
                         onClick={() => {
-                          onUseSelection(activeArtifact, selectedText.trim());
+                          onUseSelection(displayedArtifact, selectedText.trim());
                           setActiveArtifact(null);
                         }}
                       >
@@ -232,10 +276,12 @@ export function ArtifactPanel({
                   </div>
                 </div>
               ) : (
-                <ArtifactPreview artifact={activeArtifact} expanded />
+                <ArtifactPreview artifact={displayedArtifact} expanded />
               )}
             </div>
           </section>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -334,4 +380,22 @@ function artifactIcon(kind: HubArtifactDto["kind"]) {
   if (label === "markdown") return <FileMarkdownOutlined />;
   if (label === "document") return <FileDoneOutlined />;
   return <CodeOutlined />;
+}
+
+function artifactFromVersion(artifact: HubArtifactDto, version: HubArtifactVersionDto): HubArtifactDto {
+  return {
+    ...artifact,
+    title: version.title,
+    kind: version.kind,
+    mimeType: version.mimeType,
+    storageKind: version.storageKind,
+    storageUri: version.storageUri,
+    textContent: version.textContent,
+    sha256: version.sha256,
+    sizeBytes: version.sizeBytes,
+    version: version.version,
+    final: version.final,
+    metadata: version.metadata,
+    createdAt: version.createdAt,
+  };
 }

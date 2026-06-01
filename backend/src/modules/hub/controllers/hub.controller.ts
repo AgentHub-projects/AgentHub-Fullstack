@@ -339,6 +339,11 @@ export class HubUploadController {
     }
     response.type(content.contentType).send(content.body ?? "");
   }
+
+  @Get(":artifactId/versions")
+  async listArtifactVersions(@Param("artifactId") artifactId: string) {
+    return { items: await this.artifacts.listVersions(artifactId) };
+  }
 }
 
 @PublicRoute()

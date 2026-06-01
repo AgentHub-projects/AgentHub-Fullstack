@@ -243,6 +243,24 @@ export interface HubArtifactDto {
   updatedAt: ISODateString;
 }
 
+export interface HubArtifactVersionDto {
+  id: string;
+  artifactId: string;
+  version: number;
+  producingEventId?: string | null;
+  title: string;
+  kind: HubArtifactKind;
+  mimeType: string;
+  storageKind: HubStorageKind;
+  storageUri?: string | null;
+  textContent?: string | null;
+  sha256?: string | null;
+  sizeBytes?: number | null;
+  final: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: ISODateString;
+}
+
 export interface HubFileChangeDto {
   id: string;
   sessionId: string;

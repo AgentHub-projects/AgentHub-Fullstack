@@ -1966,7 +1966,7 @@ textarea:focus-visible {
 
 .artifactViewer {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   width: min(1180px, 100%);
   height: min(780px, calc(100vh - 44px));
   min-width: 0;
@@ -2018,6 +2018,41 @@ textarea:focus-visible {
 }
 
 .artifactViewerActions button.active {
+  border-color: #c9d6f5;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.artifactVersionBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 7px 14px;
+}
+
+.artifactVersionBar span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.artifactVersionBar button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.artifactVersionBar button.active {
   border-color: #c9d6f5;
   background: var(--brand-soft);
   color: var(--brand);

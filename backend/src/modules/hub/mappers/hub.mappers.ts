@@ -2,6 +2,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   HubArtifactDto,
+  HubArtifactVersionDto,
   HubContextSnapshotDto,
   HubEventDto,
   HubFileChangeDto,
@@ -224,6 +225,26 @@ export function mapArtifact(row: Row): HubArtifactDto {
     metadata: asObject(row.metadata),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function mapArtifactVersion(row: Row): HubArtifactVersionDto {
+  return {
+    id: row.id,
+    artifactId: row.artifactId ?? row.artifact_id,
+    version: row.version,
+    producingEventId: row.producingEventId ?? row.producing_event_id ?? null,
+    title: row.title,
+    kind: row.kind,
+    mimeType: row.mimeType ?? row.mime_type,
+    storageKind: row.storageKind ?? row.storage_kind,
+    storageUri: row.storageUri ?? row.storage_uri ?? null,
+    textContent: row.textContent ?? row.text_content ?? null,
+    sha256: row.sha256 ?? null,
+    sizeBytes: row.sizeBytes == null && row.size_bytes == null ? null : Number(row.sizeBytes ?? row.size_bytes),
+    final: Boolean(row.final),
+    metadata: asObject(row.metadata),
+    createdAt: iso(row.createdAt ?? row.created_at),
   };
 }
 

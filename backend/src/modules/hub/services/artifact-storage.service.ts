@@ -3,9 +3,9 @@ import { Buffer } from "node:buffer";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Inject, Injectable } from "@nestjs/common";
-import type { HubArtifactDto, HubArtifactKind, UploadedAttachmentDto } from "@agenthub/shared";
+import type { HubArtifactDto, HubArtifactKind, HubArtifactVersionDto, UploadedAttachmentDto } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { asObject, mapArtifact } from "../mappers/hub.mappers";
+import { asObject, mapArtifact, mapArtifactVersion } from "../mappers/hub.mappers";
 
 type ArtifactPayload = Record<string, unknown>;
 type OssClient = {
@@ -55,6 +55,7 @@ export class ArtifactStorageService {
         } as any,
       },
     });
+    await this.recordVersion(artifact);
 
     return {
       id: artifact.id,
@@ -142,6 +143,7 @@ export class ArtifactStorageService {
         version: { increment: 1 },
       },
     });
+    await this.recordVersion(artifact);
 
     return mapArtifact(artifact);
   }
@@ -169,8 +171,10 @@ export class ArtifactStorageService {
           textContent: (existing.textContent ?? "") + delta,
           sizeBytes: BigInt(((existing.textContent ?? "").length + delta.length)),
           producingEventId: input.producingEventId,
+          version: { increment: 1 },
         },
       });
+      await this.recordVersion(updated);
       return mapArtifact(updated);
     }
 
@@ -215,9 +219,39 @@ export class ArtifactStorageService {
       data: {
         final: true,
         producingEventId: input.producingEventId,
+        version: { increment: 1 },
       },
     });
+    await this.recordVersion(updated);
     return mapArtifact(updated);
+  }
+
+  async listVersions(artifactId: string): Promise<HubArtifactVersionDto[]> {
+    const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      `
+        SELECT
+          id,
+          artifact_id,
+          version,
+          producing_event_id,
+          title,
+          kind,
+          mime_type,
+          storage_kind,
+          storage_uri,
+          text_content,
+          sha256,
+          size_bytes,
+          final,
+          metadata,
+          created_at
+        FROM artifact_versions
+        WHERE artifact_id = $1::uuid
+        ORDER BY version DESC
+      `,
+      artifactId,
+    );
+    return rows.map(mapArtifactVersion);
   }
 
   async getContent(artifactId: string) {
@@ -327,6 +361,83 @@ export class ArtifactStorageService {
       accessKeySecret,
       endpoint: process.env.ALIYUN_OSS_ENDPOINT,
     });
+  }
+
+  private async recordVersion(artifact: {
+    id: string;
+    version: number;
+    producingEventId?: string | null;
+    title: string;
+    kind: string;
+    mimeType: string;
+    storageKind: string;
+    storageUri?: string | null;
+    textContent?: string | null;
+    sha256?: string | null;
+    sizeBytes?: bigint | number | null;
+    final: boolean;
+    metadata: unknown;
+  }) {
+    await this.prisma.$executeRawUnsafe(
+      `
+        INSERT INTO artifact_versions (
+          artifact_id,
+          version,
+          producing_event_id,
+          title,
+          kind,
+          mime_type,
+          storage_kind,
+          storage_uri,
+          text_content,
+          sha256,
+          size_bytes,
+          final,
+          metadata
+        )
+        VALUES (
+          $1::uuid,
+          $2,
+          $3::uuid,
+          $4,
+          $5::artifact_kind,
+          $6,
+          $7::storage_kind,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13::jsonb
+        )
+        ON CONFLICT (artifact_id, version)
+        DO UPDATE SET
+          producing_event_id = EXCLUDED.producing_event_id,
+          title = EXCLUDED.title,
+          kind = EXCLUDED.kind,
+          mime_type = EXCLUDED.mime_type,
+          storage_kind = EXCLUDED.storage_kind,
+          storage_uri = EXCLUDED.storage_uri,
+          text_content = EXCLUDED.text_content,
+          sha256 = EXCLUDED.sha256,
+          size_bytes = EXCLUDED.size_bytes,
+          final = EXCLUDED.final,
+          metadata = EXCLUDED.metadata
+      `,
+      artifact.id,
+      artifact.version,
+      artifact.producingEventId ?? null,
+      artifact.title,
+      artifact.kind,
+      artifact.mimeType,
+      artifact.storageKind,
+      artifact.storageUri ?? null,
+      artifact.textContent ?? null,
+      artifact.sha256 ?? null,
+      artifact.sizeBytes ?? null,
+      artifact.final,
+      JSON.stringify(asObject(artifact.metadata)),
+    );
   }
 }
 

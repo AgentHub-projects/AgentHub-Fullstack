@@ -11,6 +11,7 @@ import type {
   CreateSessionAgentRequest,
   FrontendRealtimeEnvelope,
   HubArtifactDto,
+  HubArtifactVersionDto,
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -66,6 +67,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResu
 
 export function artifactContentUrl(artifactId: string) {
   return `${API_BASE_URL}/artifacts/${encodeURIComponent(artifactId)}/content`;
+}
+
+export function listArtifactVersions(artifactId: string) {
+  return requestJson<{ items: HubArtifactVersionDto[] }>(`/artifacts/${encodeURIComponent(artifactId)}/versions`);
 }
 
 export function getAuthState() {
