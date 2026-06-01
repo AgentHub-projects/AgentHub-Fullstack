@@ -220,31 +220,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return record;
   }
 
-  /** Push context to downstream on connect/reconnect (complete context injection) */
-  async pushContext(
-    sessionId: string,
-    payload: {
-      agents: Array<{ agentId: AgentId; name: string; description: string; provider: string }>;
-      summaryChain: Array<{ seq: number; content: string }>;
-      message: string;
-      recentMessages: Array<{ role: string; content: string }>;
-    },
-  ) {
-    const record = this.connections.get(sessionId);
-    if (!record?.socket.connected) return;
-    record.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id: record.nextId++,
-      method: "session/context",
-      params: {
-        type: "init",
-        sessionId,
-        ...payload,
-      },
-    });
-    this.markDownstreamActivity(record);
-  }
-
   notifyPinUpdated(sessionId: string, payload: { messageId: string; partId?: string; pinned: boolean }) {
     this.sendSessionDelta(sessionId, "pin.updated", payload);
   }

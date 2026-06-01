@@ -230,25 +230,18 @@
   }
 }</code></pre>
 
-      <h3>2.4 session/context</h3>
-      <p><code>pushContext</code> 方法用于连接已存在时向云 Agent 主动推送完整上下文。它当前不是发送消息主链路的必经步骤。</p>
+      <h3>2.4 session/context_delta</h3>
+      <p>连接已存在时，AgentHub 只发送轻量上下文增量，不重发完整上下文快照。完整 pins、recent、retrieved 和 summary 只在下一次 <code>bootstrap</code> 时发送。</p>
       <pre><code>{
   "jsonrpc": "2.0",
-  "id": "context-&lt;agenthubSessionId&gt;-&lt;timestamp&gt;",
-  "method": "session/context",
+  "id": "context-delta-&lt;agenthubSessionId&gt;-&lt;timestamp&gt;",
+  "method": "session/context_delta",
   "params": {
-    "type": "init",
-    "sessionId": "&lt;agenthub-session-id&gt;",
-    "agents": [
-      { "agentId": "uuid", "name": "frontend-agent", "description": "...", "provider": "claude-code" }
-    ],
-    "summaryChain": [
-      { "seq": 1, "content": "长期摘要" }
-    ],
-    "message": "当前消息",
-    "recentMessages": [
-      { "role": "user", "content": "历史消息" }
-    ]
+    "sessionId": "&lt;downstream-session-id&gt;",
+    "agenthubSessionId": "&lt;agenthub-session-id&gt;",
+    "type": "member.added",
+    "agentId": 2,
+    "description": "前端成员描述"
   }
 }</code></pre>
     </section>
