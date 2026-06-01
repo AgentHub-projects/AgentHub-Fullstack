@@ -122,9 +122,29 @@ export class AgentRegistryService implements OnModuleInit {
         lastActiveAt: new Date(),
       },
     });
+    if (participantRole === "member") {
+      await this.appendSessionMemberId(sessionId, agent.id);
+    }
 
     const providerNames = await this.loadProviderNames();
     return mapAgent(agent, providerNames);
+  }
+
+  private async appendSessionMemberId(sessionId: string, agentId: number) {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { metadata: true },
+    });
+    if (!session) return;
+    const metadata = asObject(session.metadata);
+    const memberAgentIds = Array.isArray(metadata.memberAgentIds)
+      ? metadata.memberAgentIds.filter((item): item is number => typeof item === "number")
+      : [];
+    if (!memberAgentIds.includes(agentId)) memberAgentIds.push(agentId);
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { metadata: { ...metadata, memberAgentIds } as any, updatedAt: new Date() },
+    });
   }
 
   async updateAgent(id: number, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
