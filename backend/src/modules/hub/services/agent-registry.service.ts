@@ -356,5 +356,17 @@ export class AgentRegistryService implements OnModuleInit {
       },
       update: { status: "enabled" },
     });
+
+    await this.syncAgentIdSequence();
+  }
+
+  private async syncAgentIdSequence() {
+    await this.prisma.$executeRawUnsafe(`
+      SELECT setval(
+        '"agents_id_seq"',
+        GREATEST((SELECT COALESCE(MAX(id), 1) FROM "agents"), 1),
+        true
+      )
+    `);
   }
 }
