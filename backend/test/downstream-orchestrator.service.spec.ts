@@ -230,6 +230,32 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       },
     });
   });
+
+  it("does not append downstream terminal run events twice", async () => {
+    const { service, prisma, events } = createServiceHarness();
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "终态事件"), "downstream-session-1");
+    events.append.mockClear();
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 88,
+      method: "session/event",
+      params: {
+        runId: "run-1",
+        type: "run.completed",
+        payload: { status: "completed" },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(events.append).toHaveBeenCalledTimes(1);
+    expect(events.append).toHaveBeenCalledWith(expect.objectContaining({ eventType: "run.completed" }));
+    expect(prisma.agentRun.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: "run-1" },
+      data: expect.objectContaining({ status: "completed", completedAt: expect.any(Date) }),
+    }));
+    expect(responseFor(socket, 88)).toEqual({ jsonrpc: "2.0", id: 88, result: { ok: true } });
+  });
 });
 
 const orchestrator: AgentInstanceDto = {
@@ -321,12 +347,25 @@ function createRunInput(runId: string, promptText: string) {
 }
 
 function createService(options?: { gateway?: ReturnType<typeof createGateway>; events?: { append: ReturnType<typeof vi.fn> } }) {
-  return new DownstreamOrchestratorService(
-    createPrisma() as any,
-    (options?.events ?? { append: vi.fn().mockResolvedValue({}) }) as any,
-    (options?.gateway ?? createGateway()) as any,
-    { buildSnapshot: vi.fn().mockResolvedValue(context) } as any,
-  );
+  return createServiceHarness(options).service;
+}
+
+function createServiceHarness(options?: { gateway?: ReturnType<typeof createGateway>; events?: { append: ReturnType<typeof vi.fn> } }) {
+  const prisma = createPrisma();
+  const gateway = options?.gateway ?? createGateway();
+  const events = options?.events ?? { append: vi.fn().mockResolvedValue({}) };
+  const contextService = { buildSnapshot: vi.fn().mockResolvedValue(context) };
+  return {
+    prisma,
+    gateway,
+    events,
+    service: new DownstreamOrchestratorService(
+      prisma as any,
+      events as any,
+      gateway as any,
+      contextService as any,
+    ),
+  };
 }
 
 function createPrisma() {
@@ -390,9 +429,9 @@ async function startRunWithDownstreamSession(
 }
 
 async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function lastPromptParams() {

@@ -564,13 +564,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       });
 
       if (eventType === "run.completed") {
-        await this.completeRun(record.sessionId, runId, speakerAgentId ?? record.activeOrchestratorAgentId ?? 1, payload);
+        await this.markRunCompleted(record.sessionId, runId);
       }
       if (eventType === "run.failed") {
-        await this.failRun(
+        await this.markRunFailed(
           record.sessionId,
           runId,
-          speakerAgentId ?? record.activeOrchestratorAgentId ?? 1,
           "DOWNSTREAM_RUN_FAILED",
           stringValue(payload.message) ?? "run failed",
         );
@@ -856,6 +855,37 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
     this.gateway.emitContext(input.sessionId, contextSnapshot);
     return contextSnapshot;
+  }
+
+  private async markRunCompleted(sessionId: string, runId: string) {
+    await this.prisma.agentRun.update({
+      where: { id: runId },
+      data: { status: "completed", completedAt: new Date() },
+    });
+    const record = this.connections.get(sessionId);
+    if (record?.activeRunId === runId) record.activeRunId = undefined;
+    const session = await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { updatedAt: new Date() },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    this.gateway.emitSession(mapSession(session));
+  }
+
+  private async markRunFailed(sessionId: string, runId: string, code: string, message: string) {
+    await this.prisma.agentRun.update({
+      where: { id: runId },
+      data: { status: "failed", errorCode: code, errorMessage: message, completedAt: new Date() },
+    });
+    const record = this.connections.get(sessionId);
+    if (record?.activeRunId === runId) record.activeRunId = undefined;
+    if (typeof this.prisma.session.findUnique === "function") {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+      });
+      if (session) this.gateway.emitSession(mapSession(session));
+    }
   }
 
   private async buildPromptInput(
