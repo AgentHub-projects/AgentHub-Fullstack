@@ -54,7 +54,10 @@ import {
   agentColor,
   initials,
   isRunning,
+  readDirectAgentId,
   readMemberAgentIds,
+  readOrchestratorAgentId,
+  sessionMode,
   sessionSubtitle,
   sortArtifact,
   sortEvent,
@@ -102,6 +105,10 @@ export default function WorkbenchPage() {
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
+  const [directTemplateId, setDirectTemplateId] = useState<number>(0);
+  const [directName, setDirectName] = useState("");
+  const [directProvider, setDirectProvider] = useState("claude-code");
   const [groupTitle, setGroupTitle] = useState("");
   const [orchTemplateId, setOrchTemplateId] = useState<number>(0);
   const [orchName, setOrchName] = useState("");
@@ -132,11 +139,17 @@ export default function WorkbenchPage() {
 
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
-  const orchestrator = agents.find((agent) => agent.isDefaultOrchestrator) ?? agents[0] ?? null;
+  const mode = sessionMode(activeSession);
+  const directAgentId = readDirectAgentId(activeSession);
+  const directAgent = directAgentId ? (agents.find((agent) => agent.id === directAgentId) ?? null) : null;
+  const orchestratorAgentId = readOrchestratorAgentId(activeSession);
+  const orchestrator = orchestratorAgentId
+    ? (agents.find((agent) => agent.id === orchestratorAgentId) ?? null)
+    : (agents.find((agent) => agent.isDefaultOrchestrator) ?? agents[0] ?? null);
   const workerAgents = agents.filter((agent) => !agent.isDefaultOrchestrator);
   const activeGroupMemberIds = useMemo(() => readMemberAgentIds(activeSession), [activeSession]);
   const activeGroupMembers = workerAgents.filter((agent) => activeGroupMemberIds.includes(agent.id));
-  const composerAgents = activeGroupMemberIds.length > 0 ? activeGroupMembers : workerAgents;
+  const composerAgents = mode === "direct" ? (directAgent ? [directAgent] : []) : activeGroupMembers;
   const mentionCandidates = useMemo(
     () => filterMentionCandidates(composerAgents, mentionMatch?.query ?? ""),
     [composerAgents, mentionMatch?.query],
@@ -251,15 +264,15 @@ export default function WorkbenchPage() {
       return;
     }
 
-    let items = sessionRes.data.items;
-    if (items.length === 0) {
-      const created = await createSession({ title: "AgentHub 群聊" });
-      if (created.ok) items = [created.data];
-    }
+    const items = sessionRes.data.items;
     setSessions(items);
     const selected = items[0]?.id ?? null;
     setActiveSessionId(selected);
-    if (selected) await loadSession(selected);
+    if (selected) {
+      await loadSession(selected);
+    } else {
+      setDetail(null);
+    }
   }
 
   async function refreshSessions(query = sessionSearch) {
@@ -372,6 +385,10 @@ export default function WorkbenchPage() {
   }
 
   function openCreateGroupDialog() {
+    setCreateMode("direct");
+    setDirectTemplateId(0);
+    setDirectName("");
+    setDirectProvider("claude-code");
     setGroupTitle("");
     setOrchTemplateId(0);
     setOrchName("");
@@ -381,12 +398,24 @@ export default function WorkbenchPage() {
   }
 
   async function handleCreateGroup() {
+    if (createMode === "direct" && !directTemplateId) {
+      setNotice("请选择单聊 Agent 模板");
+      return;
+    }
+    if (createMode === "group" && !orchTemplateId) {
+      setNotice("请选择 Orchestrator 模板");
+      return;
+    }
     const result = await createSession({
+      mode: createMode,
       title: groupTitle.trim() || undefined,
-      orchestratorTemplateId: orchTemplateId || undefined,
-      orchestratorName: orchName || undefined,
-      orchestratorProvider: orchProvider,
-      memberTemplates: memberTemplates.length > 0 ? memberTemplates : undefined,
+      directTemplateId: createMode === "direct" ? directTemplateId : undefined,
+      directName: createMode === "direct" ? directName.trim() || undefined : undefined,
+      directProvider: createMode === "direct" ? directProvider : undefined,
+      orchestratorTemplateId: createMode === "group" ? orchTemplateId : undefined,
+      orchestratorName: createMode === "group" ? orchName || undefined : undefined,
+      orchestratorProvider: createMode === "group" ? orchProvider : undefined,
+      memberTemplates: createMode === "group" && memberTemplates.length > 0 ? memberTemplates : undefined,
     });
     if (!result.ok) {
       setNotice(`创建失败：${result.error}`);
@@ -395,6 +424,8 @@ export default function WorkbenchPage() {
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setDetail({ session: result.data, ...EMPTY_DETAIL });
     setActiveSessionId(result.data.id);
+    const agentRes = await listAgents();
+    if (agentRes.ok) setAgents(agentRes.data.items);
     closeMentionMenu();
     closeGroupDialog();
   }
@@ -406,11 +437,12 @@ export default function WorkbenchPage() {
     setComposer("");
     closeMentionMenu();
     try {
-      const targetAgentIds = parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
+      const targetAgentIds =
+        mode === "direct" ? [] : parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
       const result = await sendSessionMessage(activeSessionId, {
         content: text,
         mentionedAgentIds: targetAgentIds,
-        orchestratorAgentId: orchestrator?.id,
+        orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
       });
       if (!result.ok) {
         setNotice(`发送失败：${result.error}`);
@@ -426,7 +458,7 @@ export default function WorkbenchPage() {
         };
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
-      setNotice("消息已发送给主 Orchestrator");
+      setNotice(mode === "direct" ? "消息已发送给 Agent" : "消息已发送给 Orchestrator");
     } finally {
       setSending(false);
     }
@@ -595,7 +627,7 @@ export default function WorkbenchPage() {
           <button className="iconButton" type="button" title="新建 Agent 模板" onClick={openAgentTemplateDialog}>
             <PlusOutlined />
           </button>
-          <button className="iconButton" type="button" title="新建群聊" onClick={openCreateGroupDialog}>
+          <button className="iconButton" type="button" title="新建对话" onClick={openCreateGroupDialog}>
             <TeamOutlined />
           </button>
         </div>
@@ -607,13 +639,20 @@ export default function WorkbenchPage() {
               type="button"
               onClick={() => setGroupMembersExpanded((v) => !v)}
             >
-              <strong>群聊成员</strong>
-              <span>{composerAgents.length ? `${composerAgents.length} 个 Agent` : "未选择成员"}</span>
+              <strong>{mode === "direct" ? "单聊 Agent" : "群聊成员"}</strong>
+              <span>
+                {mode === "direct"
+                  ? directAgent?.name ?? "未选择 Agent"
+                  : composerAgents.length
+                    ? `${composerAgents.length} 个 Agent`
+                    : "未选择成员"}
+              </span>
             </button>
             {groupMembersExpanded && (
               <div className="memberList">
-                {(orchestrator ? [orchestrator] : []).concat(
-                  activeGroupMemberIds.length > 0 ? activeGroupMembers : workerAgents
+                {(mode === "direct"
+                  ? (directAgent ? [directAgent] : [])
+                  : (orchestrator ? [orchestrator] : []).concat(activeGroupMembers)
                 ).map((agent) => (
                   <div
                     key={agent.id}
@@ -627,21 +666,23 @@ export default function WorkbenchPage() {
                       {initials(agent.name)}
                     </span>
                     <span className="memberName">{agent.name}</span>
-                    {agent.isDefaultOrchestrator && <span className="memberOrchTag">协调者</span>}
+                    {mode === "group" && agent.id === orchestrator?.id && <span className="memberOrchTag">协调者</span>}
                   </div>
                 ))}
-                <button
-                  className="addMemberRow"
-                  type="button"
-                  onClick={() => {
-                    setInviteSelection([]);
-                    setInviteQuery("");
-                    setInviteDialogOpen(true);
-                  }}
-                >
-                  <PlusOutlined />
-                  <span>添加成员</span>
-                </button>
+                {mode === "group" && (
+                  <button
+                    className="addMemberRow"
+                    type="button"
+                    onClick={() => {
+                      setInviteSelection([]);
+                      setInviteQuery("");
+                      setInviteDialogOpen(true);
+                    }}
+                  >
+                    <PlusOutlined />
+                    <span>添加成员</span>
+                  </button>
+                )}
               </div>
             )}
           </section>
@@ -844,19 +885,28 @@ export default function WorkbenchPage() {
                   void handleSend();
                 }
               }}
-              placeholder="输入任务，使用 @frontend-agent 指定群聊成员"
-              disabled={sending || !activeSessionId}
+              placeholder={mode === "direct" ? "输入要交给这个 Agent 的任务" : "输入任务，使用 @frontend-agent 指定群聊成员"}
+              disabled={sending || !activeSessionId || (mode === "direct" && !directAgent)}
             />
           </div>
           <div className="composerBar">
             <span>
-              {parsedMentionIds.length
+              {mode === "direct"
+                ? directAgent
+                  ? `单聊：${directAgent.name}`
+                  : "请选择单聊 Agent"
+                : parsedMentionIds.length
                 ? `将发送给 ${parsedMentionIds.length} 个 Agent`
                 : composerAgents.length
                   ? `群聊成员 ${composerAgents.length} 个 Agent`
                   : "默认由主 Orchestrator 协调"}
             </span>
-            <button className="primaryButton" type="button" disabled={!composer.trim() || sending} onClick={() => void handleSend()}>
+            <button
+              className="primaryButton"
+              type="button"
+              disabled={!composer.trim() || sending || !activeSessionId || (mode === "direct" && !directAgent)}
+              onClick={() => void handleSend()}
+            >
               {sending ? <LoadingOutlined /> : <SendOutlined />}
               <span>发送</span>
             </button>
@@ -908,65 +958,122 @@ export default function WorkbenchPage() {
           >
             <header>
               <div>
-                <strong id="create-group-title">新建群聊</strong>
-                <span>填写群聊信息并选择模板</span>
+                <strong id="create-group-title">新建对话</strong>
+                <span>先选择单聊或群聊模式，再选择 Agent 模板</span>
               </div>
             </header>
+            <div className="modeSwitch" role="tablist" aria-label="对话模式">
+              <button
+                className={createMode === "direct" ? "active" : ""}
+                type="button"
+                onClick={() => setCreateMode("direct")}
+              >
+                单聊
+              </button>
+              <button
+                className={createMode === "group" ? "active" : ""}
+                type="button"
+                onClick={() => setCreateMode("group")}
+              >
+                群聊
+              </button>
+            </div>
             <div className="buildForm">
               <label>
-                群聊名称
-                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="输入群聊名称" />
+                对话名称
+                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="留空后使用首条消息摘要" />
               </label>
-              <label>
-                Orchestrator
-                <div className="searchableSelect">
-                  <input
-                    value={orchDropdownOpen ? orchSearch : (selectedOrchTpl?.name ?? "")}
-                    placeholder="搜索模板…"
-                    onFocus={() => { setOrchSearch(""); setOrchDropdownOpen(true); }}
-                    onChange={(e) => setOrchSearch(e.target.value)}
-                    onBlur={() => setTimeout(() => setOrchDropdownOpen(false), 150)}
-                  />
-                  {orchDropdownOpen && (
-                    <div className="searchableDropdown">
-                      {templates
-                        .filter((tpl) => !orchSearch || tpl.name.toLowerCase().includes(orchSearch.toLowerCase()))
-                        .map((tpl) => (
-                          <div
-                            key={tpl.id}
-                            className={`searchableOption ${orchTemplateId === tpl.id ? "active" : ""}`}
-                            onMouseDown={() => { setOrchTemplateId(tpl.id); setOrchDropdownOpen(false); }}
-                          >
-                            <strong>{tpl.name}</strong>
-                            <small>{tpl.description.slice(0, 50)}</small>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              </label>
-              {orchTemplateId !== 0 && (
+              {createMode === "direct" ? (
                 <>
                   <label>
-                    Orchestrator 名称
+                    Agent 模板
+                    <select
+                      value={directTemplateId}
+                      onChange={(event) => {
+                        const nextId = Number(event.target.value);
+                        setDirectTemplateId(nextId);
+                        const tpl = templates.find((item) => item.id === nextId);
+                        if (tpl) setDirectProvider(tpl.defaultProvider);
+                      }}
+                    >
+                      <option value={0}>选择模板</option>
+                      {templates.map((tpl) => (
+                        <option key={tpl.id} value={tpl.id}>
+                          {tpl.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Agent 名称
                     <input
-                      value={orchName}
-                      onChange={(e) => setOrchName(e.target.value)}
-                      placeholder={selectedOrchTpl?.name ?? "实例名称"}
+                      value={directName}
+                      onChange={(e) => setDirectName(e.target.value)}
+                      placeholder={templates.find((tpl) => tpl.id === directTemplateId)?.name ?? "不填则自动加序号"}
                     />
                   </label>
                   <label>
-                    Orchestrator Provider
-                    <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                    Provider
+                    <select value={directProvider} onChange={(e) => setDirectProvider(e.target.value)}>
                       <option value="claude-code">claude-code</option>
                       <option value="open-code">open-code</option>
                     </select>
                   </label>
                 </>
+              ) : (
+                <>
+                  <label>
+                    Orchestrator
+                    <div className="searchableSelect">
+                      <input
+                        value={orchDropdownOpen ? orchSearch : (selectedOrchTpl?.name ?? "")}
+                        placeholder="搜索模板…"
+                        onFocus={() => { setOrchSearch(""); setOrchDropdownOpen(true); }}
+                        onChange={(e) => setOrchSearch(e.target.value)}
+                        onBlur={() => setTimeout(() => setOrchDropdownOpen(false), 150)}
+                      />
+                      {orchDropdownOpen && (
+                        <div className="searchableDropdown">
+                          {templates
+                            .filter((tpl) => !orchSearch || tpl.name.toLowerCase().includes(orchSearch.toLowerCase()))
+                            .map((tpl) => (
+                              <div
+                                key={tpl.id}
+                                className={`searchableOption ${orchTemplateId === tpl.id ? "active" : ""}`}
+                                onMouseDown={() => { setOrchTemplateId(tpl.id); setOrchDropdownOpen(false); }}
+                              >
+                                <strong>{tpl.name}</strong>
+                                <small>{tpl.description.slice(0, 50)}</small>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                  {orchTemplateId !== 0 && (
+                    <>
+                      <label>
+                        Orchestrator 名称
+                        <input
+                          value={orchName}
+                          onChange={(e) => setOrchName(e.target.value)}
+                          placeholder={selectedOrchTpl?.name ?? "不填则自动加序号"}
+                        />
+                      </label>
+                      <label>
+                        Orchestrator Provider
+                        <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                          <option value="claude-code">claude-code</option>
+                          <option value="open-code">open-code</option>
+                        </select>
+                      </label>
+                    </>
+                  )}
+                  <label>群成员模板（多选）</label>
+                </>
               )}
-              <label>群成员模板（多选）</label>
             </div>
-            <div className="agentChoiceList">
+            {createMode === "group" && <div className="agentChoiceList">
               {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板，请先创建模板。</p>}
               {templates.map((tpl) => {
                 const selected = memberTemplates.some((m) => m.templateId === tpl.id);
@@ -1028,13 +1135,18 @@ export default function WorkbenchPage() {
                   </div>
                 );
               })}
-            </div>
+            </div>}
             <footer>
               <button className="ghostButton" type="button" onClick={closeGroupDialog}>
                 取消
               </button>
-              <button className="primaryButton" type="button" onClick={() => void handleCreateGroup()}>
-                创建群聊
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={createMode === "direct" ? !directTemplateId : !orchTemplateId}
+                onClick={() => void handleCreateGroup()}
+              >
+                创建对话
               </button>
             </footer>
           </section>

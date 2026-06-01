@@ -49,6 +49,25 @@ export function readMemberAgentIds(session: HubSessionDto | null | undefined) {
     .filter((item): item is number => item !== null);
 }
 
+export function readDirectAgentId(session: HubSessionDto | null | undefined) {
+  return readNumericMetadata(session, "directAgentId");
+}
+
+export function readOrchestratorAgentId(session: HubSessionDto | null | undefined) {
+  return readNumericMetadata(session, "orchestratorAgentId");
+}
+
+export function sessionMode(session: HubSessionDto | null | undefined) {
+  return session?.metadata.mode === "direct" || readDirectAgentId(session) ? "direct" : "group";
+}
+
+function readNumericMetadata(session: HubSessionDto | null | undefined, key: string) {
+  const value = session?.metadata[key];
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return null;
+}
+
 export function buildGroupTitle(templateIds: number[], templates: AgentTemplateDto[]) {
   const names = templateIds
     .map((id) => templates.find((tpl) => tpl.id === id)?.name)

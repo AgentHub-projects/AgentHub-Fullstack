@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type {
   AddParticipantRequest,
+  AgentInstanceDto,
   CreateHubSessionRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
@@ -58,84 +59,52 @@ export class HubSessionService {
   }
 
   async createSession(input: CreateHubSessionRequest) {
+    const mode = input.mode === "direct" || input.directTemplateId ? "direct" : "group";
+    if (mode === "direct" && !input.directTemplateId) throw new BadRequestException("DIRECT_TEMPLATE_REQUIRED");
+    if (mode === "group" && !input.orchestratorTemplateId) throw new BadRequestException("ORCHESTRATOR_TEMPLATE_REQUIRED");
     const session = await this.prisma.session.create({
       data: {
-        title: input.title?.trim() || "新 Agent 群聊",
+        title: input.title?.trim() || (mode === "direct" ? "新单聊" : "新 Agent 群聊"),
         metadata: {
           ...(input.metadata ?? {}),
           isPinned: Boolean(input.metadata?.isPinned),
+          mode,
           titleSource: input.title?.trim() ? "manual" : "auto",
         } as any,
       },
       include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
 
-    // Create agent instances from templates
+    let directAgentId: number | null = null;
     let orchestratorAgentId: number | null = null;
     const memberAgentIds: number[] = [];
-    if (input.orchestratorTemplateId) {
-      const tpl = await this.prisma.agentTemplate.findUnique({
-        where: { id: input.orchestratorTemplateId },
-      });
-      if (tpl) {
-        const providerId = input.orchestratorProvider
-          ? await this.agents.resolveProviderId(input.orchestratorProvider)
-          : tpl.defaultProviderId;
-        const agent = await this.prisma.agent.create({
-          data: {
-            templateId: tpl.id,
-            name: input.orchestratorName || `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
-            description: tpl.description,
-            providerId,
-            isDefaultOrchestrator: false,
-            status: "enabled",
-          },
-        });
-        await this.prisma.sessionAgent.create({
-          data: {
-            sessionId: session.id,
-            agentId: agent.id,
-            participantRole: "orchestrator",
-            source: "manual_add",
-            firstMentionedAt: new Date(),
-            lastActiveAt: new Date(),
-          },
-        });
-        orchestratorAgentId = agent.id;
-      }
+
+    if (mode === "direct") {
+      const agent = await this.agents.createAgentFromTemplate(
+        session.id,
+        input.directTemplateId!,
+        input.directProvider,
+        input.directName,
+        "direct",
+      );
+      directAgentId = agent.id;
     }
 
-    if (input.memberTemplates?.length) {
+    if (mode === "group" && input.orchestratorTemplateId) {
+      const agent = await this.agents.createAgentFromTemplate(
+        session.id,
+        input.orchestratorTemplateId,
+        input.orchestratorProvider,
+        input.orchestratorName,
+        "orchestrator",
+      );
+      orchestratorAgentId = agent.id;
+    }
+
+    if (mode === "group" && input.memberTemplates?.length) {
       for (const mt of input.memberTemplates) {
-        const tpl = await this.prisma.agentTemplate.findUnique({
-          where: { id: mt.templateId },
-        });
-        if (tpl) {
-          const providerId = mt.provider
-            ? await this.agents.resolveProviderId(mt.provider)
-            : tpl.defaultProviderId;
-          const agent = await this.prisma.agent.create({
-            data: {
-              templateId: tpl.id,
-              name: mt.name || `${tpl.name.replace(/\s+/g, "-").toLowerCase()}-${session.id.slice(0, 8)}`,
-              description: tpl.description,
-              providerId,
-              isDefaultOrchestrator: false,
-              status: "enabled",
-            },
-          });
-          await this.prisma.sessionAgent.create({
-            data: {
-              sessionId: session.id,
-              agentId: agent.id,
-              participantRole: "member",
-              source: "manual_add",
-              firstMentionedAt: new Date(),
-              lastActiveAt: new Date(),
-            },
-          });
-          memberAgentIds.push(agent.id);
-        }
+        const agent = await this.agents.createAgentFromTemplate(session.id, mt.templateId, mt.provider, mt.name, "member");
+        memberAgentIds.push(agent.id);
       }
     }
 
@@ -143,6 +112,8 @@ export class HubSessionService {
       where: { id: session.id },
       data: {
         metadata: mergeMetadata(session.metadata, {
+          mode,
+          directAgentId,
           orchestratorAgentId,
           memberAgentIds,
         }) as any,
@@ -330,12 +301,17 @@ export class HubSessionService {
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
     if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
 
-    const orchestrator = input.orchestratorAgentId
-      ? await this.agents.getAgent(input.orchestratorAgentId)
-      : await this.agents.getDefaultOrchestrator();
-    if (!orchestrator) throw new Error("Orchestrator agent not found");
+    const metadata = mergeMetadata(session.metadata, {});
+    const directAgentId = numberMetadataValue(metadata.directAgentId);
+    const isDirect = metadata.mode === "direct" || Boolean(directAgentId);
+    const runAgent = isDirect
+      ? await this.agents.getAgent(directAgentId ?? 0)
+      : await this.resolveSessionOrchestrator(metadata, input.orchestratorAgentId);
+    if (!runAgent) throw new Error(isDirect ? "Direct agent not found" : "Orchestrator agent not found");
 
-    const mentionedAgents = await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
+    const mentionedAgents = isDirect
+      ? []
+      : await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
     const message = await this.prisma.message.create({
       data: {
         sessionId,
@@ -359,15 +335,17 @@ export class HubSessionService {
     const run = await this.prisma.agentRun.create({
       data: {
         sessionId,
-        orchestratorAgentId: orchestrator.id,
+        orchestratorAgentId: runAgent.id,
         userMessageId: message.id,
         status: "queued",
       },
     });
 
-    await this.upsertSessionAgent(sessionId, orchestrator.id, "orchestrator", "default_orchestrator");
-    for (const agent of mentionedAgents) {
-      await this.upsertSessionAgent(sessionId, agent.id, "member", "mention");
+    if (!isDirect) {
+      await this.upsertSessionAgent(sessionId, runAgent.id, "orchestrator", "default_orchestrator");
+      for (const agent of mentionedAgents) {
+        await this.upsertSessionAgent(sessionId, agent.id, "member", "mention");
+      }
     }
 
     const contextSnapshot = await this.context.buildSnapshot({
@@ -394,11 +372,12 @@ export class HubSessionService {
       sessionId,
       runId: run.id,
       eventType: "run.created",
-      speakerAgentId: orchestrator.id,
+      speakerAgentId: runAgent.id,
       source: "agenthub_backend",
       payload: {
         status: "queued",
-        orchestratorAgentId: orchestrator.id,
+        orchestratorAgentId: runAgent.id,
+        mode: isDirect ? "direct" : "group",
         mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
         mentionedAgentNames: mentionedAgents.map((agent) => agent.name),
         contextSnapshotId: contextSnapshot.id,
@@ -410,7 +389,7 @@ export class HubSessionService {
       runId: run.id,
       userMessageId: message.id,
       promptText: text,
-      orchestrator,
+      orchestrator: runAgent,
       mentionedAgents,
       context: contextSnapshot,
     });
@@ -443,11 +422,16 @@ export class HubSessionService {
     return { runId, status: "cancelled" };
   }
 
+  private async resolveSessionOrchestrator(metadata: Record<string, unknown>, requestedAgentId?: number) {
+    const orchestratorAgentId = numberMetadataValue(metadata.orchestratorAgentId) ?? requestedAgentId;
+    if (orchestratorAgentId) return this.agents.getAgent(orchestratorAgentId);
+    return this.agents.getDefaultOrchestrator();
+  }
+
   private async resolveMentions(sessionId: string, text: string, explicitIds: number[]) {
-    const agents = await this.agents.listAgents();
+    const agents = await this.loadSessionMemberAgents(sessionId);
     const ids = new Set(explicitIds);
 
-    // Check text for @mentions
     const lowerText = text.toLowerCase();
     for (const agent of agents) {
       const labels = [`@${agent.name}`, `@${agent.id}`].map((label) => label.toLowerCase());
@@ -456,22 +440,32 @@ export class HubSessionService {
       }
     }
 
-    // Also include session participants (group members)
     if (ids.size === 0) {
-      const participants = await this.prisma.sessionAgent.findMany({
-        where: { sessionId },
-      });
-      const participantAgents = agents.filter((agent) =>
-        participants.some((p) => p.agentId === agent.id && p.participantRole !== "orchestrator"),
-      );
-      return participantAgents.length > 0
-        ? participantAgents
-        : agents.filter((agent) => !agent.isDefaultOrchestrator).slice(0, 2);
+      return agents;
     }
 
     const mentioned = agents.filter((agent) => ids.has(agent.id));
     if (mentioned.length > 0) return mentioned;
-    return agents.filter((agent) => !agent.isDefaultOrchestrator).slice(0, 2);
+    throw new BadRequestException("MENTIONED_AGENT_NOT_IN_SESSION");
+  }
+
+  private async loadSessionMemberAgents(sessionId: string) {
+    const participants = await this.prisma.sessionAgent.findMany({
+      where: {
+        sessionId,
+        participantRole: "member",
+        agent: { status: { not: "disabled" } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const ids = participants.map((participant) => participant.agentId);
+    const agents = await this.agents.getAgents(ids);
+    const ordered: AgentInstanceDto[] = [];
+    for (const id of ids) {
+      const agent = agents.find((item) => item.id === id);
+      if (agent) ordered.push(agent);
+    }
+    return ordered;
   }
 
   private async upsertSessionAgent(sessionId: string, agentId: number, role: string, source: string) {
@@ -541,6 +535,12 @@ function compareSessionsForList(a: { metadata: unknown; updatedAt: Date }, b: { 
 
 function sessionPinned(session: { metadata: unknown }) {
   return mergeMetadata(session.metadata, {}).isPinned === true;
+}
+
+function numberMetadataValue(value: unknown) {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return undefined;
 }
 
 function sessionMatchesQuery(

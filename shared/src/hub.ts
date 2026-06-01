@@ -248,6 +248,10 @@ export interface SessionDetailDto {
 export interface CreateHubSessionRequest {
   title?: string;
   metadata?: Record<string, unknown>;
+  mode?: "direct" | "group";
+  directTemplateId?: number;
+  directProvider?: string;
+  directName?: string;
   orchestratorTemplateId?: number;
   orchestratorProvider?: string; // "claude-code" | "open-code"
   orchestratorName?: string;
@@ -284,7 +288,7 @@ export interface AddParticipantRequest {
 export interface CreateSessionAgentRequest {
   templateId: number;
   provider: string; // "claude-code" | "open-code"
-  name: string;
+  name?: string;
   sessionId: string;
 }
 

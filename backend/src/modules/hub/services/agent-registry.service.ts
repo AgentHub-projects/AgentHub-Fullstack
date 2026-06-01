@@ -83,20 +83,22 @@ export class AgentRegistryService implements OnModuleInit {
   async createAgentFromTemplate(
     sessionId: string,
     templateId: number,
-    provider: string,
-    name: string,
+    provider?: string,
+    name?: string,
+    participantRole = "member",
   ): Promise<AgentInstanceDto> {
     const tpl = await this.prisma.agentTemplate.findUnique({
       where: { id: templateId },
     });
     if (!tpl) throw new Error("Template not found");
 
-    const providerId = await this.resolveProviderId(provider);
+    const providerId = provider ? await this.resolveProviderId(provider) : tpl.defaultProviderId;
+    const agentName = await this.nextAgentName(name?.trim() || tpl.name);
 
     const agent = await this.prisma.agent.create({
       data: {
         templateId: tpl.id,
-        name,
+        name: agentName,
         description: tpl.description,
         providerId,
         status: "enabled",
@@ -108,7 +110,7 @@ export class AgentRegistryService implements OnModuleInit {
       data: {
         sessionId,
         agentId: agent.id,
-        participantRole: "member",
+        participantRole,
         source: "manual_add",
         firstMentionedAt: new Date(),
         lastActiveAt: new Date(),
@@ -159,6 +161,17 @@ export class AgentRegistryService implements OnModuleInit {
     if (!agent) throw new Error("Agent not found");
 
     await this.prisma.agent.delete({ where: { id } });
+  }
+
+  private async nextAgentName(baseName: string): Promise<string> {
+    const base = baseName.trim() || "Agent";
+    let candidate = base;
+    let index = 2;
+    while (await this.prisma.agent.findFirst({ where: { name: candidate }, select: { id: true } })) {
+      candidate = `${base} ${index}`;
+      index += 1;
+    }
+    return candidate;
   }
 
   async getDefaultOrchestrator(): Promise<AgentInstanceDto> {

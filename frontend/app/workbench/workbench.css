@@ -1754,6 +1754,32 @@ textarea:focus-visible {
   color: var(--brand);
 }
 
+.modeSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 4px;
+}
+
+.modeSwitch button {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-weight: 750;
+}
+
+.modeSwitch button.active {
+  border-color: #c9d6f5;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
 .buildForm {
   display: grid;
   gap: 12px;
