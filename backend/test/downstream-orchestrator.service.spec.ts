@@ -109,8 +109,22 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(params.pins).toEqual([
       expect.objectContaining({ id: "pin-1", kind: "message", text: "本轮 pin" }),
     ]);
+    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 1 });
     expect(JSON.stringify(params)).not.toContain("recent should not be sent");
     expect(JSON.stringify(params)).not.toContain("rendered context prompt should not be sent");
+  });
+
+  it("uses the current run agent id when creating a downstream session", async () => {
+    const service = createService();
+    const directAgent = { ...orchestrator, id: 9, name: "direct-agent", isDefaultOrchestrator: false };
+
+    await startRunWithDownstreamSession(
+      service,
+      { ...createRunInput("run-1", "单聊任务"), orchestrator: directAgent },
+      "downstream-session-1",
+    );
+
+    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 9 });
   });
 
   it("sends only the current prompt while the downstream connection is alive", async () => {
@@ -332,4 +346,12 @@ function lastPromptParams() {
     .filter((item) => item.event === "acp:message" && item.payload.method === "session/prompt");
   expect(prompts.length).toBeGreaterThan(0);
   return prompts.at(-1)!.payload.params;
+}
+
+function firstRequestParams(method: string) {
+  const request = socketMock.sockets
+    .flatMap((socket) => socket.emitted)
+    .find((item) => item.event === "acp:message" && item.payload.method === method);
+  expect(request).toBeDefined();
+  return request!.payload.params;
 }

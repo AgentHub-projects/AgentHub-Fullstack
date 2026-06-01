@@ -246,7 +246,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private async ensureConnection(
     sessionId: string,
     downstreamUrl: string,
-    _orchestrator: AgentInstanceDto,
+    agent: AgentInstanceDto,
     options: { downstreamSessionId?: string | null; activeRunId?: string; activeOrchestratorAgentId?: AgentId } = {},
   ): Promise<ConnectionRecord> {
     const existing = this.connections.get(sessionId);
@@ -308,7 +308,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         loadSessionId
           ? { sessionId: loadSessionId }
           : {
-              _meta: { agentId: "orchestrator" },
+              _meta: { agentId: agent.id },
               mcpServers: [],
             },
       )
@@ -325,7 +325,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             record.downstreamSessionId = undefined;
             record.needsBootstrap = true;
             void this.requestDownstream(record, "session/new", {
-              _meta: { agentId: "orchestrator" },
+              _meta: { agentId: agent.id },
               mcpServers: [],
             })
               .then((result) => {
