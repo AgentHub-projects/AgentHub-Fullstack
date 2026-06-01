@@ -3,6 +3,7 @@ import type {
   AddParticipantRequest,
   AgentInstanceDto,
   CreateHubSessionRequest,
+  DeploymentTarget,
   HubMessagePartDto,
   PinHubMessageRequest,
   SendHubMessageRequest,
@@ -14,6 +15,7 @@ import { AgentRegistryService } from "./agent-registry.service";
 import { HubContextService } from "./context.service";
 import { DownstreamOrchestratorService } from "./downstream-orchestrator.service";
 import { HubEventService } from "./event.service";
+import { DeploymentService } from "./deployment.service";
 import {
   mapArtifact,
   mapContextSnapshot,
@@ -40,6 +42,8 @@ export class HubSessionService {
     private readonly downstream: DownstreamOrchestratorService,
     @Inject(HubEventService)
     private readonly events: HubEventService,
+    @Inject(DeploymentService)
+    private readonly deployments: DeploymentService,
     @Inject(HubRealtimeGateway)
     private readonly gateway: HubRealtimeGateway,
   ) {}
@@ -308,6 +312,7 @@ export class HubSessionService {
     await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
+    const deploymentTarget = parseDeploymentCommandTarget(text);
     const directAgentId = numberMetadataValue(metadata.directAgentId);
     const isDirect = metadata.mode === "direct" || Boolean(directAgentId);
     const runAgent = isDirect
@@ -357,7 +362,8 @@ export class HubSessionService {
         sessionId,
         orchestratorAgentId: runAgent.id,
         userMessageId: message.id,
-        status: "queued",
+        status: deploymentTarget ? "completed" : "queued",
+        completedAt: deploymentTarget ? new Date() : undefined,
       },
     });
 
@@ -383,13 +389,37 @@ export class HubSessionService {
       speakerAgentId: runAgent.id,
       source: "agenthub_backend",
       payload: {
-        status: "queued",
+        status: deploymentTarget ? "completed" : "queued",
+        command: deploymentTarget ? "deployment" : undefined,
+        deploymentTarget,
         orchestratorAgentId: runAgent.id,
         mode: isDirect ? "direct" : "group",
         mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
         mentionedAgentNames: mentionedAgents.map((agent) => agent.name),
       },
     });
+
+    if (deploymentTarget) {
+      await this.events.append({
+        sessionId,
+        runId: run.id,
+        eventType: "run.completed",
+        speakerAgentId: runAgent.id,
+        source: "agenthub_backend",
+        payload: {
+          status: "completed",
+          command: "deployment",
+          deploymentTarget,
+        },
+      });
+      await this.deployments.start(sessionId, { target: deploymentTarget });
+      return {
+        session: sessionDto,
+        message: mapMessage(message),
+        run: mapRun(run),
+        contextSnapshot: null,
+      };
+    }
 
     void this.downstream.startRun({
       sessionId,
@@ -695,6 +725,29 @@ function normalizeReferences(input: SendHubMessageRequest) {
     deduped.set(`${reference.messageId}:${reference.partId ?? ""}`, reference);
   }
   return [...deduped.values()];
+}
+
+export function parseDeploymentCommandTarget(text: string): DeploymentTarget | null {
+  const normalized = text.replace(/\s+/g, "").toLowerCase();
+  if (!normalized || normalized.length > 32) return null;
+  if (normalized.includes("不是") || normalized.includes("不要") || normalized.includes("解释")) return null;
+  const isDeployCommand =
+    normalized.includes("部署") ||
+    normalized.includes("发布") ||
+    normalized.includes("deploy") ||
+    normalized.includes("打包") ||
+    normalized.includes("源码包");
+  if (!isDeployCommand) return null;
+  if (normalized.includes("容器") || normalized.includes("container") || normalized.includes("docker")) return "container";
+  if (
+    normalized.includes("源码") ||
+    normalized.includes("打包") ||
+    normalized.includes("archive") ||
+    normalized.includes("source")
+  ) {
+    return "source_archive";
+  }
+  return "static";
 }
 
 function referencedPartText(contentJson: unknown, partId: string) {
