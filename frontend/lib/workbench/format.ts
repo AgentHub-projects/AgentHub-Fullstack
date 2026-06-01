@@ -101,7 +101,7 @@ export function buildGroupTitle(templateIds: number[], templates: AgentTemplateD
 
 export function sessionSubtitle(session: HubSessionDto) {
   const memberCount = readMemberAgentIds(session).length;
-  const status = session.lastRun?.status ?? session.status;
+  const status = session.status === "archived" ? "archived" : session.lastRun?.status ?? session.status;
   return `${memberCount ? `${memberCount} 个 Agent · ` : ""}${status} · ${formatTime(session.updatedAt)}`;
 }
 

@@ -390,6 +390,22 @@ textarea:focus-visible {
   padding: 0;
 }
 
+.archiveToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.archiveToggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--brand);
+}
+
 .agentContacts {
   display: grid;
   gap: 8px;
@@ -530,6 +546,14 @@ textarea:focus-visible {
   background: var(--surface);
   box-shadow: inset 3px 0 0 var(--brand);
   color: var(--ink);
+}
+
+.sessionItem.archived {
+  color: var(--muted);
+}
+
+.sessionItem.archived .sessionItemMain {
+  opacity: 0.78;
 }
 
 .sessionItemMain {

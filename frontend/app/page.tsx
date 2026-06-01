@@ -109,6 +109,7 @@ export default function WorkbenchPage() {
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [includeArchivedSessions, setIncludeArchivedSessions] = useState(false);
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetailDto | null>(null);
@@ -169,6 +170,8 @@ export default function WorkbenchPage() {
     ? (detail?.artifacts.find((artifact) => artifact.id === activeArtifactViewerId) ?? null)
     : null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
+  const sessionWritable = activeSession?.status === "active";
+  const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
   const directAgentId = readDirectAgentId(activeSession);
   const directAgent = directAgentId ? (agents.find((agent) => agent.id === directAgentId) ?? null) : null;
@@ -199,10 +202,10 @@ export default function WorkbenchPage() {
   useEffect(() => {
     if (!authenticated || !authChecked) return;
     const timer = window.setTimeout(() => {
-      void refreshSessions(sessionSearch);
+      void refreshSessions(sessionSearch, includeArchivedSessions);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [authenticated, authChecked, sessionSearch]);
+  }, [authenticated, authChecked, sessionSearch, includeArchivedSessions]);
 
   useEffect(() => {
     if (!authenticated || !activeSessionId) return;
@@ -290,7 +293,7 @@ export default function WorkbenchPage() {
     const [agentRes, templateRes, sessionRes, projectRes] = await Promise.all([
       listAgents(),
       listAgentTemplates(),
-      listSessions({ query: sessionSearch }),
+      listSessions({ query: sessionSearch, includeArchived: includeArchivedSessions }),
       listProjects(),
     ]);
     if (agentRes.ok) setAgents(agentRes.data.items);
@@ -313,8 +316,8 @@ export default function WorkbenchPage() {
     }
   }
 
-  async function refreshSessions(query = sessionSearch) {
-    const result = await listSessions({ query });
+  async function refreshSessions(query = sessionSearch, includeArchived = includeArchivedSessions) {
+    const result = await listSessions({ query, includeArchived });
     if (!result.ok) {
       setNotice(`会话列表加载失败：${result.error}`);
       return;
@@ -413,9 +416,14 @@ export default function WorkbenchPage() {
         setNotice(`归档失败：${result.error}`);
         return;
       }
-      const nextSessions = sessions.filter((item) => item.id !== session.id).sort(sortSession);
+      const nextSessions = includeArchivedSessions
+        ? upsertById(sessions, result.data).sort(sortSession)
+        : sessions.filter((item) => item.id !== session.id).sort(sortSession);
       setSessions(nextSessions);
-      if (activeSessionId === session.id) {
+      if (activeSessionId === session.id && includeArchivedSessions) {
+        setDetail((current) => (current ? { ...current, session: result.data } : current));
+      }
+      if (activeSessionId === session.id && !includeArchivedSessions) {
         const next = nextSessions[0] ?? null;
         setActiveSessionId(next?.id ?? null);
         setDetail(null);
@@ -522,7 +530,7 @@ export default function WorkbenchPage() {
 
   async function handleSend() {
     const text = composer.trim();
-    if (!text || !activeSessionId || sending) return;
+    if (!text || !activeSessionId || !sessionWritable || sending) return;
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -687,7 +695,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleRegenerate(message: HubMessageDto) {
-    if (!activeSessionId || sending) return;
+    if (!activeSessionId || !sessionWritable || sending) return;
     setSending(true);
     try {
       const result = await regenerateSessionMessage(activeSessionId, message.id);
@@ -712,7 +720,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleApplyFileChange(change: HubFileChangeDto) {
-    if (!activeSessionId || applyingFileChangeId) return;
+    if (!activeSessionId || !sessionWritable || applyingFileChangeId) return;
     setApplyingFileChangeId(change.id);
     try {
       const result = await applyFileChange(activeSessionId, change.id);
@@ -723,7 +731,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleStartDeployment(target: DeploymentTarget) {
-    if (!activeSessionId || deployingSessionId) return;
+    if (!activeSessionId || !sessionWritable || deployingSessionId) return;
     setDeploymentMenuOpen(false);
     setDeployingSessionId(activeSessionId);
     try {
@@ -742,6 +750,10 @@ export default function WorkbenchPage() {
   }
 
   function handleArtifactSelection(artifact: HubArtifactDto, selectedText: string) {
+    if (!sessionWritable) {
+      setNotice("归档会话为只读，不能发起局部修改");
+      return;
+    }
     const prompt = [
       `请修改产物「${artifact.title}」中的选中内容：`,
       "",
@@ -764,6 +776,7 @@ export default function WorkbenchPage() {
   }
 
   function addReplyTarget(message: HubMessageDto) {
+    if (!sessionWritable) return;
     setReplyTargets((current) => {
       if (current.some((item) => item.id === message.id)) return current;
       return [...current, message].slice(0, 5);
@@ -771,7 +784,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleAttachmentFiles(files: FileList | null) {
-    if (!activeSessionId || !files?.length || uploadingAttachment) return;
+    if (!activeSessionId || !sessionWritable || !files?.length || uploadingAttachment) return;
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
@@ -873,7 +886,7 @@ export default function WorkbenchPage() {
           <section className="projectBinder">
             <select
               value={activeSession?.projectId ?? ""}
-              disabled={!activeSessionId}
+              disabled={!activeSessionId || !sessionWritable}
               onChange={(event) => void handleBindProject(event.target.value || null)}
             >
               <option value="">未绑定项目</option>
@@ -956,6 +969,23 @@ export default function WorkbenchPage() {
             placeholder="搜索会话、最近消息、Agent"
           />
         </label>
+        <label className="archiveToggle">
+          <input
+            type="checkbox"
+            checked={includeArchivedSessions}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setIncludeArchivedSessions(checked);
+              if (!checked && activeSession?.status === "archived") {
+                setActiveSessionId(null);
+                setDetail(null);
+                setReplyTargets([]);
+                setAttachments([]);
+              }
+            }}
+          />
+          <span>显示归档</span>
+        </label>
 
         {contactTemplates.length > 0 && (
           <section className="agentContacts" aria-label="Agent 联系人">
@@ -998,10 +1028,11 @@ export default function WorkbenchPage() {
           {sessions.map((session) => {
             const sessionBusy = isRunning(session.lastRun?.status ?? "");
             const actionBusy = sessionActionId === session.id;
+            const archived = session.status === "archived";
             return (
               <div
                 key={session.id}
-                className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
+                className={`sessionItem ${session.id === activeSessionId ? "active" : ""} ${archived ? "archived" : ""}`}
               >
                 <button className="sessionItemMain" type="button" onClick={() => void loadSession(session.id)}>
                   <span>
@@ -1023,8 +1054,8 @@ export default function WorkbenchPage() {
                   <button
                     className="iconButton"
                     type="button"
-                    title={sessionBusy ? "运行中不能归档" : "归档"}
-                    disabled={actionBusy || sessionBusy}
+                    title={archived ? "已归档" : sessionBusy ? "运行中不能归档" : "归档"}
+                    disabled={actionBusy || sessionBusy || archived}
                     onClick={() => void handleArchiveSession(session)}
                   >
                     <InboxOutlined />
@@ -1071,7 +1102,13 @@ export default function WorkbenchPage() {
           </div>
           <div className="headerActions">
             {activeSession && !renamingSession && (
-              <button className="iconButton" type="button" title="重命名会话" onClick={beginRenameSession}>
+              <button
+                className="iconButton"
+                type="button"
+                title={sessionWritable ? "重命名会话" : "归档会话只读"}
+                disabled={!sessionWritable}
+                onClick={beginRenameSession}
+              >
                 <EditOutlined />
               </button>
             )}
@@ -1080,7 +1117,7 @@ export default function WorkbenchPage() {
                 <button
                   className="ghostButton"
                   type="button"
-                  disabled={deployingSessionId === activeSession.id}
+                  disabled={!sessionWritable || deployingSessionId === activeSession.id}
                   onClick={() => setDeploymentMenuOpen((open) => !open)}
                 >
                   {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
@@ -1126,8 +1163,8 @@ export default function WorkbenchPage() {
                 message={item.message}
                 onPin={handlePin}
                 onPinPart={handlePinPart}
-                onReply={addReplyTarget}
-                onRegenerate={(message) => void handleRegenerate(message)}
+                onReply={sessionWritable ? addReplyTarget : undefined}
+                onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 agents={agents}
               />
@@ -1140,9 +1177,9 @@ export default function WorkbenchPage() {
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}
-                onReply={addReplyTarget}
-                onRegenerate={(message) => void handleRegenerate(message)}
-                onApplyFileChange={handleApplyFileChange}
+                onReply={sessionWritable ? addReplyTarget : undefined}
+                onRegenerate={sessionWritable ? (message) => void handleRegenerate(message) : undefined}
+                onApplyFileChange={sessionWritable ? handleApplyFileChange : undefined}
                 onOpenArtifact={openArtifactViewer}
                 applyingFileChangeId={applyingFileChangeId}
               />
@@ -1161,7 +1198,7 @@ export default function WorkbenchPage() {
             </div>
           )}
           <div className="composerInputWrap">
-            {mentionMatch && !sending && activeSessionId && (
+            {mentionMatch && !sending && activeSessionId && sessionWritable && (
               <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
                 {mentionCandidates.length > 0 ? (
                   mentionCandidates.map((agent, index) => (
@@ -1235,13 +1272,23 @@ export default function WorkbenchPage() {
                   void handleSend();
                 }
               }}
-              placeholder={mode === "direct" ? "输入要交给这个 Agent 的任务" : "输入任务，使用 @frontend-agent 指定群聊成员"}
-              disabled={sending || !activeSessionId || (mode === "direct" && !directAgent)}
+              placeholder={
+                !sessionWritable
+                  ? sessionReadOnly ? "归档会话为只读" : "请选择会话"
+                  : mode === "direct"
+                    ? "输入要交给这个 Agent 的任务"
+                    : "输入任务，使用 @frontend-agent 指定群聊成员"
+              }
+              disabled={sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
             />
           </div>
           <div className="composerBar">
             <span>
-              {mode === "direct"
+              {sessionReadOnly
+                ? "归档会话只读"
+                : !activeSession
+                  ? "请选择会话"
+                : mode === "direct"
                 ? directAgent
                   ? `单聊：${directAgent.name}`
                   : "请选择单聊 Agent"
@@ -1262,7 +1309,7 @@ export default function WorkbenchPage() {
               className="iconButton"
               type="button"
               title="上传附件"
-              disabled={!activeSessionId || uploadingAttachment || attachments.length >= 5}
+              disabled={!activeSessionId || !sessionWritable || uploadingAttachment || attachments.length >= 5}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
@@ -1270,7 +1317,7 @@ export default function WorkbenchPage() {
             <button
               className="primaryButton"
               type="button"
-              disabled={!composer.trim() || sending || !activeSessionId || (mode === "direct" && !directAgent)}
+              disabled={!composer.trim() || sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
               onClick={() => void handleSend()}
             >
               {sending ? <LoadingOutlined /> : <SendOutlined />}
