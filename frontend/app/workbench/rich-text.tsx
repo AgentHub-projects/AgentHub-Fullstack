@@ -305,7 +305,7 @@ function ImagePart({
   );
 }
 
-function ArtifactPart({
+export function ArtifactPart({
   part,
   onPinPart,
   onReferencePart,

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type {
   AgentInstanceDto,
+  HubArtifactDto,
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -45,7 +46,7 @@ import {
   initials,
   isRunning,
 } from "../../lib/workbench/format";
-import { MessageParts, RichText } from "./rich-text";
+import { ArtifactPart, MessageParts, RichText } from "./rich-text";
 
 export function TimelineMessage({
   message,
@@ -100,6 +101,7 @@ export function RunThread({
   run,
   events,
   fileChanges,
+  artifacts,
   messages,
   agents,
   onPinPart,
@@ -114,6 +116,7 @@ export function RunThread({
   run: HubRunDto;
   events: HubEventDto[];
   fileChanges: HubFileChangeDto[];
+  artifacts: HubArtifactDto[];
   messages: HubMessageDto[];
   agents: AgentInstanceDto[];
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
@@ -164,10 +167,36 @@ export function RunThread({
           onApply={onApplyFileChange}
         />
       )}
+      {artifacts.length > 0 && <RunArtifactCards artifacts={artifacts} onOpenArtifact={onOpenArtifact} />}
       {activityEvents.length > 0 && <RunActivityTimeline events={activityEvents} defaultOpen={isRunning(run.status)} />}
       {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
       {run.status === "failed" && <RunFailureBlock run={run} events={events} />}
     </section>
+  );
+}
+
+function RunArtifactCards({
+  artifacts,
+  onOpenArtifact,
+}: {
+  artifacts: HubArtifactDto[];
+  onOpenArtifact?: (artifactId: string) => void;
+}) {
+  return (
+    <details className="runArtifactCards">
+      <summary>
+        <span>
+          <FileDoneOutlined />
+          <strong>Run 产物</strong>
+        </span>
+        <small>{artifacts.length} artifacts</small>
+      </summary>
+      <div className="runArtifactList">
+        {artifacts.map((artifact) => (
+          <ArtifactPart key={artifact.id} part={artifactToPart(artifact)} onOpenArtifact={onOpenArtifact} />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -556,6 +585,32 @@ function buildBeforeAfterPreview(change: HubFileChangeDto) {
   const before = change.beforeContent ? `--- before\n${change.beforeContent}` : "";
   const after = change.afterContent ? `+++ after\n${change.afterContent}` : "";
   return [before, after].filter(Boolean).join("\n\n") || "Diff 内容为空";
+}
+
+function artifactToPart(artifact: HubArtifactDto): HubMessagePartDto {
+  return {
+    id: `artifact_${artifact.id}`,
+    type: "artifact",
+    title: artifact.title,
+    text: artifactTextPreview(artifact),
+    metadata: {
+      artifactId: artifact.id,
+      artifactKey: artifact.artifactKey,
+      kind: artifact.kind,
+      mimeType: artifact.mimeType,
+      storageKind: artifact.storageKind,
+      final: artifact.final,
+      version: artifact.version,
+      sizeBytes: artifact.sizeBytes,
+      updatedAt: artifact.updatedAt,
+    },
+  };
+}
+
+function artifactTextPreview(artifact: HubArtifactDto) {
+  const text = artifact.textContent?.trim();
+  if (!text) return undefined;
+  return text.length > 1200 ? `${text.slice(0, 1200)}\n...` : text;
 }
 
 function referenceCount(message: HubMessageDto) {

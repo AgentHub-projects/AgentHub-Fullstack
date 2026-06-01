@@ -1,4 +1,5 @@
 import type {
+  HubArtifactDto,
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -34,6 +35,7 @@ export type ConversationItem =
       events: HubEventDto[];
       messages: HubMessageDto[];
       fileChanges: HubFileChangeDto[];
+      artifacts: HubArtifactDto[];
     };
 
 export interface AgentReplyBlockModel {

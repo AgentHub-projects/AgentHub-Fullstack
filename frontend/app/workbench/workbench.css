@@ -930,7 +930,8 @@ textarea:focus-visible {
   color: var(--red);
 }
 
-.runActivity {
+.runActivity,
+.runArtifactCards {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -938,7 +939,8 @@ textarea:focus-visible {
   background: var(--surface-muted);
 }
 
-.runActivity summary {
+.runActivity summary,
+.runArtifactCards summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -951,9 +953,33 @@ textarea:focus-visible {
   font-weight: 800;
 }
 
-.runActivity summary small {
+.runActivity summary small,
+.runArtifactCards summary small {
   color: var(--muted-soft);
   font-weight: 700;
+}
+
+.runArtifactCards summary > span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.runArtifactCards summary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runArtifactList {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 8px;
 }
 
 .runActivityList {

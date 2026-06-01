@@ -163,6 +163,32 @@ describe("HubEventService artifact message parts", () => {
     expect(gateway.emitMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "message-1" }));
   });
 
+  it("leaves artifacts without a speaker at run level", async () => {
+    const { service, prisma, artifacts, gateway } = createService();
+    artifacts.completeArtifact.mockResolvedValue(artifactRow({
+      id: "artifact-run",
+      title: "运行日志",
+      kind: "log",
+      mimeType: "text/plain",
+    }));
+    prisma.message.findFirst.mockResolvedValue(messageRow({ id: "message-1", contentText: "已有回复" }));
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "artifact.complete",
+      payload: { artifactKey: "run-log", title: "运行日志" },
+    });
+
+    expect(gateway.emitArtifact).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ id: "artifact-run", title: "运行日志" }),
+    );
+    expect(prisma.message.findFirst).not.toHaveBeenCalled();
+    expect(prisma.message.update).not.toHaveBeenCalled();
+    expect(gateway.emitMessage).not.toHaveBeenCalled();
+  });
+
   it("marks file changes with diff apply conflict status", async () => {
     const { service, prisma, gateway } = createService();
     const existing = fileChangeRow({ id: "change-1", metadata: {} });

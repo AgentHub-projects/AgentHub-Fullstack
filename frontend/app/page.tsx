@@ -1198,6 +1198,7 @@ export default function WorkbenchPage() {
                 run={item.run}
                 events={item.events}
                 fileChanges={item.fileChanges}
+                artifacts={item.artifacts}
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}

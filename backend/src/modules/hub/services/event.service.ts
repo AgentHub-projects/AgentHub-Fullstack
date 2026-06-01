@@ -16,7 +16,6 @@ type MessageBuffer = {
   payload: Record<string, unknown>;
   startedAt: Date;
 };
-const RUN_ARTIFACT_PARTS_KEY = "__run_artifacts__";
 
 @Injectable()
 export class HubEventService {
@@ -343,10 +342,11 @@ export class HubEventService {
   }
 
   private async attachArtifactPart(event: HubEventDto, artifact: HubArtifactDto) {
+    if (!hasArtifactSpeaker(event)) return;
     const part = artifactMessagePart(artifact);
     const message = await this.findAssistantMessageForArtifact(event);
     if (!message) {
-      this.bufferArtifactPart(event.runId, artifactBufferKey(event), part);
+      this.bufferArtifactPart(event.runId, speakerBufferKey(event), part);
       return;
     }
     const contentJson = asObject(message.contentJson);
@@ -362,6 +362,7 @@ export class HubEventService {
   }
 
   private async findAssistantMessageForArtifact(event: HubEventDto) {
+    if (!event.speakerAgentId) return null;
     if (event.speakerAgentId) {
       return this.prisma.message.findFirst({
         where: {
@@ -373,18 +374,6 @@ export class HubEventService {
         orderBy: { createdAt: "desc" },
       });
     }
-
-    const run = await this.prisma.agentRun.findUnique({
-      where: { id: event.runId },
-      select: { assistantMessageId: true },
-    });
-    if (run?.assistantMessageId) {
-      return this.prisma.message.findUnique({ where: { id: run.assistantMessageId } });
-    }
-    return this.prisma.message.findFirst({
-      where: { sessionId: event.sessionId, runId: event.runId, role: "assistant" },
-      orderBy: { createdAt: "desc" },
-    });
   }
 
   private bufferArtifactPart(runId: string, key: string, part: HubMessagePartDto) {
@@ -399,9 +388,8 @@ export class HubEventService {
   private takeBufferedArtifactParts(runId: string, speakerKey: string) {
     const runParts = this.artifactPartBuffers.get(runId);
     if (!runParts) return [];
-    const parts = [...(runParts.get(speakerKey) ?? []), ...(runParts.get(RUN_ARTIFACT_PARTS_KEY) ?? [])];
+    const parts = runParts.get(speakerKey) ?? [];
     runParts.delete(speakerKey);
-    runParts.delete(RUN_ARTIFACT_PARTS_KEY);
     if (runParts.size === 0) this.artifactPartBuffers.delete(runId);
     return parts;
   }
@@ -523,8 +511,8 @@ function speakerBufferKey(event: HubEventDto): string {
   return String(event.speakerAgentId ?? event.speakerName ?? stringValue(event.payload.speaker) ?? "orchestrator");
 }
 
-function artifactBufferKey(event: HubEventDto): string {
-  return event.speakerAgentId || event.speakerName || event.payload.speaker ? speakerBufferKey(event) : RUN_ARTIFACT_PARTS_KEY;
+function hasArtifactSpeaker(event: HubEventDto): boolean {
+  return Boolean(event.speakerAgentId || event.speakerName || event.payload.speaker);
 }
 
 function artifactMessagePart(artifact: HubArtifactDto): HubMessagePartDto {
