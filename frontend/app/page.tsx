@@ -9,6 +9,7 @@ import type {
   HubMessageDto,
   HubRunDto,
   HubSessionDto,
+  ProjectDto,
   SessionDetailDto,
   UpdateAgentRequest,
   UploadedAttachmentDto,
@@ -34,9 +35,11 @@ import {
 import {
   applyFileChange,
   archiveSession,
+  bindSessionProject,
   cancelRun,
   connectHubSocket,
   createSession,
+  createProject,
   createSessionAgent,
   deleteSession,
   deleteAgent,
@@ -44,6 +47,7 @@ import {
   getSessionDetail,
   listAgents,
   listAgentTemplates,
+  listProjects,
   listSessions,
   loginWithAccessKey,
   pinSessionMessage,
@@ -95,6 +99,7 @@ export default function WorkbenchPage() {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -260,13 +265,15 @@ export default function WorkbenchPage() {
   }
 
   async function bootstrap() {
-    const [agentRes, templateRes, sessionRes] = await Promise.all([
+    const [agentRes, templateRes, sessionRes, projectRes] = await Promise.all([
       listAgents(),
       listAgentTemplates(),
       listSessions({ query: sessionSearch }),
+      listProjects(),
     ]);
     if (agentRes.ok) setAgents(agentRes.data.items);
     if (templateRes.ok) setTemplates(templateRes.data);
+    if (projectRes.ok) setProjects(projectRes.data.items);
 
     if (!sessionRes.ok) {
       setNotice(`后端不可用：${sessionRes.error}`);
@@ -291,6 +298,31 @@ export default function WorkbenchPage() {
       return;
     }
     setSessions(result.data.items);
+  }
+
+  async function handleCreateProject() {
+    const name = window.prompt("项目名称");
+    if (!name?.trim()) return;
+    const githubUrl = window.prompt("GitHub 仓库地址");
+    if (!githubUrl?.trim()) return;
+    const result = await createProject({ name: name.trim(), githubUrl: githubUrl.trim(), defaultBranch: "main" });
+    if (!result.ok) {
+      setNotice(`项目创建失败：${result.error}`);
+      return;
+    }
+    setProjects((current) => [result.data, ...current]);
+    if (activeSessionId) await handleBindProject(result.data.id);
+  }
+
+  async function handleBindProject(projectId: string | null) {
+    if (!activeSessionId) return;
+    const result = await bindSessionProject(activeSessionId, projectId);
+    if (!result.ok) {
+      setNotice(`项目绑定失败：${result.error}`);
+      return;
+    }
+    setSessions((current) => upsertById(current, result.data).sort(sortSession));
+    setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
   }
 
   async function loadSession(sessionId: string) {
@@ -694,6 +726,23 @@ export default function WorkbenchPage() {
         </div>
 
         <div className="statusStack">
+          <section className="projectBinder">
+            <select
+              value={activeSession?.projectId ?? ""}
+              disabled={!activeSessionId}
+              onChange={(event) => void handleBindProject(event.target.value || null)}
+            >
+              <option value="">未绑定项目</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <button className="iconButton" type="button" title="新建项目" onClick={() => void handleCreateProject()}>
+              <PlusOutlined />
+            </button>
+          </section>
           <section className="groupSummary">
             <button
               className="groupSummaryHeader"

@@ -18,6 +18,7 @@ import type {
   HubSessionDto,
   ListBuildSessionsResponse,
   PinHubMessageRequest,
+  ProjectDto,
   SendBuildMessageRequest,
   SendBuildMessageResponse,
   SendHubMessageRequest,
@@ -28,6 +29,8 @@ import type {
   UpdateHubSessionRequest,
   UpdateAgentRequest,
   UpdateAgentTemplateRequest,
+  CreateProjectRequest,
+  UpdateProjectRequest,
   UploadedAttachmentDto,
 } from "@agenthub/shared";
 import { io, type Socket } from "socket.io-client";
@@ -117,6 +120,37 @@ export function archiveSession(sessionId: string) {
 
 export function deleteSession(sessionId: string) {
   return requestJson<HubSessionDto>(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function bindSessionProject(sessionId: string, projectId: string | null) {
+  return requestJson<HubSessionDto>(`/sessions/${encodeURIComponent(sessionId)}/project`, {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  });
+}
+
+export function listProjects() {
+  return requestJson<{ items: ProjectDto[] }>("/projects");
+}
+
+export function createProject(body: CreateProjectRequest) {
+  return requestJson<ProjectDto>("/projects", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateProject(projectId: string, body: UpdateProjectRequest) {
+  return requestJson<ProjectDto>(`/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteProject(projectId: string) {
+  return requestJson<{ ok: boolean }>(`/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",
   });
 }

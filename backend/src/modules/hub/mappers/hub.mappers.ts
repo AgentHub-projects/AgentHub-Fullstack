@@ -10,6 +10,8 @@ import type {
   HubRunDto,
   HubSessionDto,
   LongTermSummaryDto,
+  ProjectDto,
+  DeploymentDto,
 } from "@agenthub/shared";
 
 type Row = Record<string, any>;
@@ -72,10 +74,42 @@ export function mapSession(row: Row): HubSessionDto {
     title: row.title,
     status: row.status,
     isPinned: metadata.isPinned === true,
+    projectId: row.projectId ?? null,
     metadata,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     lastRun: row.runs?.[0] ? mapRun(row.runs[0]) : undefined,
+  };
+}
+
+export function mapProject(row: Row): ProjectDto {
+  return {
+    id: row.id,
+    name: row.name,
+    githubUrl: row.githubUrl,
+    defaultBranch: row.defaultBranch,
+    status: row.status,
+    metadata: asObject(row.metadata),
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
+export function mapDeployment(row: Row): DeploymentDto {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    projectId: row.projectId,
+    triggerMessageId: row.triggerMessageId ?? null,
+    commitSha: row.commitSha,
+    status: row.status,
+    deployServiceJobId: row.deployServiceJobId ?? null,
+    url: row.url ?? null,
+    errorMessage: row.errorMessage ?? null,
+    metadata: asObject(row.metadata),
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+    completedAt: maybeIso(row.completedAt),
   };
 }
 

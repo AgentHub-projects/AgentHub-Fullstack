@@ -79,10 +79,50 @@ export interface HubSessionDto {
   title: string;
   status: HubSessionStatus;
   isPinned: boolean;
+  projectId?: string | null;
   metadata: Record<string, unknown>;
   createdAt: ISODateString;
   updatedAt: ISODateString;
   lastRun?: HubRunDto | null;
+}
+
+export interface ProjectDto {
+  id: string;
+  name: string;
+  githubUrl: string;
+  defaultBranch: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  githubUrl: string;
+  defaultBranch?: string;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  githubUrl?: string;
+  defaultBranch?: string;
+}
+
+export interface DeploymentDto {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  triggerMessageId?: string | null;
+  commitSha: string;
+  status: string;
+  deployServiceJobId?: string | null;
+  url?: string | null;
+  errorMessage?: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+  completedAt?: ISODateString | null;
 }
 
 export interface HubMessageDto {

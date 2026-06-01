@@ -16,15 +16,17 @@ import {
 import type { Request, Response } from "express";
 import type {
   AddParticipantRequest,
+  CreateProjectRequest,
   CreateHubSessionRequest,
   CreateSessionAgentRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
   UpdateHubSessionRequest,
   UpdateAgentRequest,
+  UpdateProjectRequest,
 } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
-import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapSession } from "../mappers/hub.mappers";
+import { mapAgent, mapArtifact, mapEvent, mapFileChange, mapProject, mapSession } from "../mappers/hub.mappers";
 import { PublicRoute } from "../auth/public.decorator";
 import { AgentRegistryService } from "../services/agent-registry.service";
 import { ArtifactStorageService } from "../services/artifact-storage.service";
@@ -38,6 +40,8 @@ export class HubSessionController {
     private readonly sessions: HubSessionService,
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
+    @Inject(HubRealtimeGateway)
+    private readonly gateway: HubRealtimeGateway,
   ) {}
 
   @Get()
@@ -71,6 +75,23 @@ export class HubSessionController {
   @Delete(":sessionId")
   deleteSession(@Param("sessionId") sessionId: string) {
     return this.sessions.deleteSession(sessionId);
+  }
+
+  @Post(":sessionId/project")
+  async bindProject(@Param("sessionId") sessionId: string, @Body() body: { projectId?: string | null }) {
+    const projectId = body?.projectId ?? null;
+    if (projectId) {
+      const project = await this.prisma.project.findFirst({ where: { id: projectId, status: "active" } });
+      if (!project) throw new NotFoundException("PROJECT_NOT_FOUND");
+    }
+    const session = await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { projectId, updatedAt: new Date() },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    const dto = mapSession(session);
+    this.gateway.emitSession(dto);
+    return dto;
   }
 
   @Post(":sessionId/messages")
@@ -201,6 +222,57 @@ export class HubAgentController {
       });
       if (session) this.gateway.emitSession(mapSession(session));
     }
+    return { ok: true };
+  }
+}
+
+@Controller("projects")
+export class ProjectController {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  @Get()
+  async listProjects() {
+    const items = await this.prisma.project.findMany({
+      where: { status: "active" },
+      orderBy: { updatedAt: "desc" },
+    });
+    return { items: items.map(mapProject) };
+  }
+
+  @Post()
+  async createProject(@Body() body: CreateProjectRequest) {
+    const name = body?.name?.trim();
+    const githubUrl = body?.githubUrl?.trim();
+    if (!name || !githubUrl) throw new BadRequestException("PROJECT_NAME_AND_GITHUB_URL_REQUIRED");
+    const project = await this.prisma.project.create({
+      data: {
+        name,
+        githubUrl,
+        defaultBranch: body.defaultBranch?.trim() || "main",
+      },
+    });
+    return mapProject(project);
+  }
+
+  @Patch(":projectId")
+  async updateProject(@Param("projectId") projectId: string, @Body() body: UpdateProjectRequest) {
+    const project = await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+        ...(body.githubUrl !== undefined ? { githubUrl: body.githubUrl.trim() } : {}),
+        ...(body.defaultBranch !== undefined ? { defaultBranch: body.defaultBranch.trim() || "main" } : {}),
+      },
+    });
+    return mapProject(project);
+  }
+
+  @Delete(":projectId")
+  async deleteProject(@Param("projectId") projectId: string) {
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { status: "deleted" },
+    });
     return { ok: true };
   }
 }

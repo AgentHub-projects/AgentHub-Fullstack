@@ -11,6 +11,7 @@ import {
   HubHealthController,
   HubSessionController,
   HubUploadController,
+  ProjectController,
 } from "./controllers/hub.controller";
 import { HubRealtimeGateway } from "./gateways/hub-realtime.gateway";
 import { AgentRegistryService } from "./services/agent-registry.service";
@@ -32,6 +33,7 @@ import { PrismaService } from "./services/prisma.service";
     HubArtifactController,
     HubUploadController,
     HubSessionController,
+    ProjectController,
     BuilderController,
     AgentTemplateController,
   ],

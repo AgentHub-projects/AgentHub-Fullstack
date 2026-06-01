@@ -172,6 +172,7 @@ model Session {
   id               String             @id @default(uuid()) @db.Uuid
   title            String             @default("Untitled Session")
   status           SessionStatusDb    @default(active)
+  projectId        String?            @map("project_id") @db.Uuid
   metadata         Json               @default("{}")
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -186,9 +187,50 @@ model Session {
   contextEmbeddings ContextEmbedding[]
   contextUpdateJobs ContextUpdateJob[]
   longTermSummaries LongTermSummary[]
+  project          Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  deployments      Deployment[]
 
   @@index([updatedAt(sort: Desc)], map: "idx_sessions_updated_at")
+  @@index([projectId], map: "idx_sessions_project_id")
   @@map("sessions")
+}
+
+model Project {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String
+  githubUrl     String       @map("github_url")
+  defaultBranch String       @default("main") @map("default_branch")
+  status        String       @default("active")
+  metadata      Json         @default("{}")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions      Session[]
+  deployments   Deployment[]
+
+  @@index([status, updatedAt(sort: Desc)], map: "idx_projects_status_updated")
+  @@map("projects")
+}
+
+model Deployment {
+  id                 String    @id @default(uuid()) @db.Uuid
+  sessionId          String    @map("session_id") @db.Uuid
+  projectId          String    @map("project_id") @db.Uuid
+  triggerMessageId   String?   @map("trigger_message_id") @db.Uuid
+  commitSha          String    @map("commit_sha")
+  status             String    @default("queued")
+  deployServiceJobId String?   @map("deploy_service_job_id")
+  url                String?
+  errorMessage       String?   @map("error_message")
+  metadata           Json      @default("{}")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)
+  session            Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt(sort: Desc)], map: "idx_deployments_session_created")
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_deployments_project_created")
+  @@map("deployments")
 }
 
 model SessionAgent {
