@@ -106,4 +106,142 @@ describe("HubSessionService participant guards", () => {
     expect(agents.getAgent).not.toHaveBeenCalled();
     expect(prisma.sessionAgent.upsert).not.toHaveBeenCalled();
   });
+
+  it("adds participants without creating a synthetic run when there is no history", async () => {
+    const session = sessionRow({ metadata: { memberAgentIds: [2] } });
+    const prisma = {
+      session: {
+        findUnique: vi.fn().mockResolvedValue({ status: "active", metadata: { memberAgentIds: [] } }),
+        update: vi.fn().mockResolvedValue(session),
+      },
+      agentRun: {
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null),
+      },
+      sessionAgent: {
+        upsert: vi.fn(),
+      },
+    };
+    const agents = {
+      getAgent: vi.fn().mockResolvedValue(agentRow({ id: 2, name: "frontend-agent" })),
+    };
+    const downstream = {
+      notifyMemberAdded: vi.fn(),
+    };
+    const events = {
+      append: vi.fn(),
+    };
+    const gateway = {
+      emitSession: vi.fn(),
+    };
+    const service = new HubSessionService(
+      prisma as any,
+      agents as any,
+      {} as any,
+      downstream as any,
+      events as any,
+      {} as any,
+      gateway as any,
+    );
+
+    await service.addParticipant("session-1", { agentId: 2 });
+
+    expect(events.append).not.toHaveBeenCalled();
+    expect(downstream.notifyMemberAdded).toHaveBeenCalledWith("session-1", {
+      agentId: 2,
+      description: "前端实现",
+    });
+    expect(gateway.emitSession).toHaveBeenCalledWith(expect.objectContaining({ id: "session-1" }));
+  });
 });
+
+describe("HubSessionService pin events", () => {
+  it("pins messages without creating a synthetic run when the message has no run", async () => {
+    const prisma = {
+      agentRun: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const context = {
+      setMessagePinned: vi.fn().mockResolvedValue(messageRow({ runId: null, isPinned: true })),
+    };
+    const downstream = {
+      notifyPinUpdated: vi.fn(),
+    };
+    const events = {
+      append: vi.fn(),
+    };
+    const service = new HubSessionService(
+      prisma as any,
+      {} as any,
+      context as any,
+      downstream as any,
+      events as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.pinMessage("session-1", "message-1", { pinned: true });
+
+    expect(result.isPinned).toBe(true);
+    expect(events.append).not.toHaveBeenCalled();
+    expect(downstream.notifyPinUpdated).toHaveBeenCalledWith("session-1", {
+      messageId: "message-1",
+      partId: undefined,
+      pinned: true,
+    });
+  });
+});
+
+function sessionRow(overrides: Record<string, any> = {}) {
+  const now = new Date("2026-06-02T09:00:00.000Z");
+  return {
+    id: "session-1",
+    title: "会话",
+    status: "active",
+    projectId: null,
+    metadata: {},
+    createdAt: now,
+    updatedAt: now,
+    runs: [],
+    ...overrides,
+  };
+}
+
+function agentRow(overrides: Record<string, any> = {}) {
+  const now = new Date("2026-06-02T09:00:00.000Z");
+  return {
+    id: 2,
+    templateId: 10,
+    name: "frontend-agent",
+    description: "前端实现",
+    provider: "claude-code",
+    isDefaultOrchestrator: false,
+    status: "enabled",
+    capabilities: [],
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    ...overrides,
+  };
+}
+
+function messageRow(overrides: Record<string, any> = {}) {
+  const now = new Date("2026-06-02T09:00:00.000Z");
+  return {
+    id: "message-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    role: "user",
+    agentId: null,
+    parentMessageId: null,
+    contentText: "hello",
+    contentJson: {},
+    tokenCount: 0,
+    status: "completed",
+    isPinned: false,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}

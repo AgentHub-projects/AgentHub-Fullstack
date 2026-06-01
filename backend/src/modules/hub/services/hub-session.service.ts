@@ -227,12 +227,19 @@ export class HubSessionService {
     const sessionDto = mapSession(session);
     this.gateway.emitSession(sessionDto);
 
-    await this.events.append({
-      sessionId,
-      runId: await this.getLatestRunId(sessionId),
-      eventType: "context.updated",
-      source: "agenthub_backend",
-      payload: { action: "participant_added", agentId: input.agentId, agentName: agent.name },
+    const runId = await this.findLatestRunId(sessionId);
+    if (runId) {
+      await this.events.append({
+        sessionId,
+        runId,
+        eventType: "context.updated",
+        source: "agenthub_backend",
+        payload: { action: "participant_added", agentId: input.agentId, agentName: agent.name },
+      });
+    }
+    this.downstream.notifyMemberAdded(sessionId, {
+      agentId: input.agentId,
+      description: agent.description || agent.template?.description || "",
     });
 
     return { session: sessionDto, agent };
@@ -450,13 +457,16 @@ export class HubSessionService {
       ? await this.context.setMessagePartPinned(sessionId, messageId, input.partId, input.pinned)
       : await this.context.setMessagePinned(sessionId, messageId, input.pinned);
     const mapped = mapMessage(message);
-    await this.events.append({
-      sessionId,
-      runId: message.runId ?? (await this.getLatestRunId(sessionId)),
-      eventType: "context.updated",
-      source: "agenthub_backend",
-      payload: { messageId, partId: input.partId, pinned: input.pinned },
-    });
+    const runId = message.runId ?? (await this.findLatestRunId(sessionId));
+    if (runId) {
+      await this.events.append({
+        sessionId,
+        runId,
+        eventType: "context.updated",
+        source: "agenthub_backend",
+        payload: { messageId, partId: input.partId, pinned: input.pinned },
+      });
+    }
     this.downstream.notifyPinUpdated(sessionId, { messageId, partId: input.partId, pinned: input.pinned });
     return mapped;
   }
@@ -658,19 +668,13 @@ export class HubSessionService {
     });
   }
 
-  private async getLatestRunId(sessionId: string): Promise<string> {
+  private async findLatestRunId(sessionId: string): Promise<string | null> {
     const run = await this.prisma.agentRun.findFirst({
       where: { sessionId },
       orderBy: { createdAt: "desc" },
+      select: { id: true },
     });
-    if (!run) {
-      const orchestrator = await this.agents.getDefaultOrchestrator();
-      const created = await this.prisma.agentRun.create({
-        data: { sessionId, orchestratorAgentId: orchestrator.id, status: "queued" },
-      });
-      return created.id;
-    }
-    return run.id;
+    return run?.id ?? null;
   }
 
   private async assertNoActiveRun(sessionId: string) {
