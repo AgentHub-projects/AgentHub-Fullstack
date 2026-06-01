@@ -525,6 +525,7 @@ export class HubSessionService {
 
   async applyFileChange(sessionId: string, fileChangeId: string) {
     await this.assertSessionActive(sessionId);
+    await this.assertNoActiveRun(sessionId);
     const change = await this.prisma.fileChange.findFirst({
       where: { id: fileChangeId, sessionId },
     });

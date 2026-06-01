@@ -194,6 +194,39 @@ describe("HubSessionService pin events", () => {
   });
 });
 
+describe("HubSessionService diff apply guards", () => {
+  it("rejects applying file changes while a run is active", async () => {
+    const prisma = {
+      session: {
+        findUnique: vi.fn().mockResolvedValue({ status: "active" }),
+      },
+      agentRun: {
+        findFirst: vi.fn().mockResolvedValue({ id: "active-run" }),
+      },
+      fileChange: {
+        findFirst: vi.fn(),
+      },
+    };
+    const downstream = {
+      applyFileChanges: vi.fn(),
+    };
+    const service = new HubSessionService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      downstream as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.applyFileChange("session-1", "change-1")).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
+
+    expect(prisma.fileChange.findFirst).not.toHaveBeenCalled();
+    expect(downstream.applyFileChanges).not.toHaveBeenCalled();
+  });
+});
+
 function sessionRow(overrides: Record<string, any> = {}) {
   const now = new Date("2026-06-02T09:00:00.000Z");
   return {
