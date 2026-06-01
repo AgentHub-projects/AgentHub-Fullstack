@@ -590,7 +590,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await this.events.append({
       sessionId: input.sessionId,
       runId: input.runId,
-      eventType: "message.delta",
+      eventType: "message.completed",
       speakerAgentId: input.orchestrator.id,
       source: "mock_orchestrator",
       payload: {
@@ -604,7 +604,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       await this.events.append({
         sessionId: input.sessionId,
         runId: input.runId,
-        eventType: "message.delta",
+        eventType: "message.completed",
         speakerAgentId: agent.id,
         source: "mock_orchestrator",
         payload: {
@@ -646,7 +646,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         kind: "markdown",
         title: "执行摘要",
         mimeType: "text/markdown; charset=utf-8",
-        content: `# 执行摘要\n\n- run: ${input.runId}\n- speakers: ${speakers.map((agent) => agent.name).join(", ")}\n- mock 模式已覆盖 message.delta、file.change、artifact.upsert、run.completed。`,
+        content: `# 执行摘要\n\n- run: ${input.runId}\n- speakers: ${speakers.map((agent) => agent.name).join(", ")}\n- mock 模式已覆盖 message.completed、file.change、artifact.upsert、run.completed。`,
         final: true,
       },
     });
