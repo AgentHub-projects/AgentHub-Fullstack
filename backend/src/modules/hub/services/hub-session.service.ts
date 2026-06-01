@@ -412,10 +412,11 @@ export class HubSessionService {
           deploymentTarget,
         },
       });
-      await this.deployments.start(sessionId, { target: deploymentTarget });
+      const deploymentResult = await this.deployments.start(sessionId, { target: deploymentTarget });
       return {
         session: sessionDto,
         message: mapMessage(message),
+        messages: [mapMessage(message), deploymentResult.message],
         run: mapRun(run),
         contextSnapshot: null,
       };

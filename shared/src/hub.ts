@@ -385,6 +385,7 @@ export interface SendHubMessageRequest {
 export interface SendHubMessageResponse {
   session: HubSessionDto;
   message: HubMessageDto;
+  messages?: HubMessageDto[];
   run: HubRunDto;
   contextSnapshot?: HubContextSnapshotDto | null;
 }
