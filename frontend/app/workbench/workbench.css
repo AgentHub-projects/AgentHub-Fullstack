@@ -944,6 +944,12 @@ textarea:focus-visible {
   font-weight: 800;
 }
 
+.codeBlockHeader > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .codeBlockHeader button {
   display: grid;
   width: 26px;
@@ -975,12 +981,41 @@ textarea:focus-visible {
   padding: 8px 10px;
 }
 
+.messageCardPart > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.messageCardPart button {
+  display: grid;
+  width: 26px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.messageCardPart button:hover {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .messageCardPart strong,
-.messageCardPart span {
+.messageCardPart span,
+.messageCardPart small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.messageCardPart small {
+  color: var(--muted);
 }
 
 .markdownTableWrap {

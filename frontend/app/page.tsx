@@ -7,6 +7,7 @@ import type {
   CreateSessionAgentRequest,
   HubFileChangeDto,
   HubMessageDto,
+  HubMessagePartDto,
   HubRunDto,
   HubSessionDto,
   ProjectDto,
@@ -735,6 +736,18 @@ export default function WorkbenchPage() {
     );
   }
 
+  async function handlePinPart(message: HubMessageDto, part: HubMessagePartDto) {
+    if (!activeSessionId) return;
+    const result = await pinSessionMessage(activeSessionId, message.id, { pinned: !part.pinned, partId: part.id });
+    if (!result.ok) {
+      setNotice(`Part Pin 失败：${result.error}`);
+      return;
+    }
+    setDetail((current) =>
+      current ? { ...current, messages: upsertById(current.messages, result.data).sort(sortMessage) } : current,
+    );
+  }
+
   if (!authenticated) {
     return (
       <main className="authShell">
@@ -974,6 +987,7 @@ export default function WorkbenchPage() {
                 key={item.id}
                 message={item.message}
                 onPin={handlePin}
+                onPinPart={handlePinPart}
                 onReply={setReplyTarget}
                 onRegenerate={(message) => void handleRegenerate(message)}
                 agents={agents}
@@ -985,6 +999,7 @@ export default function WorkbenchPage() {
                 events={item.events}
                 messages={item.messages}
                 agents={agents}
+                onPinPart={handlePinPart}
               />
             ),
           )}

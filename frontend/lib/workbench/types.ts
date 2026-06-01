@@ -37,6 +37,7 @@ export type ConversationItem =
 
 export interface AgentReplyBlockModel {
   id: string;
+  messageId?: string;
   speakerId?: string | number | null;
   name: string;
   text: string;

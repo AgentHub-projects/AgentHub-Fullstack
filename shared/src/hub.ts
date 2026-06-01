@@ -157,6 +157,7 @@ export interface HubMessagePartDto {
   language?: string;
   title?: string;
   url?: string;
+  pinned?: boolean;
   metadata?: Record<string, unknown>;
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AgentInstanceDto, HubEventDto, HubMessageDto, HubRunDto } from "@agenthub/shared";
+import type { AgentInstanceDto, HubEventDto, HubMessageDto, HubMessagePartDto, HubRunDto } from "@agenthub/shared";
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -30,20 +30,22 @@ import { MessageParts, RichText } from "./rich-text";
 export function TimelineMessage({
   message,
   onPin,
+  onPinPart,
   onReply,
   onRegenerate,
   agents,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
+  onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
   agents: AgentInstanceDto[];
 }) {
   if (message.role === "user") {
-    return <UserMessage message={message} onPin={onPin} onReply={onReply} onRegenerate={onRegenerate} />;
+    return <UserMessage message={message} onPin={onPin} onPinPart={onPinPart} onReply={onReply} onRegenerate={onRegenerate} />;
   }
-  return <AgentReplyBlock block={messageToReplyBlock(message, agents)} />;
+  return <AgentReplyBlock block={messageToReplyBlock(message, agents)} onPinPart={(part) => onPinPart?.(message, part)} />;
 }
 
 export function RunThread({
@@ -51,11 +53,13 @@ export function RunThread({
   events,
   messages,
   agents,
+  onPinPart,
 }: {
   run: HubRunDto;
   events: HubEventDto[];
   messages: HubMessageDto[];
   agents: AgentInstanceDto[];
+  onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
 }) {
   const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
   const hasPersistedReplies = persistedReplies.length > 0 && !isRunning(run.status);
@@ -71,7 +75,14 @@ export function RunThread({
         <RunBadge run={run} />
       </div>
       {replyBlocks.map((block) => (
-        <AgentReplyBlock key={block.id} block={block} />
+        <AgentReplyBlock
+          key={block.id}
+          block={block}
+          onPinPart={(part) => {
+            const message = block.messageId ? messages.find((item) => item.id === block.messageId) : undefined;
+            if (message) onPinPart?.(message, part);
+          }}
+        />
       ))}
       {activityEvents.length > 0 && <RunActivityTimeline events={activityEvents} defaultOpen={isRunning(run.status)} />}
       {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
@@ -92,11 +103,13 @@ export function RunBadge({ run }: { run: HubRunDto }) {
 function UserMessage({
   message,
   onPin,
+  onPinPart,
   onReply,
   onRegenerate,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
+  onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
 }) {
@@ -122,13 +135,23 @@ function UserMessage({
             <CopyOutlined />
           </button>
         </div>
-        <MessageParts parts={message.parts} fallbackText={message.contentText} />
+        <MessageParts
+          parts={message.parts}
+          fallbackText={message.contentText}
+          onPinPart={onPinPart ? (part) => onPinPart(message, part) : undefined}
+        />
       </div>
     </article>
   );
 }
 
-function AgentReplyBlock({ block }: { block: AgentReplyBlockModel }) {
+function AgentReplyBlock({
+  block,
+  onPinPart,
+}: {
+  block: AgentReplyBlockModel;
+  onPinPart?: (part: HubMessagePartDto) => void;
+}) {
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
   return (
     <article className="agentReply">
@@ -144,7 +167,11 @@ function AgentReplyBlock({ block }: { block: AgentReplyBlockModel }) {
             <CopyOutlined />
           </button>
         </div>
-        {block.parts?.length ? <MessageParts parts={block.parts} fallbackText={block.text} /> : <RichText text={block.text} />}
+        {block.parts?.length ? (
+          <MessageParts parts={block.parts} fallbackText={block.text} onPinPart={block.messageId ? onPinPart : undefined} />
+        ) : (
+          <RichText text={block.text} />
+        )}
       </div>
     </article>
   );

@@ -136,25 +136,32 @@ export function mapMessage(row: Row): HubMessageDto {
 }
 
 function messageParts(contentJson: Record<string, unknown>, contentText: string): HubMessagePartDto[] {
+  const pinnedPartIds = new Set(
+    Array.isArray(contentJson.pinnedPartIds)
+      ? contentJson.pinnedPartIds.filter((item): item is string => typeof item === "string")
+      : [],
+  );
   if (Array.isArray(contentJson.parts)) {
     return contentJson.parts
-      .map((item, index) => normalizeMessagePart(item, index))
+      .map((item, index) => normalizeMessagePart(item, index, pinnedPartIds))
       .filter((item): item is HubMessagePartDto => Boolean(item));
   }
-  return [{ id: "part_1", type: "text", text: contentText }];
+  return [{ id: "part_1", type: "text", text: contentText, pinned: pinnedPartIds.has("part_1") }];
 }
 
-function normalizeMessagePart(value: unknown, index: number): HubMessagePartDto | null {
+function normalizeMessagePart(value: unknown, index: number, pinnedPartIds: Set<string>): HubMessagePartDto | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const type = typeof row.type === "string" ? row.type : "text";
+  const id = typeof row.id === "string" ? row.id : `part_${index + 1}`;
   return {
-    id: typeof row.id === "string" ? row.id : `part_${index + 1}`,
+    id,
     type,
     text: typeof row.text === "string" ? row.text : undefined,
     language: typeof row.language === "string" ? row.language : undefined,
     title: typeof row.title === "string" ? row.title : undefined,
     url: typeof row.url === "string" ? row.url : undefined,
+    pinned: pinnedPartIds.has(id),
     metadata: asObject(row.metadata),
   };
 }

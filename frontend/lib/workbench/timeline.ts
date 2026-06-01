@@ -125,6 +125,7 @@ export function messageToReplyBlock(message: HubMessageDto, agents: AgentInstanc
   const agent = agents.find((item) => item.id === message.agentId);
   return {
     id: message.id,
+    messageId: message.id,
     speakerId: message.agentId,
     name: message.agentName ?? agent?.name ?? "Agent",
     text: message.contentText,
