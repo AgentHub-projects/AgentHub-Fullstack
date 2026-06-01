@@ -81,6 +81,10 @@ export class HubEventService {
       return dto;
     }
 
+    if (input.eventType === "file.change") {
+      assertValidFileChangePayload(input.payload ?? {});
+    }
+
     let event;
     event = await this.prisma.agentEvent.create({
       data: {
@@ -400,6 +404,8 @@ export class HubEventService {
     const after = asObject(payload.after);
     const path = stringValue(payload.path) ?? stringValue(after.path) ?? stringValue(before.path);
     if (!path) return null;
+    const beforeContent = textField(before.content) ?? textField(payload.beforeContent);
+    const afterContent = textField(after.content) ?? textField(payload.afterContent);
 
     const created = await this.prisma.fileChange.create({
       data: {
@@ -410,10 +416,10 @@ export class HubEventService {
         oldPath: stringValue(payload.oldPath),
         changeType: normalizeChangeType(stringValue(payload.changeType) ?? stringValue(payload.type) ?? "modified"),
         language: stringValue(payload.language),
-        beforeContent: stringValue(before.content) ?? stringValue(payload.beforeContent),
+        beforeContent,
         beforeSha256: stringValue(before.sha256) ?? stringValue(payload.beforeSha256),
         beforeTruncated: Boolean(before.truncated ?? payload.beforeTruncated ?? false),
-        afterContent: stringValue(after.content) ?? stringValue(payload.afterContent),
+        afterContent,
         afterSha256: stringValue(after.sha256) ?? stringValue(payload.afterSha256),
         afterTruncated: Boolean(after.truncated ?? payload.afterTruncated ?? false),
         patch: stringValue(payload.patch),
@@ -481,6 +487,25 @@ function textFromPayload(payload: Record<string, unknown>): string {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function textField(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function assertValidFileChangePayload(payload: Record<string, unknown>) {
+  const before = asObject(payload.before);
+  const after = asObject(payload.after);
+  const path = stringValue(payload.path) ?? stringValue(after.path) ?? stringValue(before.path);
+  if (!path) throw new Error("FILE_CHANGE_PATH_REQUIRED");
+
+  const hasPatch = Boolean(stringValue(payload.patch));
+  const hasBeforeOrAfter =
+    textField(before.content) !== undefined ||
+    textField(payload.beforeContent) !== undefined ||
+    textField(after.content) !== undefined ||
+    textField(payload.afterContent) !== undefined;
+  if (!hasPatch && !hasBeforeOrAfter) throw new Error("FILE_CHANGE_CONTENT_REQUIRED");
 }
 
 function fileChangeIdsFromPayload(payload: Record<string, unknown>) {

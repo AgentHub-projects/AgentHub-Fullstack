@@ -228,6 +228,54 @@ describe("HubEventService artifact message parts", () => {
       }),
     );
   });
+
+  it("rejects file changes without patch or before/after content", async () => {
+    const { service, prisma } = createService();
+
+    await expect(service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "file.change",
+      payload: {
+        path: "src/app/page.tsx",
+        changeType: "modified",
+      },
+    })).rejects.toThrow("FILE_CHANGE_CONTENT_REQUIRED");
+
+    expect(prisma.agentEvent.create).not.toHaveBeenCalled();
+    expect(prisma.fileChange.create).not.toHaveBeenCalled();
+  });
+
+  it("accepts file changes with before and after content instead of a patch", async () => {
+    const { service, prisma, gateway, context } = createService();
+    prisma.fileChange.create.mockImplementation(async ({ data }: any) => fileChangeRow({ ...data, id: "change-before-after" }));
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "file.change",
+      payload: {
+        path: "src/app/page.tsx",
+        changeType: "modified",
+        before: { content: "" },
+        after: { content: "export default function Page() { return null; }" },
+      },
+    });
+
+    expect(prisma.fileChange.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        path: "src/app/page.tsx",
+        beforeContent: "",
+        afterContent: "export default function Page() { return null; }",
+        patch: undefined,
+      }),
+    }));
+    expect(gateway.emitFileChange).toHaveBeenCalledWith("session-1", expect.objectContaining({ id: "change-before-after" }));
+    expect(context.recordContextItem).toHaveBeenCalledWith(expect.objectContaining({
+      sourceType: "file_change",
+      sourceId: "change-before-after",
+    }));
+  });
 });
 
 function createService() {
