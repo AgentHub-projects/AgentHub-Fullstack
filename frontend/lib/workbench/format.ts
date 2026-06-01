@@ -33,7 +33,7 @@ export function agentColor(seed: string | number) {
 
 export function artifactLabel(kind: HubArtifactKind) {
   if (kind === "markdown" || kind === "text") return "markdown";
-  if (kind === "pdf" || kind === "docx") return "document";
+  if (kind === "pdf" || kind === "docx" || kind === "pptx") return "document";
   return "code";
 }
 

@@ -446,8 +446,10 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function normalizeArtifactKind(value: string): HubArtifactKind {
-  const allowed = new Set(["markdown", "text", "html", "pdf", "docx", "image", "archive", "log", "other"]);
-  return allowed.has(value) ? (value as HubArtifactKind) : "other";
+  const normalized = value.toLowerCase();
+  if (normalized === "ppt" || normalized === "presentation") return "pptx";
+  const allowed = new Set(["markdown", "text", "html", "pdf", "docx", "pptx", "image", "archive", "log", "other"]);
+  return allowed.has(normalized) ? (normalized as HubArtifactKind) : "other";
 }
 
 function inferMimeType(kind: HubArtifactKind): string {
@@ -457,6 +459,7 @@ function inferMimeType(kind: HubArtifactKind): string {
     html: "text/html; charset=utf-8",
     pdf: "application/pdf",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     image: "image/png",
     archive: "application/zip",
     log: "text/plain; charset=utf-8",
@@ -469,6 +472,7 @@ function inferKindFromMime(mimeType: string): HubArtifactKind {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType === "application/pdf") return "pdf";
   if (mimeType.includes("wordprocessingml")) return "docx";
+  if (mimeType.includes("presentationml") || mimeType === "application/vnd.ms-powerpoint") return "pptx";
   if (mimeType.startsWith("text/") || mimeType.includes("json") || mimeType.includes("xml")) return "text";
   return "other";
 }

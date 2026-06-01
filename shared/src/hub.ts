@@ -19,6 +19,7 @@ export type HubArtifactKind =
   | "html"
   | "pdf"
   | "docx"
+  | "pptx"
   | "image"
   | "archive"
   | "log"

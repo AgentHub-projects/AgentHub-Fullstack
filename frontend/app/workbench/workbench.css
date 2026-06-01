@@ -2275,6 +2275,91 @@ textarea:focus-visible {
   cursor: not-allowed;
 }
 
+.pptxPreview {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.pptxPreview.expanded {
+  min-height: 100%;
+  align-content: start;
+}
+
+.pptxSlide {
+  display: grid;
+  min-height: 260px;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.pptxSlide img {
+  width: 100%;
+  height: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.pptxSlide > div {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pptxSlide span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.pptxSlide strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.pptxSlide p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.pptxControls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pptxControls button {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 12px;
+  font-weight: 760;
+}
+
+.pptxControls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .pptxSlide {
+    grid-template-columns: 1fr;
+  }
+}
+
 .documentFallback {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);

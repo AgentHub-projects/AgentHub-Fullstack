@@ -340,11 +340,68 @@ function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifact
     );
   }
 
+  if (artifact.kind === "pptx") {
+    return <PptxPreview artifact={artifact} contentUrl={contentUrl} expanded={expanded} />;
+  }
+
   if (artifact.textContent) {
     return artifact.kind === "log" ? <pre>{artifact.textContent}</pre> : <RichText text={artifact.textContent} />;
   }
 
   return <code>{artifact.storageUri ?? "inline artifact"}</code>;
+}
+
+function PptxPreview({
+  artifact,
+  contentUrl,
+  expanded,
+}: {
+  artifact: HubArtifactDto;
+  contentUrl: string;
+  expanded: boolean;
+}) {
+  const slides = pptSlides(artifact.metadata);
+  const [index, setIndex] = useState(0);
+  const current = slides[index] ?? null;
+  const publicUrl = publicArtifactUrl(artifact) ?? contentUrl;
+  const officeUrl = publicUrl.startsWith("http") ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
+
+  if (slides.length > 0 && current) {
+    return (
+      <div className={`pptxPreview ${expanded ? "expanded" : ""}`}>
+        <div className="pptxSlide">
+          {current.imageUrl && <img alt={current.title || `Slide ${index + 1}`} src={current.imageUrl} />}
+          <div>
+            <span>Slide {index + 1} / {slides.length}</span>
+            <strong>{current.title || `Slide ${index + 1}`}</strong>
+            {current.text && <p>{current.text}</p>}
+          </div>
+        </div>
+        <div className="pptxControls">
+          <button type="button" disabled={index === 0} onClick={() => setIndex((value) => Math.max(0, value - 1))}>
+            上一页
+          </button>
+          <button type="button" disabled={index >= slides.length - 1} onClick={() => setIndex((value) => Math.min(slides.length - 1, value + 1))}>
+            下一页
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (officeUrl) {
+    return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} src={officeUrl} />;
+  }
+
+  return (
+    <div className="documentFallback">
+      <FileDoneOutlined />
+      <div>
+        <strong>PPTX 原始文件</strong>
+        <span>可打开原文件；下游若提供 metadata.slides，将在这里按页浏览。</span>
+      </div>
+    </div>
+  );
 }
 
 function UnifiedDiffView({ change }: { change: HubFileChangeDto }) {
@@ -380,6 +437,29 @@ function artifactIcon(kind: HubArtifactDto["kind"]) {
   if (label === "markdown") return <FileMarkdownOutlined />;
   if (label === "document") return <FileDoneOutlined />;
   return <CodeOutlined />;
+}
+
+function pptSlides(metadata: Record<string, unknown>) {
+  const raw = metadata.slides;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const row = item as Record<string, unknown>;
+      return {
+        title: typeof row.title === "string" ? row.title : "",
+        text: typeof row.text === "string" ? row.text : typeof row.notes === "string" ? row.notes : "",
+        imageUrl: typeof row.imageUrl === "string" ? row.imageUrl : "",
+      };
+    })
+    .filter((item): item is { title: string; text: string; imageUrl: string } => Boolean(item));
+}
+
+function publicArtifactUrl(artifact: HubArtifactDto) {
+  const metadataUrl = artifact.metadata.url;
+  if (typeof metadataUrl === "string" && /^https?:\/\//.test(metadataUrl)) return metadataUrl;
+  if (artifact.storageUri && /^https?:\/\//.test(artifact.storageUri)) return artifact.storageUri;
+  return null;
 }
 
 function artifactFromVersion(artifact: HubArtifactDto, version: HubArtifactVersionDto): HubArtifactDto {
