@@ -6,6 +6,8 @@ import {
   referencedPartText,
 } from "../src/modules/hub/services/hub-session.service";
 
+const now = new Date("2026-06-02T09:00:00.000Z");
+
 describe("HubSessionService deployment command parsing", () => {
   it("maps chat deployment commands to deployment targets", () => {
     expect(parseDeploymentCommandTarget("部署")).toBe("static");
@@ -227,8 +229,66 @@ describe("HubSessionService diff apply guards", () => {
   });
 });
 
+describe("HubSessionService deployment command lifecycle", () => {
+  it("completes the command run after deployment starts successfully", async () => {
+    const run = runRow({ status: "queued" });
+    const completedRun = runRow({ status: "completed", completedAt: now });
+    const deploymentMessage = messageRow({ id: "deployment-message", role: "system", contentText: "静态站点排队" });
+    const prisma = createDeploymentCommandPrisma(run, completedRun);
+    const service = createDeploymentCommandService(prisma, {
+      start: vi.fn().mockResolvedValue({
+        deployment: { id: "deployment-1", commitSha: "abcdef123456" },
+        message: deploymentMessage,
+      }),
+    });
+
+    const result = await service.sendMessage("session-1", { content: "部署" });
+
+    expect(prisma.agentRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "queued" }),
+    }));
+    expect(prisma.agentRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run-1" },
+      data: expect.objectContaining({ status: "completed" }),
+    }));
+    expect(result.run.status).toBe("completed");
+    expect(result.messages?.map((message) => message.id)).toEqual(["message-1", "deployment-message"]);
+  });
+
+  it("marks the command run failed when deployment cannot start", async () => {
+    const run = runRow({ status: "queued" });
+    const failedRun = runRow({
+      status: "failed",
+      errorCode: "DEPLOYMENT_TRIGGER_FAILED",
+      errorMessage: "NO_SUCCESSFUL_PUSH_COMMIT",
+      completedAt: now,
+    });
+    const prisma = createDeploymentCommandPrisma(run, failedRun);
+    const events = { append: vi.fn() };
+    const service = createDeploymentCommandService(
+      prisma,
+      { start: vi.fn().mockRejectedValue(new Error("NO_SUCCESSFUL_PUSH_COMMIT")) },
+      events,
+    );
+
+    await expect(service.sendMessage("session-1", { content: "部署" })).rejects.toThrow("NO_SUCCESSFUL_PUSH_COMMIT");
+
+    expect(prisma.agentRun.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "DEPLOYMENT_TRIGGER_FAILED",
+        errorMessage: "NO_SUCCESSFUL_PUSH_COMMIT",
+      }),
+    }));
+    expect(events.append).toHaveBeenCalledWith(expect.objectContaining({
+      eventType: "run.failed",
+      payload: expect.objectContaining({ message: "NO_SUCCESSFUL_PUSH_COMMIT" }),
+    }));
+  });
+});
+
 function sessionRow(overrides: Record<string, any> = {}) {
-  const now = new Date("2026-06-02T09:00:00.000Z");
   return {
     id: "session-1",
     title: "会话",
@@ -260,7 +320,6 @@ function agentRow(overrides: Record<string, any> = {}) {
 }
 
 function messageRow(overrides: Record<string, any> = {}) {
-  const now = new Date("2026-06-02T09:00:00.000Z");
   return {
     id: "message-1",
     sessionId: "session-1",
@@ -277,4 +336,66 @@ function messageRow(overrides: Record<string, any> = {}) {
     updatedAt: now,
     ...overrides,
   };
+}
+
+function runRow(overrides: Record<string, any> = {}) {
+  return {
+    id: "run-1",
+    sessionId: "session-1",
+    orchestratorAgentId: 2,
+    userMessageId: "message-1",
+    assistantMessageId: null,
+    contextSnapshotId: null,
+    status: "queued",
+    downstreamSessionId: null,
+    downstreamRunId: null,
+    errorCode: null,
+    errorMessage: null,
+    usageJson: {},
+    startedAt: null,
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function createDeploymentCommandPrisma(run: Record<string, any>, updatedRun: Record<string, any>) {
+  return {
+    session: {
+      findUnique: vi.fn().mockResolvedValue(sessionRow({
+        metadata: { mode: "direct", directAgentId: 2 },
+        projectId: "project-1",
+      })),
+      update: vi.fn().mockResolvedValue(sessionRow({
+        metadata: { mode: "direct", directAgentId: 2 },
+        projectId: "project-1",
+        runs: [updatedRun],
+      })),
+    },
+    agentRun: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue(run),
+      update: vi.fn().mockResolvedValue(updatedRun),
+    },
+    message: {
+      create: vi.fn().mockResolvedValue(messageRow({ contentText: "部署" })),
+    },
+  };
+}
+
+function createDeploymentCommandService(
+  prisma: Record<string, any>,
+  deployments: { start: ReturnType<typeof vi.fn> },
+  events = { append: vi.fn() },
+) {
+  return new HubSessionService(
+    prisma as any,
+    { getAgent: vi.fn().mockResolvedValue(agentRow({ id: 2 })) } as any,
+    { estimateTokens: vi.fn((text: string) => text.length), recordContextItem: vi.fn() } as any,
+    {} as any,
+    events as any,
+    deployments as any,
+    { emitSession: vi.fn() } as any,
+  );
 }

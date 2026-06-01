@@ -370,8 +370,7 @@ export class HubSessionService {
         sessionId,
         orchestratorAgentId: runAgent.id,
         userMessageId: message.id,
-        status: deploymentTarget ? "completed" : "queued",
-        completedAt: deploymentTarget ? new Date() : undefined,
+        status: "queued",
       },
     });
 
@@ -397,7 +396,7 @@ export class HubSessionService {
       speakerAgentId: runAgent.id,
       source: "agenthub_backend",
       payload: {
-        status: deploymentTarget ? "completed" : "queued",
+        status: "queued",
         command: deploymentTarget ? "deployment" : undefined,
         deploymentTarget,
         orchestratorAgentId: runAgent.id,
@@ -408,6 +407,39 @@ export class HubSessionService {
     });
 
     if (deploymentTarget) {
+      let deploymentResult: Awaited<ReturnType<DeploymentService["start"]>>;
+      try {
+        deploymentResult = await this.deployments.start(sessionId, { target: deploymentTarget });
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error);
+        await this.prisma.agentRun.update({
+          where: { id: run.id },
+          data: {
+            status: "failed",
+            errorCode: "DEPLOYMENT_TRIGGER_FAILED",
+            errorMessage: messageText,
+            completedAt: new Date(),
+          },
+        });
+        await this.events.append({
+          sessionId,
+          runId: run.id,
+          eventType: "run.failed",
+          speakerAgentId: runAgent.id,
+          source: "agenthub_backend",
+          payload: {
+            status: "failed",
+            command: "deployment",
+            deploymentTarget,
+            message: messageText,
+          },
+        });
+        throw error;
+      }
+      const completedRun = await this.prisma.agentRun.update({
+        where: { id: run.id },
+        data: { status: "completed", completedAt: new Date() },
+      });
       await this.events.append({
         sessionId,
         runId: run.id,
@@ -420,12 +452,11 @@ export class HubSessionService {
           deploymentTarget,
         },
       });
-      const deploymentResult = await this.deployments.start(sessionId, { target: deploymentTarget });
       return {
         session: sessionDto,
         message: mapMessage(message),
         messages: [mapMessage(message), deploymentResult.message],
-        run: mapRun(run),
+        run: mapRun(completedRun),
         contextSnapshot: null,
       };
     }
