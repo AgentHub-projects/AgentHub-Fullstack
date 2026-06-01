@@ -25,7 +25,7 @@ import {
 } from "../mappers/hub.mappers";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
-import { messageJsonWithParts } from "../utils/message-parts";
+import { buildLinkPreviewParts, messageJsonWithParts } from "../utils/message-parts";
 
 @Injectable()
 export class HubSessionService {
@@ -317,7 +317,8 @@ export class HubSessionService {
       ? []
       : await this.resolveMentions(sessionId, text, input.mentionedAgentIds ?? []);
     const attachmentParts = await this.loadAttachmentParts(sessionId, input.attachments?.map((item) => item.id) ?? []);
-    const promptText = withAttachmentPrompt(text, attachmentParts);
+    const linkParts = await buildLinkPreviewParts(text);
+    const promptText = withAttachmentPrompt(text, [...attachmentParts, ...linkParts]);
     const message = await this.prisma.message.create({
       data: {
         sessionId,
@@ -331,7 +332,7 @@ export class HubSessionService {
             quotedMessageId: input.quotedMessageId,
           },
           text,
-          attachmentParts,
+          [...attachmentParts, ...linkParts],
         ) as any,
         tokenCount: this.context.estimateTokens(promptText),
       },
@@ -623,8 +624,9 @@ function withAttachmentPrompt(text: string, parts: HubMessagePartDto[]) {
   if (parts.length === 0) return text;
   const attachmentText = parts
     .map((part) => {
+      const description = typeof part.metadata?.description === "string" ? `\ndescription: ${part.metadata.description}` : "";
       const preview = part.text ? `\ntextPreview:\n${part.text}` : "";
-      return `- ${part.title ?? part.id} (${part.metadata?.mimeType ?? part.type}, ${part.metadata?.sizeBytes ?? 0} bytes)\nurl: ${part.url ?? ""}${preview}`;
+      return `- ${part.title ?? part.id} (${part.metadata?.mimeType ?? part.type}, ${part.metadata?.sizeBytes ?? 0} bytes)\nurl: ${part.url ?? ""}${description}${preview}`;
     })
     .join("\n");
   return `${text}\n\nAttachments:\n${attachmentText}`;
