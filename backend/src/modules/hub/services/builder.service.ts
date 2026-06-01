@@ -21,7 +21,8 @@ const BUILDER_SYSTEM_PROMPT = [
   "1. Agent 名称（name）— 简洁明了，如 'Python 数据分析 Agent'",
   "2. Agent 描述（description）— 简明描述它的用途和能力",
   "3. System Prompt（systemPrompt）— 定义 Agent 的行为和回答风格",
-  "4. 底层 Provider（defaultProvider）— \"claude-code\" 或 \"open-code\"",
+  "4. 工具集（tools）— 这个 Agent 可以使用的工具标识，如 shell、git、browser、deploy、file-system",
+  "5. 底层 Provider（defaultProvider）— \"claude-code\" 或 \"open-code\"",
   "",
   "规则：",
   "- 每次只问一个问题，逐步收集",
@@ -33,8 +34,9 @@ const BUILDER_SYSTEM_PROMPT = [
   "- options 是方向选择，不是最终字段。用户点选后，你必须综合用户第一句话和后续选择生成更完整的 name、description、systemPrompt",
   "- 用户点选某个 option 后，不要说“已定为该选项”。只把它当作偏好或范围，用于下一轮问题和最终草稿生成",
   "- 特别是 systemPrompt 不要直接复用用户点选的短句，要展开为可落地的行为规范、输出要求和边界约束",
-  "- 当所有 4 个字段都收集完毕后，options 必须为空数组，并把 draft 设为：",
-  "  { \"name\": \"...\", \"description\": \"...\", \"systemPrompt\": \"...\", \"defaultProvider\": \"claude-code\" }",
+  "- tools 必须是字符串数组，允许为空数组，但要优先根据 Agent 职责选择 2~5 个工具标识",
+  "- 当所有 5 个字段都收集完毕后，options 必须为空数组，并把 draft 设为：",
+  "  { \"name\": \"...\", \"description\": \"...\", \"systemPrompt\": \"...\", \"defaultProvider\": \"claude-code\", \"tools\": [\"shell\", \"git\"] }",
   "- defaultProvider 只能是 \"claude-code\" 或 \"open-code\"",
 ].join("\n");
 
@@ -43,6 +45,7 @@ type CollectedContext = {
   description?: string;
   systemPrompt?: string;
   defaultProvider?: string;
+  tools?: string[];
 };
 
 export type BuilderAssistantContent = {
@@ -227,6 +230,7 @@ export class BuilderService {
       description: input.description,
       systemPrompt: input.systemPrompt,
       defaultProvider: input.defaultProvider,
+      tools: input.tools ?? [],
     });
 
     // Mark session as completed
@@ -240,6 +244,7 @@ export class BuilderService {
           description: input.description,
           systemPrompt: input.systemPrompt,
           defaultProvider: input.defaultProvider,
+          tools: input.tools ?? [],
         } as any,
         updatedAt: new Date(),
       },
@@ -260,6 +265,7 @@ export class BuilderService {
         ctx.description = draft.description;
         ctx.systemPrompt = draft.systemPrompt;
         ctx.defaultProvider = draft.defaultProvider;
+        ctx.tools = draft.tools;
         return ctx;
       }
     }
@@ -272,6 +278,8 @@ export class BuilderService {
     if (descMatch) ctx.description = descMatch[1].trim();
     const promptMatch = fullText.match(/(?:system[_ ]?prompt|提示词|行为)\S{0,3}[:：]\s*(.+)/i);
     if (promptMatch) ctx.systemPrompt = promptMatch[1].trim();
+    const toolsMatch = fullText.match(/(?:tools?|工具集?|工具)\S{0,3}[:：]\s*(.+)/i);
+    if (toolsMatch) ctx.tools = parseToolList(toolsMatch[1]);
     if (fullText.includes("claude-code") || fullText.includes("claude code")) ctx.defaultProvider = "claude-code";
     if (fullText.includes("open-code") || fullText.includes("opencode")) ctx.defaultProvider = "open-code";
 
@@ -354,6 +362,14 @@ export class BuilderService {
 
     if (messages.length <= 8) {
       return JSON.stringify({
+        text: "这个 Agent 需要哪些工具？请选择或输入工具标识，多个工具可以用逗号分隔。",
+        options: ["shell, git, file-system", "browser, fetch, file-system", "deploy, git, shell", "none"],
+        draft: null,
+      });
+    }
+
+    if (messages.length <= 10) {
+      return JSON.stringify({
         text: "最后，请选择底层 Provider：claude-code 或 open-code。你想用哪个？",
         options: ["claude-code", "open-code"],
         draft: null,
@@ -408,6 +424,7 @@ export function normalizeDraftForConversation(
   const selectedName = userMessages[1] || draft.name;
   const selectedDescription = userMessages[2] || draft.description;
   const selectedPromptDirection = userMessages[3] || draft.systemPrompt;
+  const selectedTools = parseToolList(userMessages[4] || "");
 
   const description = isDirectOptionReuse(draft.description, userMessages)
     ? buildMockDescription(initialNeed, selectedDescription)
@@ -421,6 +438,7 @@ export function normalizeDraftForConversation(
     description,
     systemPrompt,
     defaultProvider: draft.defaultProvider === "open-code" ? "open-code" : "claude-code",
+    tools: selectedTools.length ? selectedTools : normalizeTools(draft.tools),
   };
 }
 
@@ -441,6 +459,7 @@ function draftValue(value: unknown): BuildTemplateDraft | null {
     description: stringValue(record.description),
     systemPrompt: stringValue(record.systemPrompt),
     defaultProvider: stringValue(record.defaultProvider),
+    tools: normalizeTools(record.tools),
   };
   return draft.name && draft.description && draft.systemPrompt && draft.defaultProvider
     ? draft
@@ -470,6 +489,7 @@ function buildMockDraft(messages: Array<{ role: string; content: string }>): Bui
   const selectedName = userMessages[1] || deriveMockName(initialNeed);
   const selectedDescription = userMessages[2] || "协助完成用户指定的专业任务";
   const selectedPromptDirection = userMessages[3] || "专业、准确、结构化地回答";
+  const selectedTools = parseToolList(userMessages[4] || "");
   const providerChoice = [...userMessages].reverse().find((message) =>
     message === "claude-code" || message === "open-code" || /claude|open.?code/i.test(message)
   );
@@ -479,7 +499,20 @@ function buildMockDraft(messages: Array<{ role: string; content: string }>): Bui
     description: buildMockDescription(initialNeed, selectedDescription),
     systemPrompt: buildMockSystemPrompt(selectedName, selectedDescription, selectedPromptDirection),
     defaultProvider: providerChoice?.includes("open") ? "open-code" : "claude-code",
+    tools: selectedTools,
   };
+}
+
+function normalizeTools(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    .slice(0, 12);
+}
+
+function parseToolList(value: string) {
+  const normalized = value.trim();
+  if (!normalized || /^(none|无|不需要|claude-code|open-code)$/i.test(normalized)) return [];
+  return normalizeTools(normalized.split(/[,，、\n]/).filter((item) => !/^(claude-code|open-code)$/i.test(item.trim())));
 }
 
 function deriveMockName(value: string) {

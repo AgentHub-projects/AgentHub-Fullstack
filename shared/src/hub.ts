@@ -53,6 +53,7 @@ export interface CreateAgentTemplateRequest {
   description: string;
   defaultProvider: string;
   systemPrompt: string;
+  tools?: string[];
 }
 
 export interface UpdateAgentTemplateRequest {
@@ -60,6 +61,7 @@ export interface UpdateAgentTemplateRequest {
   description?: string;
   defaultProvider?: string;
   systemPrompt?: string;
+  tools?: string[];
 }
 
 export interface AgentInstanceDto {

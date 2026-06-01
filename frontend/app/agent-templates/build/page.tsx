@@ -30,6 +30,7 @@ const EMPTY_DRAFT: BuildTemplateDraft = {
   description: "",
   systemPrompt: "",
   defaultProvider: "",
+  tools: [],
 };
 
 export default function AgentTemplateBuildPage() {
@@ -337,6 +338,7 @@ export default function AgentTemplateBuildPage() {
         <section className="builderDraftCard">
           <Field label="名称" value={previewDraft.name || "尚未生成"} />
           <Field label="Provider" value={previewDraft.defaultProvider || "尚未选择"} code />
+          <Field label="工具集" value={previewDraft.tools.length ? previewDraft.tools.join(", ") : "尚未配置"} code />
           <Field label="描述" value={previewDraft.description || "Builder 会根据你的选择生成用途描述。"} />
           <div className="builderDraftField">
             <span>System Prompt</span>
@@ -390,12 +392,21 @@ function draftFromContext(context: Record<string, unknown> | undefined): BuildTe
     description: stringValue(context.description),
     systemPrompt: stringValue(context.systemPrompt),
     defaultProvider: stringValue(context.defaultProvider),
+    tools: stringArrayValue(context.tools),
   };
   return draft.name && draft.description && draft.systemPrompt && draft.defaultProvider ? draft : null;
 }
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stringArrayValue(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function statusText(status: string) {

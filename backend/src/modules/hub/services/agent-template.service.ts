@@ -50,12 +50,14 @@ export class AgentTemplateService {
 
   async create(input: CreateAgentTemplateRequest): Promise<AgentTemplateDto> {
     const providerId = await this.resolveProviderId(input.defaultProvider);
+    const tools = normalizeTools(input.tools);
     const item = await this.prisma.agentTemplate.create({
       data: {
         name: input.name,
         description: input.description,
         defaultProviderId: providerId,
         systemPrompt: input.systemPrompt,
+        promptConfig: input.tools !== undefined ? { tools } : undefined,
         status: "enabled",
       },
     });
@@ -79,6 +81,12 @@ export class AgentTemplateService {
         ...(input.description !== undefined && { description: input.description }),
         ...(providerId !== undefined && { defaultProviderId: providerId }),
         ...(input.systemPrompt !== undefined && { systemPrompt: input.systemPrompt }),
+        ...(input.tools !== undefined && {
+          promptConfig: {
+            ...objectValue(existing.promptConfig),
+            tools: normalizeTools(input.tools),
+          },
+        }),
       },
     });
     const providerNames = await this.loadProviderNames();
@@ -91,4 +99,14 @@ export class AgentTemplateService {
     await this.prisma.agentTemplate.delete({ where: { id } });
     return { ok: true };
   }
+}
+
+function normalizeTools(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    .slice(0, 12);
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

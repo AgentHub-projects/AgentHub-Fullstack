@@ -28,6 +28,7 @@ describe("parseBuilderAssistantContent", () => {
         description: "审查前端组件、样式和交互体验。",
         systemPrompt: "你是一个前端审查助手。",
         defaultProvider: "claude-code",
+        tools: ["shell", "git"],
       },
     }));
 
@@ -38,6 +39,7 @@ describe("parseBuilderAssistantContent", () => {
       description: "审查前端组件、样式和交互体验。",
       systemPrompt: "你是一个前端审查助手。",
       defaultProvider: "claude-code",
+      tools: ["shell", "git"],
     });
   });
 
@@ -74,6 +76,7 @@ describe("BuilderService mock flow", () => {
     let reply = await service.sendMessage(started.buildId, { message: started.message.options![0] });
     reply = await service.sendMessage(started.buildId, { message: reply.message.options![0] });
     reply = await service.sendMessage(started.buildId, { message: reply.message.options![0] });
+    reply = await service.sendMessage(started.buildId, { message: "shell, git, file-system" });
     reply = await service.sendMessage(started.buildId, { message: "claude-code" });
 
     expect(reply.message.content).not.toContain("\"draft\"");
@@ -83,6 +86,7 @@ describe("BuilderService mock flow", () => {
     expect(reply.message.draft?.systemPrompt).toContain("你的职责是");
     expect(reply.message.draft?.systemPrompt).toContain("风格方向");
     expect(reply.message.draft?.defaultProvider).toBe("claude-code");
+    expect(reply.message.draft?.tools).toEqual(["shell", "git", "file-system"]);
     expect(reply.context).toMatchObject(reply.message.draft as BuildTemplateDraft);
 
     const confirmed = await service.confirmBuild(started.buildId, reply.message.draft!);
@@ -123,11 +127,13 @@ describe("normalizeDraftForConversation", () => {
       description: descriptionOption,
       systemPrompt: promptOption,
       defaultProvider: "claude-code",
+      tools: ["shell", "git"],
     }, [
       { role: "user", content: "我想创建一个 Python 数据分析 Agent" },
       { role: "user", content: "Python 数据分析 Agent" },
       { role: "user", content: descriptionOption },
       { role: "user", content: promptOption },
+      { role: "user", content: "shell, git" },
       { role: "user", content: "claude-code" },
     ]);
 
@@ -135,6 +141,7 @@ describe("normalizeDraftForConversation", () => {
     expect(draft.description).toContain("我想创建一个 Python 数据分析 Agent");
     expect(draft.systemPrompt).not.toBe(promptOption);
     expect(draft.systemPrompt).toContain("你的职责是");
+    expect(draft.tools).toEqual(["shell", "git"]);
   });
 });
 
@@ -203,7 +210,7 @@ function createBuilderHarness() {
     create: vi.fn(async (input: BuildTemplateDraft) => ({
       id: 42,
       ...input,
-      promptConfig: {},
+      promptConfig: { tools: input.tools },
       defaultCapabilities: [],
       defaultModelConfig: {},
       metadata: {},
@@ -234,6 +241,7 @@ function createListHarness() {
             description: "审查前端代码",
             systemPrompt: "你是前端审查助手",
             defaultProvider: "claude-code",
+            tools: ["shell", "git"],
           },
           agentTemplateId: 10,
           createdAt: older,

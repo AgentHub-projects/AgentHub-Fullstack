@@ -58,6 +58,7 @@ export interface BuildTemplateDraft {
   description: string;
   systemPrompt: string;
   defaultProvider: string;
+  tools: string[];
 }
 
 export interface ConfirmBuildRequest {
@@ -65,6 +66,7 @@ export interface ConfirmBuildRequest {
   description: string;
   systemPrompt: string;
   defaultProvider: string;
+  tools?: string[];
 }
 
 export interface ConfirmBuildResponse {
