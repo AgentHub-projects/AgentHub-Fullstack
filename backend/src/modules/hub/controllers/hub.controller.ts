@@ -166,7 +166,8 @@ export class HubSessionController {
   }
 
   @Post(":sessionId/deployments")
-  startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
+  async startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
+    await assertSessionWritable(this.prisma, sessionId);
     return this.deployments.start(sessionId, body ?? {});
   }
 }

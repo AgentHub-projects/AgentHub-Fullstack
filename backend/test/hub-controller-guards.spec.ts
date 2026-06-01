@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertSessionActive, assertSessionWritable } from "../src/modules/hub/controllers/hub.controller";
+import {
+  HubSessionController,
+  assertSessionActive,
+  assertSessionWritable,
+} from "../src/modules/hub/controllers/hub.controller";
 
 describe("Hub controller session write guards", () => {
   it("allows active sessions for read-write endpoints", async () => {
@@ -36,6 +40,16 @@ describe("Hub controller session write guards", () => {
     const prisma = createPrisma({ status: "active", activeRun: { id: "run-1" } });
 
     await expect(assertSessionWritable(prisma as any, "session-1")).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
+  });
+
+  it("guards deployment requests against concurrent active runs", async () => {
+    const prisma = createPrisma({ status: "active", activeRun: { id: "run-1" } });
+    const deployments = { start: vi.fn() };
+    const controller = new HubSessionController({} as any, prisma as any, {} as any, deployments as any);
+
+    await expect(controller.startDeployment("session-1", { target: "static" })).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
+
+    expect(deployments.start).not.toHaveBeenCalled();
   });
 });
 
