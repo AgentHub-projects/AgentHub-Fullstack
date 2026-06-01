@@ -603,7 +603,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleEditAgent(body: UpdateAgentRequest) {
-    if (!editTarget) return;
+    if (!editTarget || !sessionWritable) return;
     const result = await updateAgent(editTarget.id, body);
     if (!result.ok) {
       setNotice(`编辑失败：${result.error}`);
@@ -616,7 +616,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleDeleteAgent() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !sessionWritable) return;
     const result = await deleteAgent(deleteTarget.id);
     if (!result.ok) {
       setNotice(`删除失败：${result.error}`);
@@ -644,7 +644,7 @@ export default function WorkbenchPage() {
   }
 
   async function handleInviteAgent() {
-    if (!activeSessionId) return;
+    if (!activeSessionId || !sessionWritable) return;
     const selected = inviteSelection.filter((item) => item.templateId);
     if (selected.length === 0) {
       setNotice("请至少选择一个模板");
@@ -925,7 +925,7 @@ export default function WorkbenchPage() {
                     key={agent.id}
                     className="memberRow"
                     onContextMenu={(e) => {
-                      if (mode !== "group" || agent.id === orchestrator?.id) return;
+                      if (!sessionWritable || mode !== "group" || agent.id === orchestrator?.id) return;
                       e.preventDefault();
                       setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
                     }}
@@ -942,7 +942,7 @@ export default function WorkbenchPage() {
                     </span>
                   </div>
                 ))}
-                {mode === "group" && (
+                {mode === "group" && sessionWritable && (
                   <button
                     className="addMemberRow"
                     type="button"
@@ -1693,7 +1693,7 @@ export default function WorkbenchPage() {
               <button
                 className="primaryButton"
                 type="button"
-                disabled={!editTarget.name.trim()}
+                disabled={!sessionWritable || !editTarget.name.trim()}
                 onClick={() => handleEditAgent({
                   name: editTarget.name,
                   description: editTarget.description,
@@ -1798,7 +1798,7 @@ export default function WorkbenchPage() {
             </div>
             <footer>
               <button className="ghostButton" type="button" onClick={() => setInviteDialogOpen(false)}>取消</button>
-              <button className="primaryButton" type="button" onClick={() => void handleInviteAgent()}>
+              <button className="primaryButton" type="button" disabled={!sessionWritable} onClick={() => void handleInviteAgent()}>
                 邀请加入
               </button>
             </footer>
@@ -1827,7 +1827,7 @@ export default function WorkbenchPage() {
               <button className="ghostButton" type="button" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}>
                 取消
               </button>
-              <button className="dangerButton" type="button" onClick={() => void handleDeleteAgent()}>
+              <button className="dangerButton" type="button" disabled={!sessionWritable} onClick={() => void handleDeleteAgent()}>
                 确认移除
               </button>
             </footer>

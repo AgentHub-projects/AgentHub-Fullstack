@@ -195,7 +195,7 @@ export class HubAgentController {
 
   @Post()
   async createAgent(@Body() body: CreateSessionAgentRequest) {
-    await assertSessionHasNoActiveRun(this.prisma, body.sessionId);
+    await assertSessionWritable(this.prisma, body.sessionId);
     const agent = await this.agents.createAgentFromTemplate(
       body.sessionId,
       body.templateId,
@@ -224,6 +224,7 @@ export class HubAgentController {
 
   @Patch(":id")
   async updateAgent(@Param("id") id: string, @Body() body: UpdateAgentRequest) {
+    await assertAgentSessionsWritable(this.prisma, Number(id));
     return this.agents.updateAgent(Number(id), body);
   }
 
@@ -236,7 +237,7 @@ export class HubAgentController {
     }
     const links = await this.prisma.sessionAgent.findMany({ where: { agentId } });
     for (const link of links) {
-      await assertSessionHasNoActiveRun(this.prisma, link.sessionId);
+      await assertSessionWritable(this.prisma, link.sessionId);
     }
     await this.agents.deleteAgent(agentId);
     for (const link of links) {
@@ -383,6 +384,26 @@ export class HubHealthController {
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const ACTIVE_RUN_STATUSES = ["queued", "context_building", "connecting", "running"] as const;
+
+export async function assertSessionWritable(prisma: PrismaService, sessionId: string) {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { status: true },
+  });
+  if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
+  if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
+  await assertSessionHasNoActiveRun(prisma, sessionId);
+}
+
+async function assertAgentSessionsWritable(prisma: PrismaService, agentId: number) {
+  const links = await prisma.sessionAgent.findMany({
+    where: { agentId },
+    select: { sessionId: true },
+  });
+  for (const link of links) {
+    await assertSessionWritable(prisma, link.sessionId);
+  }
+}
 
 async function assertSessionHasNoActiveRun(prisma: PrismaService, sessionId: string) {
   const activeRun = await prisma.agentRun.findFirst({
