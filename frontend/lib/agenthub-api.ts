@@ -25,6 +25,7 @@ import type {
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
+  StartDeploymentRequest,
   StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
@@ -222,10 +223,10 @@ export function applyFileChange(sessionId: string, fileChangeId: string) {
   );
 }
 
-export function startDeployment(sessionId: string) {
+export function startDeployment(sessionId: string, body: StartDeploymentRequest = {}) {
   return requestJson<StartDeploymentResponse>(`/sessions/${encodeURIComponent(sessionId)}/deployments`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
 }
 

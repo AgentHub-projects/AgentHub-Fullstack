@@ -125,6 +125,12 @@ export interface DeploymentDto {
   completedAt?: ISODateString | null;
 }
 
+export type DeploymentTarget = "static" | "container" | "source_archive";
+
+export interface StartDeploymentRequest {
+  target?: DeploymentTarget;
+}
+
 export interface StartDeploymentResponse {
   deployment: DeploymentDto;
   message: HubMessageDto;

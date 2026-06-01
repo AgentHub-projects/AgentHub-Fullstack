@@ -519,6 +519,52 @@ textarea:focus-visible {
   flex: 0 0 auto;
 }
 
+.deployMenuWrap {
+  position: relative;
+}
+
+.deployMenu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 184px;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.deployMenu button {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  padding: 0 9px;
+  text-align: left;
+}
+
+.deployMenu button:hover {
+  background: var(--surface-muted);
+}
+
+.deployMenuWrap .ghostButton span,
+.deployMenu button span {
+  display: inline;
+  margin-top: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
 .runBadge {
   color: var(--muted);
   text-transform: none;

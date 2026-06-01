@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import type { DeploymentTarget, StartDeploymentRequest } from "@agenthub/shared";
 import { mapDeployment, mapMessage, mapSession, asObject } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -14,7 +15,7 @@ export class DeploymentService {
     @Inject(HubRealtimeGateway) private readonly gateway: HubRealtimeGateway,
   ) {}
 
-  async start(sessionId: string) {
+  async start(sessionId: string, input: StartDeploymentRequest = {}) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
       include: { project: true, runs: { orderBy: { createdAt: "desc" }, take: 1 } },
@@ -23,19 +24,31 @@ export class DeploymentService {
     const metadata = asObject(session.metadata);
     const commitSha = stringValue(metadata.latestSuccessfulPushCommitSha);
     if (!commitSha) throw new Error("NO_SUCCESSFUL_PUSH_COMMIT");
+    const target = normalizeDeploymentTarget(input.target);
+    const sourceArchiveUrl = githubArchiveUrl(session.project.githubUrl, commitSha);
+    if (target === "source_archive" && !sourceArchiveUrl) throw new Error("SOURCE_ARCHIVE_UNAVAILABLE");
+    const initialStatus = target === "source_archive" ? "completed" : "queued";
+    const initialTitle = deploymentStatusText(initialStatus, target);
 
     const message = await this.prisma.message.create({
       data: {
         sessionId,
         role: "system",
-        contentText: `部署已触发：${session.project.name}@${commitSha.slice(0, 12)}`,
+        contentText: `${initialTitle}：${session.project.name}@${commitSha.slice(0, 12)}`,
         contentJson: {
           parts: [
             {
               id: "deploy_status",
               type: "deploy_status",
-              title: "部署中",
-              metadata: { projectId: session.projectId, commitSha, status: "queued" },
+              title: initialTitle,
+              metadata: {
+                projectId: session.projectId,
+                projectName: session.project.name,
+                commitSha,
+                status: initialStatus,
+                target,
+                sourceArchiveUrl,
+              },
             },
           ],
         } as any,
@@ -48,12 +61,14 @@ export class DeploymentService {
         projectId: session.projectId,
         triggerMessageId: message.id,
         commitSha,
-        status: "queued",
+        status: initialStatus,
+        completedAt: target === "source_archive" ? new Date() : undefined,
+        metadata: { target, sourceArchiveUrl } as any,
       },
     });
     const syncedMessage = await this.syncDeploymentMessage(deployment.id);
     this.gateway.emitSession(mapSession(session));
-    void this.runDeployJob(deployment.id);
+    if (target !== "source_archive") void this.runDeployJob(deployment.id);
     return { deployment: mapDeployment(deployment), message: syncedMessage ?? mapMessage(message) };
   }
 
@@ -69,6 +84,8 @@ export class DeploymentService {
       include: { project: true },
     });
     if (!deployment) return;
+    const metadata = asObject(deployment.metadata);
+    const target = normalizeDeploymentTarget(metadata.target);
 
     try {
       const response = await fetch(`${deployServiceUrl}/deployments`, {
@@ -78,6 +95,8 @@ export class DeploymentService {
           githubUrl: deployment.project.githubUrl,
           defaultBranch: deployment.project.defaultBranch,
           commitSha: deployment.commitSha,
+          target,
+          deploymentTarget: target,
         }),
       });
       if (!response.ok) throw new Error(`Deploy service HTTP ${response.status}`);
@@ -86,7 +105,7 @@ export class DeploymentService {
       await this.updateDeployment(deploymentId, {
         status: "running",
         deployServiceJobId: jobId,
-        metadata: { jobId } as any,
+        metadata: { jobId, target } as any,
       });
       if (jobId) await this.pollJob(deploymentId, jobId, Date.now());
     } catch (error) {
@@ -133,9 +152,20 @@ export class DeploymentService {
   }
 
   private async updateDeployment(deploymentId: string, data: Prisma.DeploymentUpdateArgs["data"]) {
+    const existing = await this.prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      select: { metadata: true },
+    });
+    const nextData = { ...data } as Prisma.DeploymentUpdateArgs["data"];
+    if ("metadata" in nextData) {
+      nextData.metadata = {
+        ...asObject(existing?.metadata),
+        ...asObject(nextData.metadata),
+      } as any;
+    }
     const deployment = await this.prisma.deployment.update({
       where: { id: deploymentId },
-      data,
+      data: nextData,
     });
     await this.syncDeploymentMessage(deployment.id);
     return deployment;
@@ -150,9 +180,12 @@ export class DeploymentService {
     const existing = await this.prisma.message.findUnique({ where: { id: deployment.triggerMessageId } });
     if (!existing) return null;
     const contentJson = asObject(existing.contentJson);
-    const statusText = deploymentStatusText(deployment.status);
+    const metadata = asObject(deployment.metadata);
+    const target = normalizeDeploymentTarget(metadata.target);
+    const statusText = deploymentStatusText(deployment.status, target);
     const contentText = `${statusText}：${deployment.project.name}@${deployment.commitSha.slice(0, 12)}`;
-    const sourceArchiveUrl = githubArchiveUrl(deployment.project.githubUrl, deployment.commitSha);
+    const sourceArchiveUrl =
+      stringValue(metadata.sourceArchiveUrl) ?? githubArchiveUrl(deployment.project.githubUrl, deployment.commitSha);
     const message = await this.prisma.message.update({
       where: { id: existing.id },
       data: {
@@ -173,6 +206,8 @@ export class DeploymentService {
                 githubUrl: deployment.project.githubUrl,
                 commitSha: deployment.commitSha,
                 status: deployment.status,
+                target,
+                targetLabel: deploymentTargetLabel(target),
                 jobId: deployment.deployServiceJobId,
                 errorMessage: deployment.errorMessage,
                 sourceArchiveUrl,
@@ -206,11 +241,27 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function deploymentStatusText(status: string) {
-  if (status === "completed") return "部署完成";
-  if (status === "failed") return "部署失败";
-  if (status === "running") return "部署中";
-  return "部署排队";
+function normalizeDeploymentTarget(value: unknown): DeploymentTarget {
+  if (value === "container" || value === "source_archive") return value;
+  return "static";
+}
+
+function deploymentTargetLabel(target: DeploymentTarget) {
+  if (target === "container") return "容器化部署";
+  if (target === "source_archive") return "源码包";
+  return "静态站点";
+}
+
+function deploymentStatusText(status: string, target: DeploymentTarget = "static") {
+  const label = deploymentTargetLabel(target);
+  if (target === "source_archive") {
+    if (status === "failed") return "源码包生成失败";
+    return "源码包已生成";
+  }
+  if (status === "completed") return `${label}完成`;
+  if (status === "failed") return `${label}失败`;
+  if (status === "running") return `${label}部署中`;
+  return `${label}排队`;
 }
 
 function githubArchiveUrl(githubUrl: string, commitSha: string) {

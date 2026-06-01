@@ -21,6 +21,7 @@ import type {
   CreateSessionAgentRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
+  StartDeploymentRequest,
   UpdateHubSessionRequest,
   UpdateAgentRequest,
   UpdateProjectRequest,
@@ -164,8 +165,8 @@ export class HubSessionController {
   }
 
   @Post(":sessionId/deployments")
-  startDeployment(@Param("sessionId") sessionId: string) {
-    return this.deployments.start(sessionId);
+  startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
+    return this.deployments.start(sessionId, body ?? {});
   }
 }
 

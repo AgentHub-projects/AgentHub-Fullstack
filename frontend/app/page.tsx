@@ -5,6 +5,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   CreateSessionAgentRequest,
+  DeploymentTarget,
   HubArtifactDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -19,6 +20,7 @@ import type {
 import {
   BranchesOutlined,
   CheckCircleOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -124,6 +126,7 @@ export default function WorkbenchPage() {
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
+  const [deploymentMenuOpen, setDeploymentMenuOpen] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
@@ -688,19 +691,20 @@ export default function WorkbenchPage() {
     }
   }
 
-  async function handleStartDeployment() {
+  async function handleStartDeployment(target: DeploymentTarget) {
     if (!activeSessionId || deployingSessionId) return;
+    setDeploymentMenuOpen(false);
     setDeployingSessionId(activeSessionId);
     try {
-      const result = await startDeployment(activeSessionId);
+      const result = await startDeployment(activeSessionId, { target });
       if (!result.ok) {
-        setNotice(`部署失败：${result.error}`);
+        setNotice(`${deploymentTargetLabel(target)}失败：${result.error}`);
         return;
       }
       setDetail((current) =>
         current ? { ...current, messages: upsertById(current.messages, result.data.message).sort(sortMessage) } : current,
       );
-      setNotice(`部署已触发：${result.data.deployment.commitSha.slice(0, 12)}`);
+      setNotice(`${deploymentTargetLabel(target)}已触发：${result.data.deployment.commitSha.slice(0, 12)}`);
     } finally {
       setDeployingSessionId(null);
     }
@@ -992,15 +996,33 @@ export default function WorkbenchPage() {
               </button>
             )}
             {activeSession?.projectId && (
-              <button
-                className="ghostButton"
-                type="button"
-                disabled={deployingSessionId === activeSession.id}
-                onClick={() => void handleStartDeployment()}
-              >
-                {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
-                <span>部署</span>
-              </button>
+              <div className="deployMenuWrap">
+                <button
+                  className="ghostButton"
+                  type="button"
+                  disabled={deployingSessionId === activeSession.id}
+                  onClick={() => setDeploymentMenuOpen((open) => !open)}
+                >
+                  {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
+                  <span>部署</span>
+                </button>
+                {deploymentMenuOpen && (
+                  <div className="deployMenu">
+                    <button type="button" onClick={() => void handleStartDeployment("static")}>
+                      <RocketOutlined />
+                      <span>静态站点</span>
+                    </button>
+                    <button type="button" onClick={() => void handleStartDeployment("container")}>
+                      <CloudUploadOutlined />
+                      <span>容器化部署</span>
+                    </button>
+                    <button type="button" onClick={() => void handleStartDeployment("source_archive")}>
+                      <FileDoneOutlined />
+                      <span>源码包下载</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             {latestRun && <RunBadge run={latestRun} />}
             {latestRun && isRunning(latestRun.status) && (
@@ -1673,4 +1695,10 @@ export default function WorkbenchPage() {
 
     </main>
   );
+}
+
+function deploymentTargetLabel(target: DeploymentTarget) {
+  if (target === "container") return "容器化部署";
+  if (target === "source_archive") return "源码包";
+  return "静态站点部署";
 }

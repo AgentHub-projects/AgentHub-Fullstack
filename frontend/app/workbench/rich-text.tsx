@@ -119,6 +119,8 @@ function DeployStatusPart({
   const status = stringMetadata(part.metadata, "status") ?? "queued";
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
   const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
+  const target = stringMetadata(part.metadata, "target") ?? "static";
+  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? deploymentTargetLabel(target);
   const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
   const sourceArchiveUrl = stringMetadata(part.metadata, "sourceArchiveUrl");
   const shortSha = commitSha ? commitSha.slice(0, 12) : "";
@@ -129,9 +131,10 @@ function DeployStatusPart({
         <strong>{part.title ?? "部署状态"}</strong>
         <span>
           {projectName}
+          {` · ${targetLabel}`}
           {shortSha ? ` · ${shortSha}` : ""}
         </span>
-        {part.url && (
+        {part.url && target !== "source_archive" && (
           <a href={part.url} target="_blank" rel="noreferrer">
             预览地址：{part.url}
           </a>
@@ -242,4 +245,10 @@ function deployStatusIcon(status: string) {
   if (status === "failed") return <CloseCircleOutlined />;
   if (status === "running") return <LoadingOutlined />;
   return <RocketOutlined />;
+}
+
+function deploymentTargetLabel(target: string) {
+  if (target === "container") return "容器化部署";
+  if (target === "source_archive") return "源码包";
+  return "静态站点";
 }
