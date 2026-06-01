@@ -512,6 +512,7 @@ export class HubSessionService {
   }
 
   async applyFileChange(sessionId: string, fileChangeId: string) {
+    await this.assertSessionActive(sessionId);
     const change = await this.prisma.fileChange.findFirst({
       where: { id: fileChangeId, sessionId },
     });
@@ -679,6 +680,15 @@ export class HubSessionService {
       select: { id: true },
     });
     if (activeRun) throw new BadRequestException("SESSION_HAS_ACTIVE_RUN");
+  }
+
+  private async assertSessionActive(sessionId: string) {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+    if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
+    if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
   }
 }
 

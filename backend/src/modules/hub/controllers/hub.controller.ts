@@ -84,6 +84,7 @@ export class HubSessionController {
 
   @Post(":sessionId/project")
   async bindProject(@Param("sessionId") sessionId: string, @Body() body: { projectId?: string | null }) {
+    await assertSessionActive(this.prisma, sessionId);
     const projectId = body?.projectId ?? null;
     if (projectId) {
       const project = await this.prisma.project.findFirst({ where: { id: projectId, status: "active" } });
@@ -324,12 +325,16 @@ export class HubArtifactController {
 
 @Controller()
 export class HubUploadController {
-  constructor(@Inject(ArtifactStorageService) private readonly artifacts: ArtifactStorageService) {}
+  constructor(
+    @Inject(ArtifactStorageService) private readonly artifacts: ArtifactStorageService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   @Post("sessions/:sessionId/uploads")
   async uploadAttachment(@Param("sessionId") sessionId: string, @Req() request: Request) {
     const contentLength = Number(request.headers["content-length"] ?? 0);
     if (!sessionId) throw new BadRequestException("SESSION_ID_REQUIRED");
+    await assertSessionActive(this.prisma, sessionId);
     if (contentLength > MAX_UPLOAD_BYTES) throw new BadRequestException("UPLOAD_TOO_LARGE");
     const data = await readRequestBuffer(request, MAX_UPLOAD_BYTES);
     if (data.length === 0) throw new BadRequestException("UPLOAD_EMPTY");
@@ -386,13 +391,17 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const ACTIVE_RUN_STATUSES = ["queued", "context_building", "connecting", "running"] as const;
 
 export async function assertSessionWritable(prisma: PrismaService, sessionId: string) {
+  await assertSessionActive(prisma, sessionId);
+  await assertSessionHasNoActiveRun(prisma, sessionId);
+}
+
+export async function assertSessionActive(prisma: PrismaService, sessionId: string) {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     select: { status: true },
   });
   if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
   if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
-  await assertSessionHasNoActiveRun(prisma, sessionId);
 }
 
 async function assertAgentSessionsWritable(prisma: PrismaService, agentId: number) {

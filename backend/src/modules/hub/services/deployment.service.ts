@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import type { DeploymentTarget, StartDeploymentRequest } from "@agenthub/shared";
 import { mapDeployment, mapMessage, mapSession, asObject } from "../mappers/hub.mappers";
@@ -20,6 +20,8 @@ export class DeploymentService {
       where: { id: sessionId },
       include: { project: true, runs: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
+    if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
+    if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
     if (!session?.projectId || !session.project) throw new Error("PROJECT_NOT_BOUND");
     const metadata = asObject(session.metadata);
     const commitSha = stringValue(metadata.latestSuccessfulPushCommitSha);

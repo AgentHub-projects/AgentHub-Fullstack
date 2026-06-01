@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertSessionWritable } from "../src/modules/hub/controllers/hub.controller";
+import { assertSessionActive, assertSessionWritable } from "../src/modules/hub/controllers/hub.controller";
 
 describe("Hub controller session write guards", () => {
+  it("allows active sessions for read-write endpoints", async () => {
+    const prisma = createPrisma({ status: "active", activeRun: null });
+
+    await expect(assertSessionActive(prisma as any, "session-1")).resolves.toBeUndefined();
+    expect(prisma.agentRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects archived sessions for read-write endpoints", async () => {
+    const prisma = createPrisma({ status: "archived", activeRun: null });
+
+    await expect(assertSessionActive(prisma as any, "session-1")).rejects.toThrow("SESSION_NOT_ACTIVE");
+  });
+
   it("allows active sessions without active runs", async () => {
     const prisma = createPrisma({ status: "active", activeRun: null });
 
