@@ -83,6 +83,46 @@ describe("HubEventService artifact message parts", () => {
     );
     expect(gateway.emitMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "message-1" }));
   });
+
+  it("marks file changes with diff apply conflict status", async () => {
+    const { service, prisma, gateway } = createService();
+    const existing = fileChangeRow({ id: "change-1", metadata: {} });
+    prisma.fileChange.findFirst.mockResolvedValue(existing);
+    prisma.fileChange.update.mockImplementation(async ({ data }: any) =>
+      fileChangeRow({ ...existing, metadata: data.metadata }),
+    );
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "diff.apply.failed",
+      payload: {
+        fileChangeIds: ["change-1"],
+        status: "conflict",
+        message: "patch conflict in src/app/page.tsx",
+        conflicts: [{ path: "src/app/page.tsx" }],
+      },
+    });
+
+    expect(prisma.fileChange.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "change-1" },
+      data: {
+        metadata: expect.objectContaining({
+          applyStatus: "conflict",
+          applyMessage: "patch conflict in src/app/page.tsx",
+          applyConflicts: [{ path: "src/app/page.tsx" }],
+          applyRunId: "run-1",
+        }),
+      },
+    }));
+    expect(gateway.emitFileChange).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        id: "change-1",
+        metadata: expect.objectContaining({ applyStatus: "conflict" }),
+      }),
+    );
+  });
 });
 
 function createService() {
@@ -112,11 +152,18 @@ function createService() {
       create: vi.fn(),
       update: vi.fn(),
     },
+    fileChange: {
+      findFirst: vi.fn(),
+      update: vi.fn(),
+      create: vi.fn(),
+      findMany: vi.fn(),
+    },
   };
   const gateway = {
     emitEvent: vi.fn(),
     emitArtifact: vi.fn(),
     emitMessage: vi.fn(),
+    emitFileChange: vi.fn(),
   };
   const artifacts = {
     upsertArtifact: vi.fn(),
@@ -133,6 +180,31 @@ function createService() {
     artifacts,
     context,
     service: new HubEventService(prisma as any, gateway as any, artifacts as any, context as any),
+  };
+}
+
+function fileChangeRow(overrides: Record<string, any> = {}) {
+  return {
+    id: "change-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    artifactId: null,
+    producingEventId: "event-1",
+    path: "src/app/page.tsx",
+    oldPath: null,
+    changeType: "modified",
+    language: "tsx",
+    beforeContent: "",
+    beforeSha256: null,
+    beforeTruncated: false,
+    afterContent: "",
+    afterSha256: null,
+    afterTruncated: false,
+    patch: "@@ -1 +1 @@",
+    stats: {},
+    metadata: {},
+    createdAt: now,
+    ...overrides,
   };
 }
 

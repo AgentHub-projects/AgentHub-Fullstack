@@ -131,6 +131,17 @@ export class HubEventService {
       }
     }
 
+    if (
+      event.eventType === "diff.apply.requested" ||
+      event.eventType === "diff.apply.completed" ||
+      event.eventType === "diff.apply.failed"
+    ) {
+      const changes = await this.updateDiffApplyStatus(event);
+      for (const change of changes) {
+        this.gateway.emitFileChange(event.sessionId, change);
+      }
+    }
+
     if (event.eventType === "artifact.upsert") {
       const artifact = await this.artifacts.upsertArtifact({
         sessionId: event.sessionId,
@@ -372,6 +383,42 @@ export class HubEventService {
     return mapFileChange(created);
   }
 
+  private async updateDiffApplyStatus(event: HubEventDto) {
+    const ids = fileChangeIdsFromPayload(event.payload);
+    if (ids.length === 0) return [];
+    const status = diffApplyStatus(event.eventType, event.payload);
+    const timestamp = event.persistedAt ?? new Date().toISOString();
+    const updates: ReturnType<typeof mapFileChange>[] = [];
+
+    for (const id of ids) {
+      const existing = await this.prisma.fileChange.findFirst({
+        where: { id, sessionId: event.sessionId },
+      });
+      if (!existing) continue;
+      const metadata = asObject(existing.metadata);
+      const message = stringValue(event.payload.message) ?? stringValue(event.payload.error);
+      const conflicts = Array.isArray(event.payload.conflicts) ? event.payload.conflicts : null;
+      const updated = await this.prisma.fileChange.update({
+        where: { id },
+        data: {
+          metadata: {
+            ...metadata,
+            applyStatus: status,
+            applyEventId: event.id,
+            applyRunId: event.runId,
+            applyMessage: message ?? null,
+            applyConflicts: conflicts,
+            appliedAt: status === "applied" ? timestamp : metadata.appliedAt ?? null,
+            applyFailedAt: status === "failed" || status === "conflict" ? timestamp : metadata.applyFailedAt ?? null,
+          } as any,
+        },
+      });
+      updates.push(mapFileChange(updated));
+    }
+
+    return updates;
+  }
+
   async emitSnapshotArtifacts(sessionId: string) {
     const [artifacts, fileChanges] = await Promise.all([
       this.prisma.artifact.findMany({ where: { sessionId }, orderBy: { updatedAt: "desc" }, take: 20 }),
@@ -393,6 +440,30 @@ function textFromPayload(payload: Record<string, unknown>): string {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function fileChangeIdsFromPayload(payload: Record<string, unknown>) {
+  const ids = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) ids.add(value.trim());
+  };
+  if (Array.isArray(payload.fileChangeIds)) {
+    for (const item of payload.fileChangeIds) add(item);
+  }
+  add(payload.fileChangeId);
+  if (Array.isArray(payload.changes)) {
+    for (const item of payload.changes) add(asObject(item).id);
+  }
+  return [...ids];
+}
+
+function diffApplyStatus(eventType: string, payload: Record<string, unknown>) {
+  if (eventType === "diff.apply.requested") return "queued";
+  if (eventType === "diff.apply.completed") return "applied";
+  const status = stringValue(payload.status);
+  return status === "conflict" || (Array.isArray(payload.conflicts) && payload.conflicts.length > 0)
+    ? "conflict"
+    : "failed";
 }
 
 function speakerBufferKey(event: HubEventDto): string {

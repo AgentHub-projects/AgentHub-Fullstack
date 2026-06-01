@@ -37,6 +37,29 @@ export function artifactLabel(kind: HubArtifactKind) {
   return "code";
 }
 
+export type FileChangeApplyStatus = "queued" | "applied" | "failed" | "conflict";
+
+export function fileChangeApplyStatus(change: HubFileChangeDto): FileChangeApplyStatus | null {
+  const value = change.metadata.applyStatus;
+  if (value === "queued" || value === "applied" || value === "failed" || value === "conflict") return value;
+  return null;
+}
+
+export function fileChangeApplyLabel(status: FileChangeApplyStatus) {
+  if (status === "queued") return "等待应用";
+  if (status === "applied") return "已应用";
+  if (status === "conflict") return "有冲突";
+  return "应用失败";
+}
+
+export function fileChangeApplyMessage(change: HubFileChangeDto) {
+  const message = change.metadata.applyMessage;
+  if (typeof message === "string" && message.trim()) return message.trim();
+  const conflicts = change.metadata.applyConflicts;
+  if (Array.isArray(conflicts) && conflicts.length > 0) return `检测到 ${conflicts.length} 个冲突`;
+  return "";
+}
+
 export function isRunning(status: string) {
   return status === "queued" || status === "context_building" || status === "connecting" || status === "running";
 }

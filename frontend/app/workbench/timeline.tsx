@@ -32,7 +32,16 @@ import {
   payloadString,
   runStageLabel,
 } from "../../lib/workbench/timeline";
-import { agentColor, formatElapsed, formatTime, initials, isRunning } from "../../lib/workbench/format";
+import {
+  agentColor,
+  fileChangeApplyLabel,
+  fileChangeApplyMessage,
+  fileChangeApplyStatus,
+  formatElapsed,
+  formatTime,
+  initials,
+  isRunning,
+} from "../../lib/workbench/format";
 import { MessageParts, RichText } from "./rich-text";
 
 export function TimelineMessage({
@@ -154,31 +163,48 @@ function RunDiffCards({
 }) {
   return (
     <div className="runDiffCards">
-      {changes.map((change) => (
-        <details className="runDiffCard" key={change.id}>
-          <summary>
-            <span>
-              <BranchesOutlined />
-              <strong>{change.path}</strong>
-            </span>
-            <code>{change.changeType}</code>
-          </summary>
-          <div className="runDiffBody">
-            <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
-            {onApply && (
-              <button
-                className="ghostButton"
-                type="button"
-                disabled={applyingId === change.id}
-                onClick={() => onApply(change)}
-              >
-                <CheckCircleOutlined />
-                <span>{applyingId === change.id ? "应用中" : "应用 Diff"}</span>
-              </button>
-            )}
-          </div>
-        </details>
-      ))}
+      {changes.map((change) => {
+        const status = fileChangeApplyStatus(change);
+        const message = fileChangeApplyMessage(change);
+        const applyLocked = status === "queued" || status === "applied";
+        return (
+          <details className="runDiffCard" key={change.id}>
+            <summary>
+              <span>
+                <BranchesOutlined />
+                <strong>{change.path}</strong>
+              </span>
+              <span className="runDiffSummaryBadges">
+                {status && <span className={`applyStatus ${status}`}>{fileChangeApplyLabel(status)}</span>}
+                <code>{change.changeType}</code>
+              </span>
+            </summary>
+            <div className="runDiffBody">
+              {message && <div className={`diffApplyMessage ${status ?? ""}`}>{message}</div>}
+              <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
+              {onApply && (
+                <button
+                  className="ghostButton"
+                  type="button"
+                  disabled={applyingId === change.id || applyLocked}
+                  onClick={() => onApply(change)}
+                >
+                  <CheckCircleOutlined />
+                  <span>
+                    {applyingId === change.id
+                      ? "应用中"
+                      : status === "queued"
+                        ? "等待结果"
+                        : status === "applied"
+                          ? "已应用"
+                          : "应用 Diff"}
+                  </span>
+                </button>
+              )}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 }

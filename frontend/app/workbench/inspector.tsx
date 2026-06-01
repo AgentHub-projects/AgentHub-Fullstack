@@ -30,7 +30,12 @@ import {
   parseUnifiedPatch,
 } from "../../lib/workbench/diff";
 import type { DiffLine } from "../../lib/workbench/types";
-import { artifactLabel } from "../../lib/workbench/format";
+import {
+  artifactLabel,
+  fileChangeApplyLabel,
+  fileChangeApplyMessage,
+  fileChangeApplyStatus,
+} from "../../lib/workbench/format";
 import { RichText } from "./rich-text";
 
 export function DiffPanel({
@@ -59,6 +64,9 @@ export function DiffPanel({
   const rows = buildFileTreeRows(changes);
   const additions = countChangeLines(activeChange, "add");
   const deletions = countChangeLines(activeChange, "remove");
+  const applyStatus = fileChangeApplyStatus(activeChange);
+  const applyMessage = fileChangeApplyMessage(activeChange);
+  const applyLocked = applyStatus === "queued" || applyStatus === "applied";
 
   return (
     <div className="panelScroll diffPanelLayout">
@@ -97,15 +105,24 @@ export function DiffPanel({
           </div>
           <div className="diffViewerActions">
             <span className={`changeType ${activeChange.changeType}`}>{activeChange.changeType}</span>
+            {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
             {onApply && (
               <button
                 className="ghostButton"
                 type="button"
-                disabled={applyingId === activeChange.id}
+                disabled={applyingId === activeChange.id || applyLocked}
                 onClick={() => onApply(activeChange)}
               >
                 <CheckCircleOutlined />
-                <span>{applyingId === activeChange.id ? "应用中" : "应用 Diff"}</span>
+                <span>
+                  {applyingId === activeChange.id
+                    ? "应用中"
+                    : applyStatus === "queued"
+                      ? "等待结果"
+                      : applyStatus === "applied"
+                        ? "已应用"
+                        : "应用 Diff"}
+                </span>
               </button>
             )}
           </div>
@@ -114,6 +131,7 @@ export function DiffPanel({
           <span className="add">+{additions}</span>
           <span className="remove">-{deletions}</span>
           {activeChange.afterTruncated || activeChange.beforeTruncated ? <span>内容已截断</span> : null}
+          {applyMessage ? <span className={`diffApplyMessage ${applyStatus ?? ""}`}>{applyMessage}</span> : null}
         </div>
         <UnifiedDiffView change={activeChange} />
       </section>

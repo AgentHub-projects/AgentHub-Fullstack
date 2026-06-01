@@ -1107,6 +1107,11 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.runDiffSummaryBadges {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
 .runDiffBody {
   display: grid;
   gap: 8px;
@@ -2058,6 +2063,56 @@ textarea:focus-visible {
   border-color: rgba(148, 98, 0, 0.22);
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.applyStatus {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.applyStatus.queued {
+  border-color: rgba(148, 98, 0, 0.22);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.applyStatus.applied {
+  border-color: rgba(24, 121, 78, 0.22);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.applyStatus.failed,
+.applyStatus.conflict {
+  border-color: rgba(180, 35, 24, 0.2);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.diffApplyMessage {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 5px 8px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffApplyMessage.failed,
+.diffApplyMessage.conflict {
+  border-color: rgba(180, 35, 24, 0.2);
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 .diffStats {
