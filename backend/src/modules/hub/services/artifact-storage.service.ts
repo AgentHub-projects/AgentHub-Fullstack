@@ -15,10 +15,12 @@ type OssClient = {
 
 export const TEXT_ATTACHMENT_PREVIEW_CHAR_LIMIT = 100 * 1024;
 
+/** 产物存储服务：管理附件上传、产物增删改查、OSS 存储和版本记录 */
 @Injectable()
 export class ArtifactStorageService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /** 创建用户上传的附件：存储到 OSS 或本地，记录 artifact 和版本 */
   async createAttachment(input: {
     sessionId: string;
     name: string;
@@ -71,6 +73,7 @@ export class ArtifactStorageService {
     };
   }
 
+  /** 创建或更新 artifact：支持二进制、内联文本和远程 URL，保留版本历史 */
   async upsertArtifact(input: {
     sessionId: string;
     runId: string;
@@ -161,6 +164,7 @@ export class ArtifactStorageService {
     return mapArtifact(artifact);
   }
 
+  /** 追加 delta 内容到已有 artifact（简化版 chunk 累积） */
   async storeChunk(input: {
     sessionId: string;
     runId: string;
@@ -207,6 +211,7 @@ export class ArtifactStorageService {
     });
   }
 
+  /** 标记 artifact 为完成状态 */
   async completeArtifact(input: {
     sessionId: string;
     runId: string;
@@ -239,6 +244,7 @@ export class ArtifactStorageService {
     return mapArtifact(updated);
   }
 
+  /** 列出 artifact 的所有版本 */
   async listVersions(artifactId: string): Promise<HubArtifactVersionDto[]> {
     const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
       `
@@ -267,6 +273,7 @@ export class ArtifactStorageService {
     return rows.map(mapArtifactVersion);
   }
 
+  /** 获取 artifact 内容：内联文本直接返回，OSS 返回签名重定向 URL */
   async getContent(artifactId: string) {
     const artifact = await this.prisma.artifact.findUnique({ where: { id: artifactId } });
     if (!artifact) return null;
@@ -291,6 +298,7 @@ export class ArtifactStorageService {
     };
   }
 
+  /** 获取上传内容：优先从本地文件读取，否则走 getContent */
   async getUploadedContent(artifactId: string) {
     const artifact = await this.prisma.artifact.findUnique({ where: { id: artifactId } });
     if (!artifact) return null;
@@ -306,6 +314,7 @@ export class ArtifactStorageService {
     return this.getContent(artifactId);
   }
 
+  /** 上传文件到阿里云 OSS */
   private async uploadToOss(
     sessionId: string,
     runId: string,
@@ -331,6 +340,7 @@ export class ArtifactStorageService {
     };
   }
 
+  /** 将上传文件写入本地 .uploads 目录 */
   private async writeLocalUpload(artifactId: string, fileName: string, data: Buffer) {
     const dir = join(process.cwd(), ".uploads");
     await mkdir(dir, { recursive: true });
@@ -339,11 +349,13 @@ export class ArtifactStorageService {
     return filePath;
   }
 
+  /** 构建本地上传文件的公开访问 URL */
   private localUploadUrl(artifactId: string) {
     const baseUrl = (process.env.AGENTHUB_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3001}/api`).replace(/\/$/, "");
     return `${baseUrl}/uploads/${artifactId}/content`;
   }
 
+  /** 获取 OSS 签名 URL，过期时间 600 秒 */
   private async getSignedOssUrl(storageUri: string): Promise<string | undefined> {
     const bucket = process.env.ALIYUN_OSS_BUCKET;
     const publicDomain = process.env.ALIYUN_OSS_PUBLIC_DOMAIN?.replace(/\/$/, "");
@@ -358,6 +370,7 @@ export class ArtifactStorageService {
     return undefined;
   }
 
+  /** 懒加载创建阿里云 OSS 客户端 */
   private async createOssClient(): Promise<OssClient | null> {
     const bucket = process.env.ALIYUN_OSS_BUCKET;
     const region = process.env.ALIYUN_OSS_REGION;
@@ -376,6 +389,7 @@ export class ArtifactStorageService {
     });
   }
 
+  /** 在 artifact_versions 表中插入或更新版本记录 */
   private async recordVersion(artifact: {
     id: string;
     version: number;
@@ -502,6 +516,7 @@ function inferKindFromMime(mimeType: string): HubArtifactKind {
   return "other";
 }
 
+/** 对文本类 MIME 生成预览，超过 100KB 则返回 null */
 export function buildTextAttachmentPreview(mimeType: string, data: Buffer) {
   if (!mimeType.startsWith("text/") && !mimeType.includes("json") && !mimeType.includes("xml")) return null;
   const text = data.toString("utf8");
@@ -509,6 +524,7 @@ export function buildTextAttachmentPreview(mimeType: string, data: Buffer) {
   return text;
 }
 
+/** 从 payload 中解码 base64 二进制数据 */
 function decodeBinary(payload: ArtifactPayload): Buffer | null {
   const dataBase64 = stringValue(payload.dataBase64) ?? stringValue(payload.base64);
   if (dataBase64) return Buffer.from(dataBase64, "base64");
@@ -518,14 +534,17 @@ function decodeBinary(payload: ArtifactPayload): Buffer | null {
   return null;
 }
 
+/** 计算文本的 SHA-256 哈希 */
 function sha256Text(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+/** 计算 Buffer 的 SHA-256 哈希 */
 function sha256Buffer(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
+/** 清理字符串，仅保留字母数字和 . _ - */
 function safeKey(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "artifact";
 }
