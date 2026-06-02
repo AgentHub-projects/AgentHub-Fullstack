@@ -1,20 +1,21 @@
 .agenthubShell {
   display: grid;
-  grid-template-columns: 272px minmax(500px, 1fr) minmax(360px, 420px);
+  grid-template-columns: clamp(280px, 22vw, 340px) minmax(560px, 1fr) clamp(360px, 28vw, 460px);
   width: 100%;
-  height: 100vh;
+  height: 100dvh;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: var(--bg);
 }
 
 .agenthubShell.inspectorCollapsed {
-  grid-template-columns: 272px minmax(500px, 1fr) 56px;
+  grid-template-columns: clamp(280px, 22vw, 340px) minmax(560px, 1fr) 64px;
 }
 
 .authShell {
   display: grid;
-  min-height: 100vh;
+  min-height: 100dvh;
   place-items: center;
   background: var(--bg);
   padding: 24px;
@@ -52,7 +53,7 @@
 }
 
 .authError {
-  color: var(--danger);
+  color: var(--red);
 }
 
 .sessionRail,
@@ -65,11 +66,19 @@
 .sessionRail {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  overflow: auto;
+  gap: 8px;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--bg-panel);
-  padding: 12px;
+  padding: 14px 0 10px;
+}
+
+.imRailTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 0 14px 6px;
 }
 
 .railHeader,
@@ -87,8 +96,9 @@
 }
 
 .railHeader {
-  min-height: 42px;
-  padding: 2px 2px 4px;
+  min-height: 32px;
+  flex: 0 0 auto;
+  padding: 0 14px;
 }
 
 .railHeader > div {
@@ -100,7 +110,7 @@
   display: block;
   overflow: hidden;
   color: var(--ink);
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 760;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -150,6 +160,18 @@
   color: var(--muted);
 }
 
+.iconButton.primaryIconButton {
+  border-color: rgba(25, 103, 210, 0.3);
+  background: var(--brand);
+  color: #fff;
+}
+
+.iconButton.primaryIconButton:hover {
+  border-color: var(--brand-hover);
+  background: var(--brand-hover);
+  color: #fff;
+}
+
 .iconButton:hover,
 .ghostButton:hover,
 .inspectorTabs button:hover,
@@ -178,7 +200,9 @@ textarea:focus-visible {
 
 .statusStack {
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
+  padding: 0 14px;
 }
 
 .projectBinder {
@@ -374,11 +398,12 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: #eef1f4;
   color: var(--muted);
-  padding: 8px 10px;
+  padding: 0 10px;
 }
 
 .sessionSearch input {
@@ -394,9 +419,11 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  flex: 0 0 auto;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+  padding: 0 14px;
   user-select: none;
 }
 
@@ -404,107 +431,6 @@ textarea:focus-visible {
   width: 14px;
   height: 14px;
   accent-color: var(--brand);
-}
-
-.agentContacts {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 10px;
-}
-
-.agentContactsHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.agentContactsHeader strong {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.agentContactsHeader span {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.agentContactList {
-  display: grid;
-  gap: 4px;
-  max-height: 246px;
-  min-width: 0;
-  overflow: auto;
-  padding-right: 2px;
-}
-
-.agentContactItem {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  align-items: start;
-  gap: 9px;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--ink-soft);
-  padding: 7px 8px;
-  text-align: left;
-}
-
-.agentContactItem:hover:not(:disabled) {
-  border-color: var(--line);
-  background: var(--surface-muted);
-}
-
-.agentContactItem:disabled {
-  cursor: wait;
-  opacity: 0.68;
-}
-
-.agentContactMeta {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.agentContactTop {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 6px;
-}
-
-.agentContactTop strong,
-.agentContactMeta > small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agentContactTop strong {
-  flex: 1;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 720;
-}
-
-.agentContactTop small {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.agentContactMeta > small {
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .emptySessionList {
@@ -515,35 +441,37 @@ textarea:focus-visible {
 
 .sessionList {
   display: grid;
+  flex: 1 1 auto;
   align-content: start;
-  gap: 4px;
+  gap: 0;
   min-height: 0;
   overflow: auto;
-  padding-right: 2px;
+  padding: 0;
 }
 
 .sessionItem {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   width: 100%;
+  min-height: 68px;
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--ink-soft);
-  padding: 4px;
+  padding: 8px 14px;
   text-align: left;
 }
 
 .sessionItem:hover {
-  border-color: var(--line);
-  background: var(--surface);
+  background: var(--surface-hover);
 }
 
 .sessionItem.active {
-  border-color: #c9d6f5;
-  background: var(--surface);
+  background: #e8edf3;
   box-shadow: inset 3px 0 0 var(--brand);
   color: var(--ink);
 }
@@ -558,24 +486,50 @@ textarea:focus-visible {
 
 .sessionItemMain {
   display: grid;
-  flex: 1;
+  align-content: center;
   min-width: 0;
   gap: 4px;
+  width: 100%;
+  min-height: 44px;
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 5px 4px 5px 7px;
+  padding: 0;
   text-align: left;
 }
 
-.sessionItemMain > span {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 6px;
+.sessionAvatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1;
 }
 
-.sessionItemMain > span > span,
+.sessionItemTop,
+.sessionItemBottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.sessionTitle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.sessionTitle > span,
 .sessionItem small {
   min-width: 0;
   overflow: hidden;
@@ -583,25 +537,57 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
-.sessionItemMain > span > span {
-  font-weight: 700;
+.sessionItemTop time {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
 }
 
 .sessionItem small {
+  color: var(--muted);
   font-size: 12px;
+}
+
+.sessionStateBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 16px;
+}
+
+.sessionStateBadge.muted {
+  background: var(--surface);
+  color: var(--muted);
 }
 
 .sessionItemActions {
   display: flex;
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  z-index: 2;
+  align-items: center;
   gap: 2px;
   opacity: 0;
+  transform: translateY(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-soft);
+  padding: 2px;
+  pointer-events: none;
 }
 
 .sessionItem:hover .sessionItemActions,
-.sessionItem:focus-within .sessionItemActions,
-.sessionItem.active .sessionItemActions {
+.sessionItem:focus-within .sessionItemActions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .sessionItemActions .iconButton {
@@ -611,7 +597,7 @@ textarea:focus-visible {
 }
 
 .dangerIcon {
-  color: var(--danger);
+  color: var(--red);
 }
 
 .conversationPane {
@@ -623,10 +609,12 @@ textarea:focus-visible {
 }
 
 .conversationHeader {
+  flex-wrap: wrap;
+  align-items: flex-start;
   min-height: 58px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.98);
-  padding: 10px 18px;
+  padding: 12px clamp(16px, 2.2vw, 24px);
 }
 
 .conversationHeader > div:first-child {
@@ -635,6 +623,7 @@ textarea:focus-visible {
 
 .conversationTitleBlock {
   display: grid;
+  min-width: min(360px, 100%);
   gap: 3px;
 }
 
@@ -676,6 +665,9 @@ textarea:focus-visible {
 .headerActions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
   flex: 0 0 auto;
 }
@@ -695,7 +687,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-menu);
   padding: 6px;
 }
 
@@ -790,17 +782,17 @@ textarea:focus-visible {
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-height: 0;
   overflow: auto;
   background: var(--surface);
-  padding: 20px 22px;
+  padding: 24px clamp(18px, 3.4vw, 44px);
 }
 
 .timelineRow,
 .runThread,
 .agentReply {
-  max-width: min(900px, 96%);
+  max-width: min(920px, 100%);
 }
 
 .timelineRow {
@@ -812,6 +804,7 @@ textarea:focus-visible {
 .userRow {
   align-self: flex-end;
   justify-content: flex-end;
+  max-width: min(780px, 100%);
 }
 
 .agentReply,
@@ -830,6 +823,10 @@ textarea:focus-visible {
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
+}
+
+.sessionRail .avatar {
+  border-radius: 50%;
 }
 
 .bubble,
@@ -883,7 +880,7 @@ textarea:focus-visible {
 
 .runThread {
   display: grid;
-  width: min(900px, 96%);
+  width: min(920px, 100%);
   gap: 10px;
   border-left: 2px solid var(--line);
   padding-left: 14px;
@@ -1926,7 +1923,8 @@ textarea:focus-visible {
 .composer {
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.98);
-  padding: 10px 12px 12px;
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
+  padding: 12px clamp(16px, 2.4vw, 28px) 14px;
 }
 
 .composerInputWrap {
@@ -1943,7 +1941,7 @@ textarea:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
   color: var(--muted);
-  margin-bottom: 8px;
+  margin-bottom: 9px;
   padding: 7px 9px;
   font-size: 12px;
   font-weight: 700;
@@ -1965,12 +1963,12 @@ textarea:focus-visible {
 
 .mentionMenu {
   position: absolute;
-  right: 10px;
+  right: 12px;
   bottom: calc(100% + 8px);
   z-index: 20;
   display: grid;
-  width: min(360px, calc(100% - 20px));
-  max-height: 260px;
+  width: min(420px, calc(100% - 24px));
+  max-height: min(280px, 46dvh);
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2034,7 +2032,7 @@ textarea:focus-visible {
 
 .composer textarea {
   width: 100%;
-  min-height: 84px;
+  min-height: 92px;
   max-height: 220px;
   resize: vertical;
   border: 1px solid var(--line-strong);
@@ -2042,7 +2040,7 @@ textarea:focus-visible {
   background: var(--surface);
   color: var(--ink);
   outline: none;
-  padding: 11px 12px;
+  padding: 12px 13px;
   line-height: 1.52;
 }
 
@@ -2052,7 +2050,18 @@ textarea:focus-visible {
 }
 
 .composerBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.composerBar > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hiddenFileInput {
@@ -2099,7 +2108,7 @@ textarea:focus-visible {
 .inspector {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  overflow: auto;
+  overflow: hidden;
   border-left: 1px solid var(--line);
   background: var(--bg-panel);
 }
@@ -2110,18 +2119,18 @@ textarea:focus-visible {
 
 .inspectorTabs {
   display: grid;
-  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
   gap: 6px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  padding: 9px;
+  background: var(--bg-panel);
+  padding: 10px;
 }
 
 .inspectorTabs button {
   gap: 6px;
   min-width: 0;
   min-height: 34px;
-  background: var(--surface-muted);
+  background: var(--surface);
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
@@ -2145,7 +2154,7 @@ textarea:focus-visible {
 }
 
 .inspectorTabs .inspectorToggle {
-  width: 36px;
+  width: 38px;
   padding: 0;
 }
 
@@ -2158,12 +2167,13 @@ textarea:focus-visible {
   align-content: start;
   min-height: 100%;
   border-bottom: 0;
-  padding: 8px;
+  gap: 8px;
+  padding: 10px 8px;
 }
 
 .inspector.collapsed .inspectorTabs button {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 40px;
   padding: 0;
 }
 
@@ -2177,7 +2187,7 @@ textarea:focus-visible {
   gap: 12px;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 16px;
 }
 
 .diffBlock,
@@ -3555,32 +3565,149 @@ div.agentChoice {
   color: var(--brand);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1279px) {
   .agenthubShell,
   .agenthubShell.inspectorCollapsed {
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(300px, 36dvh);
+  }
+
+  .agenthubShell.inspectorCollapsed {
     grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .sessionRail {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .conversationPane {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .inspector,
   .inspector.collapsed {
     grid-column: 1 / -1;
-    min-height: 360px;
+    grid-row: 2;
+    min-height: 0;
     border-top: 1px solid var(--line);
     border-left: 0;
   }
 
   .inspector.collapsed {
-    min-height: auto;
+    min-height: 0;
   }
 
   .inspector.collapsed .inspectorTabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     min-height: auto;
+    gap: 6px;
+    border-bottom: 1px solid var(--line);
+    padding: 9px;
   }
 
   .inspector.collapsed .inspectorTabs button {
     width: auto;
+    height: 36px;
+  }
+}
+
+@media (max-width: 899px) {
+  .agenthubShell,
+  .agenthubShell.inspectorCollapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 30dvh) minmax(0, 1fr) minmax(260px, 32dvh);
+  }
+
+  .agenthubShell.inspectorCollapsed {
+    grid-template-rows: minmax(180px, 30dvh) minmax(0, 1fr) auto;
+  }
+
+  .sessionRail {
+    grid-column: 1;
+    grid-row: 1;
+    gap: 8px;
+    overflow: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 10px;
+  }
+
+  .railHeader {
+    min-height: 36px;
+    padding-bottom: 0;
+  }
+
+  .statusStack {
+    gap: 6px;
+  }
+
+  .sessionSearch {
+    padding: 7px 9px;
+  }
+
+  .archiveToggle {
+    display: none;
+  }
+
+  .conversationPane {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 0;
+  }
+
+  .conversationHeader {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .conversationHeader span {
+    white-space: normal;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .timeline {
+    gap: 12px;
+    padding: 14px 12px;
+  }
+
+  .timelineRow,
+  .runThread,
+  .agentReply,
+  .userRow {
+    max-width: 100%;
+  }
+
+  .runThread {
+    width: 100%;
+    padding-left: 10px;
+  }
+
+  .composer {
+    padding: 10px 12px 12px;
+  }
+
+  .composer textarea {
+    min-height: 78px;
+  }
+
+  .composerBar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .inspector,
+  .inspector.collapsed {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .panelScroll {
+    padding: 12px;
   }
 }
 
@@ -3609,7 +3736,7 @@ div.agentChoice {
   display: grid;
   grid-template-columns: 292px minmax(500px, 1fr) minmax(340px, 420px);
   width: 100%;
-  height: 100vh;
+  height: 100dvh;
   min-width: 0;
   overflow: hidden;
   background: var(--bg);

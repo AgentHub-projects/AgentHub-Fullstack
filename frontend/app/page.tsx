@@ -35,7 +35,6 @@ import {
   RocketOutlined,
   SendOutlined,
   SearchOutlined,
-  TeamOutlined,
 } from "@ant-design/icons";
 import {
   applyFileChange,
@@ -69,6 +68,7 @@ import { MessagePartViewerLayer } from "./workbench/rich-text";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
+  formatTime,
   initials,
   isRunning,
   readDirectAgentId,
@@ -139,7 +139,6 @@ export default function WorkbenchPage() {
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
-  const [creatingContactTemplateId, setCreatingContactTemplateId] = useState<number | null>(null);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
   const [directTemplateId, setDirectTemplateId] = useState<number>(0);
   const [directName, setDirectName] = useState("");
@@ -202,7 +201,6 @@ export default function WorkbenchPage() {
     () => filterInviteTemplates(templates, inviteQuery),
     [templates, inviteQuery],
   );
-  const contactTemplates = useMemo(() => templates.filter((tpl) => tpl.status !== "disabled"), [templates]);
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
 
@@ -494,7 +492,7 @@ export default function WorkbenchPage() {
 
   async function handleCreateGroup() {
     if (createMode === "direct" && !directTemplateId) {
-      setNotice("请选择单聊 Agent 模板");
+      setNotice("请选择用于创建单聊实例的 Agent 模板");
       return;
     }
     if (createMode === "group" && !orchTemplateId) {
@@ -523,31 +521,6 @@ export default function WorkbenchPage() {
     if (agentRes.ok) setAgents(agentRes.data.items);
     closeMentionMenu();
     closeGroupDialog();
-  }
-
-  async function handleCreateDirectFromTemplate(template: AgentTemplateDto) {
-    if (creatingContactTemplateId !== null) return;
-    setCreatingContactTemplateId(template.id);
-    try {
-      const result = await createSession({
-        mode: "direct",
-        directTemplateId: template.id,
-        directProvider: template.defaultProvider,
-        directName: template.name,
-      });
-      if (!result.ok) {
-        setNotice(`创建失败：${result.error}`);
-        return;
-      }
-      setSessions((current) => upsertById(current, result.data).sort(sortSession));
-      setDetail({ session: result.data, ...EMPTY_DETAIL });
-      setActiveSessionId(result.data.id);
-      const agentRes = await listAgents();
-      if (agentRes.ok) setAgents(agentRes.data.items);
-      closeMentionMenu();
-    } finally {
-      setCreatingContactTemplateId(null);
-    }
   }
 
   async function handleSend() {
@@ -910,17 +883,28 @@ export default function WorkbenchPage() {
   return (
     <main className={`agenthubShell ${inspectorCollapsed ? "inspectorCollapsed" : ""}`}>
       <aside className="sessionRail">
+        <div className="imRailTop">
+          <label className="sessionSearch">
+            <SearchOutlined />
+            <input
+              value={sessionSearch}
+              onChange={(event) => setSessionSearch(event.target.value)}
+              placeholder="搜索"
+            />
+          </label>
+          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={openAgentTemplateDialog}>
+            <BranchesOutlined />
+          </button>
+          <button className="iconButton primaryIconButton" type="button" title="新建对话" onClick={openCreateGroupDialog}>
+            <PlusOutlined />
+          </button>
+        </div>
+
         <div className="railHeader">
           <div>
             <strong>AgentHub</strong>
             <span>多 Agent 群聊</span>
           </div>
-          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={openAgentTemplateDialog}>
-            <PlusOutlined />
-          </button>
-          <button className="iconButton" type="button" title="新建对话" onClick={openCreateGroupDialog}>
-            <TeamOutlined />
-          </button>
         </div>
 
         <div className="statusStack">
@@ -1005,14 +989,6 @@ export default function WorkbenchPage() {
           </section>
         </div>
 
-        <label className="sessionSearch">
-          <SearchOutlined />
-          <input
-            value={sessionSearch}
-            onChange={(event) => setSessionSearch(event.target.value)}
-            placeholder="搜索会话、最近消息、Agent"
-          />
-        </label>
         <label className="archiveToggle">
           <input
             type="checkbox"
@@ -1031,42 +1007,6 @@ export default function WorkbenchPage() {
           <span>显示归档</span>
         </label>
 
-        {contactTemplates.length > 0 && (
-          <section className="agentContacts" aria-label="Agent 联系人">
-            <div className="agentContactsHeader">
-              <strong>Agent 联系人</strong>
-              <span>{contactTemplates.length} 个</span>
-            </div>
-            <div className="agentContactList">
-              {contactTemplates.map((tpl) => {
-                const creating = creatingContactTemplateId === tpl.id;
-                return (
-                  <button
-                    key={tpl.id}
-                    className="agentContactItem"
-                    type="button"
-                    title={`和 ${tpl.name} 单聊`}
-                    disabled={creatingContactTemplateId !== null}
-                    onClick={() => void handleCreateDirectFromTemplate(tpl)}
-                  >
-                    <span className="avatar" style={{ background: agentColor(tpl.id) }}>
-                      {initials(tpl.name)}
-                    </span>
-                    <span className="agentContactMeta">
-                      <span className="agentContactTop">
-                        <strong>{tpl.name}</strong>
-                        {creating ? <LoadingOutlined /> : <small>{tpl.defaultProvider}</small>}
-                      </span>
-                      <small>{tpl.description}</small>
-                      <CapabilityTags capabilities={tpl.defaultCapabilities} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
         <nav className="sessionList" aria-label="会话">
           {sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
           {sessions.map((session) => {
@@ -1078,12 +1018,22 @@ export default function WorkbenchPage() {
                 key={session.id}
                 className={`sessionItem ${session.id === activeSessionId ? "active" : ""} ${archived ? "archived" : ""}`}
               >
+                <span className="sessionAvatar" style={{ background: agentColor(session.id) }}>
+                  {initials(session.title)}
+                </span>
                 <button className="sessionItemMain" type="button" onClick={() => void loadSession(session.id)}>
-                  <span>
-                    {session.isPinned && <PushpinFilled />}
-                    <span>{session.title}</span>
+                  <span className="sessionItemTop">
+                    <span className="sessionTitle">
+                      {session.isPinned && <PushpinFilled />}
+                      <span>{session.title}</span>
+                    </span>
+                    <time>{formatTime(session.updatedAt)}</time>
                   </span>
-                  <small>{sessionSubtitle(session)}</small>
+                  <span className="sessionItemBottom">
+                    <small>{sessionListPreview(session)}</small>
+                    {sessionBusy && <span className="sessionStateBadge">运行</span>}
+                    {archived && <span className="sessionStateBadge muted">归档</span>}
+                  </span>
                 </button>
                 <div className="sessionItemActions">
                   <button
@@ -1467,7 +1417,7 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="create-group-title">新建对话</strong>
-                <span>先选择单聊或群聊模式，再选择 Agent 模板</span>
+                <span>单聊会创建 Agent 实例；群聊会创建协作会话</span>
               </div>
             </header>
             <div className="modeSwitch" role="tablist" aria-label="对话模式">
@@ -1513,7 +1463,7 @@ export default function WorkbenchPage() {
                     </select>
                   </label>
                   <label>
-                    Agent 名称
+                    实例名称
                     <input
                       value={directName}
                       onChange={(e) => setDirectName(e.target.value)}
@@ -1918,6 +1868,12 @@ function deploymentTargetLabel(target: DeploymentTarget) {
   if (target === "container") return "容器化部署";
   if (target === "source_archive") return "源码包";
   return "静态站点部署";
+}
+
+function sessionListPreview(session: HubSessionDto) {
+  const timeSuffix = ` · ${formatTime(session.updatedAt)}`;
+  const subtitle = sessionSubtitle(session);
+  return subtitle.endsWith(timeSuffix) ? subtitle.slice(0, -timeSuffix.length) : subtitle;
 }
 
 function CapabilityTags({ capabilities }: { capabilities?: unknown[] }) {
