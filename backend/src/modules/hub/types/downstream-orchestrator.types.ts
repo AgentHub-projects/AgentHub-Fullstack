@@ -1,6 +1,7 @@
 import type { Socket } from "socket.io-client";
 import type { AgentId } from "@agenthub/shared";
 
+/** 下游 Socket.IO 连接记录 */
 export type ConnectionRecord = {
   key: string;
   socket: Socket;
@@ -27,6 +28,7 @@ export type ConnectionRecord = {
   >;
 };
 
+/** ACP 协议消息信封 */
 export type DownstreamEnvelope = {
   jsonrpc?: string;
   id?: string | number;
