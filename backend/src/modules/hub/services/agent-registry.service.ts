@@ -15,14 +15,17 @@ const IDS = {
   reviewer: 4,
 };
 
+/** Agent 注册中心：管理 Agent 和模板的 CRUD，启动时自动种子默认数据 */
 @Injectable()
 export class AgentRegistryService implements OnModuleInit {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /** 模块初始化时播种默认数据 */
   async onModuleInit() {
     await this.seedDefaults();
   }
 
+  /** 根据 provider 名称查找或创建 provider 记录，返回其 ID */
   async resolveProviderId(name: string): Promise<number> {
     const provider = await this.prisma.provider.upsert({
       where: { name },
@@ -32,6 +35,7 @@ export class AgentRegistryService implements OnModuleInit {
     return provider.id;
   }
 
+  /** 加载所有 provider 并构建 ID→名称映射 */
   private async loadProviderNames(): Promise<Map<number, string>> {
     const providers = await this.prisma.provider.findMany();
     const map = new Map<number, string>();
@@ -41,6 +45,7 @@ export class AgentRegistryService implements OnModuleInit {
     return map;
   }
 
+  /** 列出所有 Agent 模板 */
   async listTemplates(): Promise<AgentTemplateDto[]> {
     const [items, providerNames] = await Promise.all([
       this.prisma.agentTemplate.findMany({
@@ -51,6 +56,7 @@ export class AgentRegistryService implements OnModuleInit {
     return items.map((row) => mapTemplate(row, providerNames));
   }
 
+  /** 列出所有未禁用的 Agent */
   async listAgents(): Promise<AgentInstanceDto[]> {
     const [items, providerNames] = await Promise.all([
       this.prisma.agent.findMany({
@@ -63,6 +69,7 @@ export class AgentRegistryService implements OnModuleInit {
     return items.map((row) => mapAgent(row, providerNames));
   }
 
+  /** 获取单个 Agent 详情 */
   async getAgent(id: number): Promise<AgentInstanceDto | null> {
     const [item, providerNames] = await Promise.all([
       this.prisma.agent.findUnique({
@@ -74,6 +81,7 @@ export class AgentRegistryService implements OnModuleInit {
     return item ? mapAgent(item, providerNames) : null;
   }
 
+  /** 批量获取 Agent */
   async getAgents(ids: number[]): Promise<AgentInstanceDto[]> {
     if (ids.length === 0) return [];
     const [items, providerNames] = await Promise.all([
@@ -86,6 +94,7 @@ export class AgentRegistryService implements OnModuleInit {
     return items.map((row) => mapAgent(row, providerNames));
   }
 
+  /** 从模板创建 Agent 实例，自动加入指定会话 */
   async createAgentFromTemplate(
     sessionId: string,
     templateId: number,
@@ -131,6 +140,7 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(agent, providerNames);
   }
 
+  /** 将 agentId 追加到会话的 memberAgentIds 元数据中 */
   private async appendSessionMemberId(sessionId: string, agentId: number) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -148,6 +158,7 @@ export class AgentRegistryService implements OnModuleInit {
     });
   }
 
+  /** 更新 Agent 的名称、描述或 provider */
   async updateAgent(id: number, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
@@ -171,6 +182,7 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(updated, providerNames);
   }
 
+  /** 获取 Agent 的 system prompt */
   async getAgentPrompt(id: number): Promise<{ agentId: number; systemPrompt: string }> {
     const agent = await this.prisma.agent.findUnique({
       where: { id },
@@ -183,6 +195,7 @@ export class AgentRegistryService implements OnModuleInit {
     };
   }
 
+  /** 获取下游 Agent 的完整配置 */
   async getDownstreamConfig(id: number): Promise<DownstreamAgentConfigResponse | null> {
     const [agent, providerNames] = await Promise.all([
       this.prisma.agent.findUnique({
@@ -210,6 +223,7 @@ export class AgentRegistryService implements OnModuleInit {
     };
   }
 
+  /** 软删除 Agent：标记为 disabled，更新关联会话元数据 */
   async deleteAgent(id: number): Promise<void> {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
@@ -245,6 +259,7 @@ export class AgentRegistryService implements OnModuleInit {
     }
   }
 
+  /** 根据基础名称查找可用的唯一 Agent 名称（重名时追加数字后缀） */
   private async nextAgentName(baseName: string): Promise<string> {
     const base = baseName.trim() || "Agent";
     let candidate = base;
@@ -256,6 +271,7 @@ export class AgentRegistryService implements OnModuleInit {
     return candidate;
   }
 
+  /** 获取默认的 orchestrator agent，如果不存在则重新播种 */
   async getDefaultOrchestrator(): Promise<AgentInstanceDto> {
     let agent = await this.prisma.agent.findFirst({
       where: { isDefaultOrchestrator: true },
@@ -275,6 +291,7 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(agent, providerNames);
   }
 
+  /** 播种 4 个默认模板和 4 个默认 Agent：orchestrator、frontend、backend、review */
   private async seedDefaults() {
     // Ensure provider records exist
     const providerClaudeId = await this.resolveProviderId("claude-code");
@@ -381,6 +398,7 @@ export class AgentRegistryService implements OnModuleInit {
     await this.syncAgentIdSequence();
   }
 
+  /** 同步 agents_id_seq 序列值，防止手动指定 ID 后冲突 */
   private async syncAgentIdSequence() {
     await this.prisma.$executeRawUnsafe(`
       SELECT setval(
