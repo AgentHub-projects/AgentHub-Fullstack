@@ -10,6 +10,7 @@ const DEPLOY_TIMEOUT_MS = 30 * 60 * 1000;
 const VERCEL_API_BASE_URL = "https://api.vercel.com";
 const VERCEL_TARGET = "production";
 
+/** 部署服务：Vercel 部署全流程 — 预检、创建项目、启动部署、轮询状态 */
 @Injectable()
 export class DeploymentService {
   constructor(
@@ -17,6 +18,7 @@ export class DeploymentService {
     @Inject(HubRealtimeGateway) private readonly gateway: HubRealtimeGateway,
   ) {}
 
+  /** 部署预检：检查项目绑定、commit SHA、Vercel token 等前置条件 */
   async preflight(sessionId: string): Promise<DeploymentPreflightResponse> {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -47,6 +49,7 @@ export class DeploymentService {
     };
   }
 
+  /** 启动部署：创建部署记录和系统消息，异步触发 Vercel 部署任务 */
   async start(sessionId: string, _input: StartDeploymentRequest = {}) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -120,6 +123,7 @@ export class DeploymentService {
     return { deployment: mapDeployment(deployment), message: syncedMessage ?? mapMessage(message) };
   }
 
+  /** 执行完整 Vercel 部署流程：确保项目存在 → 创建部署 → 轮询结果 */
   private async runDeployJob(deploymentId: string) {
     const deployment = await this.prisma.deployment.findUnique({
       where: { id: deploymentId },
@@ -185,6 +189,7 @@ export class DeploymentService {
     }
   }
 
+  /** 查找或创建 Vercel 项目，同步环境变量 */
   private async ensureVercelProject(
     project: { id: string; name: string; githubUrl: string; metadata: unknown },
     githubRepo: GithubRepository,
@@ -227,6 +232,7 @@ export class DeploymentService {
     return { id: vercelProjectId, name: vercelProjectName };
   }
 
+  /** 根据 VERCEL_DEPLOY_ENV_KEYS 同步环境变量到 Vercel 项目 */
   private async syncVercelEnv(vercelProjectId: string) {
     const keys = parseEnvKeys(process.env.VERCEL_DEPLOY_ENV_KEYS);
     for (const key of keys) {
@@ -244,6 +250,7 @@ export class DeploymentService {
     }
   }
 
+  /** 轮询 Vercel 部署状态直到完成、失败或超时 */
   private async pollJob(deploymentId: string, vercelDeploymentId: string, startedAt: number) {
     if (Date.now() - startedAt > DEPLOY_TIMEOUT_MS) {
       await this.markFailed(deploymentId, "DEPLOY_TIMEOUT");
@@ -291,6 +298,7 @@ export class DeploymentService {
     setTimeout(() => void this.pollJob(deploymentId, vercelDeploymentId, startedAt), POLL_INTERVAL_MS);
   }
 
+  /** 更新部署记录并同步部署消息 */
   private async updateDeployment(deploymentId: string, data: Prisma.DeploymentUpdateArgs["data"]) {
     const existing = await this.prisma.deployment.findUnique({
       where: { id: deploymentId },
@@ -311,6 +319,7 @@ export class DeploymentService {
     return deployment;
   }
 
+  /** 同步部署状态到触发消息，通过 WebSocket 推送 */
   private async syncDeploymentMessage(deploymentId: string) {
     const deployment = await this.prisma.deployment.findUnique({
       where: { id: deploymentId },
@@ -362,6 +371,7 @@ export class DeploymentService {
     return dto;
   }
 
+  /** 标记部署失败 */
   private async markFailed(deploymentId: string, message: string) {
     await this.updateDeployment(deploymentId, {
       status: "failed",
@@ -376,6 +386,7 @@ type GithubRepository = {
   repo: string;
 };
 
+/** 调用 Vercel REST API，自动附加团队 ID 和 Bearer Token */
 async function vercelRequest(path: string, init: RequestInit) {
   const token = process.env.VERCEL_TOKEN?.trim();
   if (!token) throw new Error("VERCEL_TOKEN_NOT_CONFIGURED");
@@ -402,6 +413,7 @@ async function vercelRequest(path: string, init: RequestInit) {
   return payload;
 }
 
+/** 解析 GitHub URL 或 SSH 字符串为 owner/repo */
 function parseGithubRepository(githubUrl: string): GithubRepository | null {
   const normalized = githubUrl.trim().replace(/\.git$/, "");
   const ssh = /^git@github\.com:([^/]+)\/(.+)$/.exec(normalized);
@@ -417,6 +429,7 @@ function parseGithubRepository(githubUrl: string): GithubRepository | null {
   }
 }
 
+/** 构建 Vercel 项目的 slug 名称 */
 function buildVercelProjectName(name: string, projectId: string) {
   const slug = name
     .trim()
