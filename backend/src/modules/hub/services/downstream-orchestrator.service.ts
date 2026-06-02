@@ -13,6 +13,7 @@ const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
 const RECOVERY_TIMEOUT_MS = 3000;
 
+/** 下游编排服务：通过 Socket.IO ACP 协议与下游 Agent 通信，管理连接生命周期和运行编排 */
 @Injectable()
 export class DownstreamOrchestratorService implements OnModuleDestroy {
   private readonly connections = new Map<string, ConnectionRecord>();
@@ -28,6 +29,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     private readonly context: HubContextService,
   ) {}
 
+  /** 模块销毁时断开所有下游 WebSocket 连接 */
   onModuleDestroy() {
     for (const record of this.connections.values()) {
       this.clearIdleTimer(record);
@@ -37,6 +39,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.connections.clear();
   }
 
+  /** 启动运行：建立连接→构建上下文快照→发送 session/prompt */
   async startRun(input: {
     sessionId: string;
     runId: string;
@@ -119,6 +122,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 取消运行：更新状态，发送 session/cancel，跳过已终止的 run */
   async cancelRun(sessionId: string, runId: string, orchestratorAgentId: AgentId) {
     // Skip if the run is already in a terminal state
     const existing = await this.prisma.agentRun.findUnique({
@@ -157,6 +161,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (session) this.gateway.emitSession(mapSession(session));
   }
 
+  /** 关闭会话对应的下游连接 */
   async closeSession(sessionId: string) {
     const record = this.connections.get(sessionId);
     if (!record) return;
@@ -166,6 +171,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.connections.delete(sessionId);
   }
 
+  /** 发送 file/apply_diff ACP 消息应用文件变更 */
   async applyFileChanges(input: {
     sessionId: string;
     runId: string;
@@ -190,6 +196,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
   }
 
+  /** 确保有可用的下游连接用于 apply diff */
   private async ensureApplyConnection(sessionId: string, runId: string) {
     const existing = this.connections.get(sessionId);
     if (existing?.socket.connected) return existing;
@@ -220,18 +227,22 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return record;
   }
 
+  /** 通知下游置顶状态更新 */
   notifyPinUpdated(sessionId: string, payload: { messageId: string; partId?: string; pinned: boolean }) {
     this.sendSessionDelta(sessionId, "pin.updated", payload);
   }
 
+  /** 通知下游成员已加入 */
   notifyMemberAdded(sessionId: string, payload: { agentId: AgentId; description: string }) {
     this.sendSessionDelta(sessionId, "member.added", payload);
   }
 
+  /** 通知下游成员已离开 */
   notifyMemberDeleted(sessionId: string, payload: { agentId: AgentId }) {
     this.sendSessionDelta(sessionId, "member.deleted", payload);
   }
 
+  /** 发送 session/context_delta 给下游 */
   private sendSessionDelta(sessionId: string, type: string, payload: Record<string, unknown>) {
     const record = this.connections.get(sessionId);
     if (!record?.socket.connected) return;
@@ -249,6 +260,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
   }
 
+  /** 建立或复用下游 Socket.IO 连接，完成 ACP initialize + session load/new 握手 */
   private async ensureConnection(
     sessionId: string,
     downstreamUrl: string,
@@ -397,11 +409,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return record;
   }
 
+  /** 更新下游连接最近活跃时间并调度空闲检查 */
   private markDownstreamActivity(record: ConnectionRecord) {
     record.lastActivityAt = Date.now();
     this.scheduleIdleDisconnectCheck(record);
   }
 
+  /** 调度空闲断开检查定时器 */
   private scheduleIdleDisconnectCheck(record: ConnectionRecord) {
     this.clearIdleTimer(record);
     const idleFor = Date.now() - record.lastActivityAt;
@@ -411,6 +425,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }, delay);
   }
 
+  /** 空闲时断开连接：无活跃 run 且无 WebSocket 订阅者则断开 */
   private closeIfIdle(record: ConnectionRecord) {
     if (this.connections.get(record.key) !== record) return;
     if (record.activeRunId) {
@@ -433,6 +448,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }, delay);
   }
 
+  /** 清除空闲断开定时器 */
   private clearIdleTimer(record: ConnectionRecord) {
     if (record.idleTimer) {
       clearTimeout(record.idleTimer);
@@ -440,6 +456,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 通过 JSON-RPC 向下游发送请求并返回 Promise */
   private requestDownstream(
     record: ConnectionRecord,
     method: string,
@@ -462,6 +479,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 
+  /** 处理下游事件：解析 JSON-RPC 请求/响应、session/update 流、session/event 事件 */
   private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
     this.markDownstreamActivity(record);
 
@@ -591,6 +609,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 发送 ACP 确认响应 */
   private ackDownstreamEvent(record: ConnectionRecord, id?: string | number) {
     if (id === undefined) return;
     record.socket.emit("acp:message", {
@@ -600,6 +619,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 
+  /** 发送 ACP 错误响应 */
   private rejectDownstreamEvent(record: ConnectionRecord, id: string | number | undefined, error: unknown) {
     if (id === undefined) return;
     const message = error instanceof Error ? error.message : String(error);
@@ -613,6 +633,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
   }
 
+  /** Mock 模式模拟运行：未配置下游时生成示例事件 */
   private async simulateRun(input: {
     sessionId: string;
     runId: string;
@@ -722,6 +743,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
+  /** 查找会话可复用的下游 session ID */
   private async findReusableDownstreamSessionId(sessionId: string) {
     const agentRunModel = this.prisma.agentRun as any;
     if (typeof agentRunModel.findFirst !== "function") return null;
@@ -736,6 +758,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return run?.downstreamSessionId ?? null;
   }
 
+  /** 下游断开后恢复活跃 run：重新连接并恢复状态 */
   private async recoverActiveRunAfterDisconnect(input: {
     sessionId: string;
     runId: string;
@@ -816,6 +839,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 读取恢复后下游 run 的状态 */
   private async readRecoveredRunStatus(record: ConnectionRecord, runId: string) {
     if (record.loadedActiveRun?.runId) {
       if (record.loadedActiveRun.runId !== runId) throw new Error("DOWNSTREAM_ACTIVE_RUN_MISMATCH");
@@ -828,6 +852,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return stringValue(statusRun.status) ?? "running";
   }
 
+  /** 检查 run 是否已被取消 */
   private async isRunCancelled(runId: string): Promise<boolean> {
     const run = await this.prisma.agentRun.findUnique({
       where: { id: runId },
@@ -836,6 +861,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return run?.status === "cancelled";
   }
 
+  /** 为新会话创建引导上下文快照 */
   private async createBootstrapSnapshot(input: {
     sessionId: string;
     runId: string;
@@ -868,6 +894,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     return contextSnapshot;
   }
 
+  /** 标记 run 完成并推送会话更新 */
   private async markRunCompleted(sessionId: string, runId: string) {
     await this.prisma.agentRun.update({
       where: { id: runId },
@@ -883,6 +910,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.gateway.emitSession(mapSession(session));
   }
 
+  /** 标记 run 失败并推送会话更新 */
   private async markRunFailed(sessionId: string, runId: string, code: string, message: string) {
     await this.prisma.agentRun.update({
       where: { id: runId },
@@ -899,6 +927,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 构建 ACP session/prompt 的输入参数 */
   private async buildPromptInput(
     input: {
       sessionId: string;
@@ -951,6 +980,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     };
   }
 
+  /** 加载会话成员 Agent 简要描述（排除 orchestrator） */
   private async loadSessionAgentBriefs(sessionId: string, orchestratorAgentId: AgentId) {
     const participants = await this.prisma.sessionAgent.findMany({
       where: {
@@ -970,6 +1000,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }));
   }
 
+  /** 完结 run：更新状态，推送事件和会话 */
   private async completeRun(sessionId: string, runId: string, speakerAgentId: AgentId, payload: Record<string, unknown>) {
     await this.prisma.agentRun.update({
       where: { id: runId },
@@ -992,6 +1023,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.gateway.emitSession(mapSession(session));
   }
 
+  /** 标记 run 为失败：更新状态，推送失败事件和会话 */
   private async failRun(sessionId: string, runId: string, speakerAgentId: AgentId, code: string, message: string) {
     await this.prisma.agentRun.update({
       where: { id: runId },
