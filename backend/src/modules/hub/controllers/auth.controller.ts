@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { PublicRoute } from "../auth/public.decorator";
 import {
@@ -10,7 +10,7 @@ import { AuthSessionService } from "../auth/auth-session.service";
 @PublicRoute()
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly authSessions: AuthSessionService) {}
+  constructor(@Inject(AuthSessionService) private readonly authSessions: AuthSessionService) {}
 
   @Get("me")
   async me(@Req() request: Request) {

@@ -1,4 +1,4 @@
-import { Optional } from "@nestjs/common";
+import { Inject, Optional } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -31,7 +31,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   private readonly clientSessions = new Map<string, Set<string>>();
   private readonly sessionSubscriberCounts = new Map<string, number>();
 
-  constructor(@Optional() private readonly authSessions?: AuthSessionService) {}
+  constructor(@Optional() @Inject(AuthSessionService) private readonly authSessions?: AuthSessionService) {}
 
   async handleConnection(client: Socket) {
     if (!this.authSessions || !(await this.authSessions.authenticateCookie(client.handshake.headers.cookie))) {

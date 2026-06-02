@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 import { AuthSessionService } from "./auth-session.service";
@@ -6,7 +6,9 @@ import { AuthSessionService } from "./auth-session.service";
 @Injectable()
 export class AgentHubAuthGuard implements CanActivate {
   constructor(
+    @Inject(Reflector)
     private readonly reflector: Reflector,
+    @Inject(AuthSessionService)
     private readonly authSessions: AuthSessionService,
   ) {}
 
