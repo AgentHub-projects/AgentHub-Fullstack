@@ -13,6 +13,7 @@ type SessionPayload = {
   username: string;
 };
 
+/** 认证会话服务：基于 Redis 管理用户登录会话的全生命周期 */
 @Injectable()
 export class AuthSessionService implements OnModuleDestroy {
   private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
@@ -24,10 +25,12 @@ export class AuthSessionService implements OnModuleDestroy {
     this.redis.on("error", () => undefined);
   }
 
+  /** 模块销毁时断开 Redis 连接 */
   async onModuleDestroy() {
     this.redis.disconnect();
   }
 
+  /** 用户登录：验证凭据后在 Redis 中创建会话，返回 token 和用户信息 */
   async login(username: string, password: string) {
     const normalized = username.trim();
     const user = await this.prisma.user.findUnique({ where: { username: normalized } });
@@ -42,11 +45,13 @@ export class AuthSessionService implements OnModuleDestroy {
     return { token, user: payload };
   }
 
+  /** 用户登出：从 Redis 删除会话 token */
   async logout(cookieHeader: string | string[] | undefined) {
     const token = authCookieToken(cookieHeader);
     if (token) await this.redis.del(sessionKey(token));
   }
 
+  /** 通过 Cookie 认证：解析 token 并从 Redis 获取会话，成功后刷新 TTL */
   async authenticateCookie(cookieHeader: string | string[] | undefined) {
     const token = authCookieToken(cookieHeader);
     if (!token) return null;
@@ -63,6 +68,7 @@ export class AuthSessionService implements OnModuleDestroy {
   }
 }
 
+/** 生成 Redis 会话键名 */
 function sessionKey(token: string) {
   return `agenthub:session:${token}`;
 }
