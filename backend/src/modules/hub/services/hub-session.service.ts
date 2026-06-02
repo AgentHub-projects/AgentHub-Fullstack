@@ -28,6 +28,7 @@ import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
 import { buildLinkPreviewParts, messageJsonWithParts } from "../utils/message-parts";
 
+/** 会话服务：管理会话 CRUD、消息收发、@提及、附件、上下文引用和运行编排 */
 @Injectable()
 export class HubSessionService {
   constructor(
@@ -47,6 +48,7 @@ export class HubSessionService {
     private readonly gateway: HubRealtimeGateway,
   ) {}
 
+  /** 列出会话，支持搜索和归档过滤，置顶优先排序 */
   async listSessions(input: { query?: string; includeArchived?: boolean } = {}) {
     const query = input.query?.trim().toLowerCase() ?? "";
     const sessions = await this.prisma.session.findMany({
@@ -63,6 +65,7 @@ export class HubSessionService {
     return { items: filtered.map(mapSession) };
   }
 
+  /** 创建会话：支持 direct 单聊和 group 群聊模式，自动创建对应的 Agent */
   async createSession(input: CreateHubSessionRequest) {
     const mode = input.mode === "direct" || input.directTemplateId ? "direct" : "group";
     if (mode === "direct" && !input.directTemplateId) throw new BadRequestException("DIRECT_TEMPLATE_REQUIRED");
@@ -135,6 +138,7 @@ export class HubSessionService {
     return dto;
   }
 
+  /** 获取会话完整详情：含消息、运行、事件、产物、文件变更和上下文快照 */
   async getDetail(sessionId: string): Promise<SessionDetailDto> {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -183,6 +187,7 @@ export class HubSessionService {
     };
   }
 
+  /** 添加已有 Agent 作为会话参与者，通知下游 */
   async addParticipant(sessionId: string, input: AddParticipantRequest) {
     const currentSession = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -244,6 +249,7 @@ export class HubSessionService {
     return { session: sessionDto, agent };
   }
 
+  /** 更新会话标题和置顶状态 */
   async updateSession(sessionId: string, input: UpdateHubSessionRequest) {
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
@@ -274,6 +280,7 @@ export class HubSessionService {
     return dto;
   }
 
+  /** 归档会话：关闭下游连接，标记为 archived */
   async archiveSession(sessionId: string) {
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
@@ -290,6 +297,7 @@ export class HubSessionService {
     return dto;
   }
 
+  /** 软删除会话：关闭下游，标记状态为 deleted */
   async deleteSession(sessionId: string) {
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
@@ -306,6 +314,7 @@ export class HubSessionService {
     return dto;
   }
 
+  /** 发送消息主入口：解析 orchestrator/单聊 agent、@提及、附件、链接预览、引用，创建 run 并委托下游执行 */
   async sendMessage(sessionId: string, input: SendHubMessageRequest): Promise<SendHubMessageResponse> {
     const text = input.content.trim();
     if (!text) throw new Error("Message content is required");
@@ -479,6 +488,7 @@ export class HubSessionService {
     };
   }
 
+  /** 置顶/取消置顶消息或消息部件 */
   async pinMessage(sessionId: string, messageId: string, input: PinHubMessageRequest) {
     const message = input.partId
       ? await this.context.setMessagePartPinned(sessionId, messageId, input.partId, input.pinned)
@@ -498,6 +508,7 @@ export class HubSessionService {
     return mapped;
   }
 
+  /** 取消正在运行的 run */
   async cancelRun(sessionId: string, runId: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
     if (!run) throw new Error("Run not found");
@@ -505,6 +516,7 @@ export class HubSessionService {
     return { runId, status: "cancelled" };
   }
 
+  /** 重新发送用户消息以重新生成回复 */
   async regenerateFromMessage(sessionId: string, messageId: string) {
     const message = await this.resolveRegenerationSourceMessage(sessionId, messageId);
     const contentJson = mergeMetadata(message.contentJson, {});
@@ -529,6 +541,7 @@ export class HubSessionService {
     });
   }
 
+  /** 解析重新生成时关联的用户消息 */
   private async resolveRegenerationSourceMessage(sessionId: string, messageId: string) {
     const message = await this.prisma.message.findFirst({
       where: { id: messageId, sessionId },
@@ -550,6 +563,7 @@ export class HubSessionService {
     throw new NotFoundException("USER_MESSAGE_NOT_FOUND");
   }
 
+  /** 应用文件变更：通过下游连接发送 file/apply_diff */
   async applyFileChange(sessionId: string, fileChangeId: string) {
     await this.assertSessionActive(sessionId);
     await this.assertNoActiveRun(sessionId);
@@ -582,12 +596,14 @@ export class HubSessionService {
     return { ok: true, runId: change.runId, fileChangeIds: [change.id], status: "queued" as const };
   }
 
+  /** 解析会话的 orchestrator agent */
   private async resolveSessionOrchestrator(metadata: Record<string, unknown>, requestedAgentId?: number) {
     const orchestratorAgentId = numberMetadataValue(metadata.orchestratorAgentId) ?? requestedAgentId;
     if (orchestratorAgentId) return this.agents.getAgent(orchestratorAgentId);
     return this.agents.getDefaultOrchestrator();
   }
 
+  /** 从消息文本中解析 @提及 的 agent，如果未提及则返回全部成员 */
   private async resolveMentions(sessionId: string, text: string, explicitIds: number[]) {
     const agents = await this.loadSessionMemberAgents(sessionId);
     const ids = new Set(explicitIds);
@@ -609,6 +625,7 @@ export class HubSessionService {
     throw new BadRequestException("MENTIONED_AGENT_NOT_IN_SESSION");
   }
 
+  /** 加载会话的所有成员 Agent */
   private async loadSessionMemberAgents(sessionId: string) {
     const participants = await this.prisma.sessionAgent.findMany({
       where: {
@@ -628,6 +645,7 @@ export class HubSessionService {
     return ordered;
   }
 
+  /** 加载附件对应的消息部件 */
   private async loadAttachmentParts(sessionId: string, attachmentIds: string[]): Promise<HubMessagePartDto[]> {
     if (attachmentIds.length === 0) return [];
     const artifacts = await this.prisma.artifact.findMany({
@@ -657,6 +675,7 @@ export class HubSessionService {
     });
   }
 
+  /** 加载引用消息的上下文文本块 */
   private async loadReferenceBlocks(
     sessionId: string,
     references: Array<{ messageId: string; partId?: string }>,
@@ -677,6 +696,7 @@ export class HubSessionService {
     });
   }
 
+  /** 插入或更新会话-Agent 关联 */
   private async upsertSessionAgent(sessionId: string, agentId: number, role: string, source: string) {
     await this.prisma.sessionAgent.upsert({
       where: { sessionId_agentId: { sessionId, agentId } },
@@ -696,6 +716,7 @@ export class HubSessionService {
     });
   }
 
+  /** 查找会话最新的运行 ID */
   private async findLatestRunId(sessionId: string): Promise<string | null> {
     const run = await this.prisma.agentRun.findFirst({
       where: { sessionId },
@@ -705,6 +726,7 @@ export class HubSessionService {
     return run?.id ?? null;
   }
 
+  /** 断言会话没有活跃的 run，否则抛出异常 */
   private async assertNoActiveRun(sessionId: string) {
     const activeRun = await this.prisma.agentRun.findFirst({
       where: {
@@ -716,6 +738,7 @@ export class HubSessionService {
     if (activeRun) throw new BadRequestException("SESSION_HAS_ACTIVE_RUN");
   }
 
+  /** 断言会话处于活跃状态 */
   private async assertSessionActive(sessionId: string) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -726,6 +749,7 @@ export class HubSessionService {
   }
 }
 
+/** 根据首条消息自动派生命名会话标题，手动标题不会被覆盖 */
 export function deriveTitle(current: string, text: string, metadata: unknown) {
   if (mergeMetadata(metadata, {}).titleSource === "manual") return current;
   if (current && !isAutoTitlePlaceholder(current)) return current;
@@ -794,6 +818,7 @@ function normalizeReferences(input: SendHubMessageRequest) {
   return [...deduped.values()];
 }
 
+/** 检测用户输入是否为部署命令（部署/发布/上线/deploy/vercel 等关键词） */
 export function parseDeploymentCommand(text: string) {
   const normalized = text.replace(/\s+/g, "").toLowerCase();
   if (!normalized || normalized.length > 32) return false;
@@ -818,6 +843,7 @@ export function parseDeploymentCommand(text: string) {
   return isDeployCommand;
 }
 
+/** 获取被引用消息部件的上下文文本 */
 export function referencedPartText(contentJson: unknown, partId: string) {
   const content = mergeMetadata(contentJson, {});
   if (!Array.isArray(content.parts)) return null;
