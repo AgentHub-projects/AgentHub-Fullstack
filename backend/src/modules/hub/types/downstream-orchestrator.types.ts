@@ -1,10 +1,12 @@
 import type { Socket } from "socket.io-client";
 import type { AgentId } from "@agenthub/shared";
+import type { AcpConnection } from "../services/acp-connection";
 
 /** 下游 Socket.IO 连接记录 */
 export type ConnectionRecord = {
   key: string;
   socket: Socket;
+  acp: AcpConnection;
   sessionId: string;
   downstreamSessionId?: string;
   downstreamReady?: Promise<string>;
@@ -17,15 +19,6 @@ export type ConnectionRecord = {
   lastActivityAt: number;
   needsBootstrap: boolean;
   closing?: boolean;
-  nextId: number;
-  pendingRequests: Map<
-    number,
-    {
-      resolve: (result: Record<string, unknown>) => void;
-      reject: (error: Error) => void;
-      timer: NodeJS.Timeout;
-    }
-  >;
 };
 
 /** ACP 协议消息信封 */

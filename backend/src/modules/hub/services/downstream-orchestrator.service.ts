@@ -7,6 +7,7 @@ import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubContextService } from "./context.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
+import { AcpConnection } from "./acp-connection";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
@@ -34,7 +35,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     for (const record of this.connections.values()) {
       this.clearIdleTimer(record);
       record.closing = true;
-      record.socket.disconnect();
+      record.acp.close();
     }
     this.connections.clear();
   }
@@ -84,12 +85,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
       connection.activeRunId = input.runId;
       connection.activeOrchestratorAgentId = input.orchestrator.id;
-      connection.socket.emit("acp:message", {
-        jsonrpc: "2.0",
-        id: connection.nextId++,
-        method: "session/prompt",
-        params: promptInput,
-      });
+      connection.acp.notify("session/prompt", promptInput);
       connection.needsBootstrap = false;
       this.markDownstreamActivity(connection);
 
@@ -139,12 +135,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
     const record = this.connections.get(sessionId);
     if (record?.activeRunId === runId) record.activeRunId = undefined;
-    record?.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id: record.nextId++,
-      method: "session/cancel",
-      params: { runId },
-    });
+    record?.acp.notify("session/cancel", { runId });
     if (record?.socket.connected) this.markDownstreamActivity(record);
     await this.events.append({
       sessionId,
@@ -167,7 +158,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (!record) return;
     this.clearIdleTimer(record);
     record.closing = true;
-    record.socket.disconnect();
+    record.acp.close();
     this.connections.delete(sessionId);
   }
 
@@ -181,17 +172,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const record = await this.ensureApplyConnection(input.sessionId, input.runId);
     const downstreamSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
     if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
-    record.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id: record.nextId++,
-      method: "file/apply_diff",
-      params: {
-        sessionId: downstreamSessionId,
-        agenthubSessionId: input.sessionId,
-        runId: input.runId,
-        fileChangeIds: input.fileChangeIds,
-        changes: input.changes,
-      },
+    record.acp.notify("file/apply_diff", {
+      sessionId: downstreamSessionId,
+      agenthubSessionId: input.sessionId,
+      runId: input.runId,
+      fileChangeIds: input.fileChangeIds,
+      changes: input.changes,
     });
     this.markDownstreamActivity(record);
   }
@@ -246,16 +232,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private sendSessionDelta(sessionId: string, type: string, payload: Record<string, unknown>) {
     const record = this.connections.get(sessionId);
     if (!record?.socket.connected) return;
-    record.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id: record.nextId++,
-      method: "session/context_delta",
-      params: {
-        sessionId: record.downstreamSessionId,
-        agenthubSessionId: sessionId,
-        type,
-        ...payload,
-      },
+    record.acp.notify("session/context_delta", {
+      sessionId: record.downstreamSessionId,
+      agenthubSessionId: sessionId,
+      type,
+      ...payload,
     });
     this.markDownstreamActivity(record);
   }
@@ -279,7 +260,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     if (existing) {
       existing.closing = true;
-      existing.socket.disconnect();
+      existing.acp.close();
       this.connections.delete(sessionId);
     }
 
@@ -287,6 +268,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       transports: ["websocket"],
       reconnection: false,
     });
+
+    await waitForSocket(socket);
+
+    const acp = new AcpConnection(socket, RECOVERY_TIMEOUT_MS);
+    acp.onNotification((env) => void this.handleDownstreamEvent(sessionId, env));
 
     let resolveReady!: (id: string) => void;
     let rejectReady!: (error: Error) => void;
@@ -298,6 +284,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const record: ConnectionRecord = {
       key: sessionId,
       socket,
+      acp,
       sessionId,
       downstreamSessionId: options.downstreamSessionId ?? undefined,
       downstreamReady,
@@ -308,80 +295,17 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       idleTimer: null,
       lastActivityAt: Date.now(),
       needsBootstrap: !options.downstreamSessionId,
-      nextId: 1,
-      pendingRequests: new Map(),
     };
     this.connections.set(sessionId, record);
 
-    socket.on("connect", () => {
-      // ACP v1 initialize
-      socket.emit("acp:message", {
-        jsonrpc: "2.0",
-        id: record.nextId++,
-        method: "initialize",
-        params: {
-          protocolVersion: 1,
-          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        },
-      });
-      const loadSessionId = record.downstreamSessionId;
-      void this.requestDownstream(
-        record,
-        loadSessionId ? "session/load" : "session/new",
-        loadSessionId
-          ? { sessionId: loadSessionId }
-          : {
-              _meta: { agentId: agent.id },
-              mcpServers: [],
-            },
-      )
-        .then((result) => {
-          const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
-          if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
-          record.downstreamSessionId = resultSessionId;
-          record.needsBootstrap = !loadSessionId;
-          record.loadedActiveRun = readActiveRun(result);
-          record.resolveDownstreamReady?.(resultSessionId);
-        })
-        .catch((error) => {
-          if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
-            record.downstreamSessionId = undefined;
-            record.needsBootstrap = true;
-            void this.requestDownstream(record, "session/new", {
-              _meta: { agentId: agent.id },
-              mcpServers: [],
-            })
-              .then((result) => {
-                const resultSessionId = stringValue(result.sessionId);
-                if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
-                record.downstreamSessionId = resultSessionId;
-                record.loadedActiveRun = undefined;
-                record.resolveDownstreamReady?.(resultSessionId);
-              })
-              .catch((fallbackError) => {
-                record.rejectDownstreamReady?.(
-                  fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)),
-                );
-              });
-            return;
-          }
-          record.rejectDownstreamReady?.(error instanceof Error ? error : new Error(String(error)));
-        });
-      this.markDownstreamActivity(record);
-    });
-
-    socket.on("acp:message", (msg: DownstreamEnvelope) => {
-      void this.handleDownstreamEvent(record, msg);
-    });
+    // 注册 old-style 事件监听（socket.io 自定义事件名兼容）
+    socket.on("session/event", (event) => void this.handleDownstreamEvent(sessionId, event));
+    socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event));
+    socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event));
 
     socket.on("disconnect", () => {
       this.clearIdleTimer(record);
       record.needsBootstrap = true;
-      for (const [id, pending] of record.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("DOWNSTREAM_DISCONNECTED"));
-        record.pendingRequests.delete(id);
-      }
       if (this.connections.get(sessionId) === record) {
         this.connections.delete(sessionId);
       }
@@ -400,11 +324,53 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       // socket.io handles reconnection internally
     });
 
-    socket.on("session/event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
-    socket.on("acp:event", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
-    socket.on("message", (event) => void this.handleDownstreamEvent(record, event as DownstreamEnvelope));
+    // ACP handshake
+    const loadSessionId = record.downstreamSessionId;
+    acp.notify("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    });
 
-    await waitForSocket(socket);
+    try {
+      const result = await acp.request(
+        loadSessionId ? "session/load" : "session/new",
+        loadSessionId
+          ? { sessionId: loadSessionId }
+          : { _meta: { agentId: agent.id }, mcpServers: [] },
+      );
+      const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
+      if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
+      record.downstreamSessionId = resultSessionId;
+      record.needsBootstrap = !loadSessionId;
+      record.loadedActiveRun = readActiveRun(result);
+      record.resolveDownstreamReady?.(resultSessionId);
+    } catch (error) {
+      if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
+        record.downstreamSessionId = undefined;
+        record.needsBootstrap = true;
+        try {
+          const result = await acp.request("session/new", {
+            _meta: { agentId: agent.id },
+            mcpServers: [],
+          });
+          const resultSessionId = stringValue(result.sessionId);
+          if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
+          record.downstreamSessionId = resultSessionId;
+          record.loadedActiveRun = undefined;
+          record.resolveDownstreamReady?.(resultSessionId);
+        } catch (fallbackError) {
+          record.rejectDownstreamReady?.(
+            fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)),
+          );
+        }
+        this.markDownstreamActivity(record);
+        this.scheduleIdleDisconnectCheck(record);
+        return record;
+      }
+      record.rejectDownstreamReady?.(error instanceof Error ? error : new Error(String(error)));
+    }
+
+    this.markDownstreamActivity(record);
     this.scheduleIdleDisconnectCheck(record);
     return record;
   }
@@ -437,7 +403,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
     const idleFor = Date.now() - record.lastActivityAt;
     if (idleFor >= IDLE_TIMEOUT_MS && !this.gateway.hasSessionSubscribers(record.sessionId)) {
-      record.socket.disconnect();
+      record.acp.close();
       this.connections.delete(record.key);
       return;
     }
@@ -456,54 +422,16 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
-  /** 通过 JSON-RPC 向下游发送请求并返回 Promise */
-  private requestDownstream(
-    record: ConnectionRecord,
-    method: string,
-    params: Record<string, unknown>,
-    timeoutMs = RECOVERY_TIMEOUT_MS,
-  ): Promise<Record<string, unknown>> {
-    const id = record.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        record.pendingRequests.delete(id);
-        reject(new Error(`${method.toUpperCase()}_TIMEOUT`));
-      }, timeoutMs);
-      record.pendingRequests.set(id, { resolve, reject, timer });
-      record.socket.emit("acp:message", {
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      });
-    });
-  }
-
-  /** 处理下游事件：解析 JSON-RPC 请求/响应、session/update 流、session/event 事件 */
-  private async handleDownstreamEvent(record: ConnectionRecord, envelope: DownstreamEnvelope) {
+  /**
+   * 处理下游通知（session/update、session/event 及 legacy 事件）。
+   * JSON-RPC 响应匹配已由 AcpConnection 内部处理，此处仅处理通知。
+   */
+  private async handleDownstreamEvent(sessionId: string, envelope: DownstreamEnvelope) {
+    const record = this.connections.get(sessionId);
+    if (!record) return;
     this.markDownstreamActivity(record);
 
     const envelopeId = typeof envelope.id === "number" || typeof envelope.id === "string" ? envelope.id : undefined;
-    const requestId =
-      typeof envelopeId === "number"
-        ? envelopeId
-        : typeof envelopeId === "string" && /^\d+$/.test(envelopeId)
-          ? Number(envelopeId)
-          : null;
-    if (requestId && record.pendingRequests.has(requestId)) {
-      const pending = record.pendingRequests.get(requestId)!;
-      record.pendingRequests.delete(requestId);
-      clearTimeout(pending.timer);
-      if (envelope.error) {
-        const message = typeof envelope.error === "string" ? envelope.error : envelope.error.message ?? "DOWNSTREAM_REQUEST_FAILED";
-        pending.reject(new Error(message));
-      } else {
-        pending.resolve(asRecord(envelope.result));
-      }
-      return;
-    }
-
-    const inboundRequestId = envelopeId;
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
 
     // Handle session/update (agent message chunks from downstream)
@@ -537,19 +465,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             });
           }
         }
-        this.ackDownstreamEvent(record, inboundRequestId);
+        if (envelopeId !== undefined) record.acp.respond(envelopeId);
       } catch (error) {
-        this.rejectDownstreamEvent(record, inboundRequestId, error);
-      }
-      return;
-    }
-
-    // Handle JSON-RPC result (e.g. prompt completion)
-    if (envelope.result) {
-      const runId = record.activeRunId;
-      const result = asRecord(envelope.result);
-      if (result.stopReason && runId) {
-        await this.completeRun(record.sessionId, runId, record.activeOrchestratorAgentId ?? 1, { status: "completed", stopReason: result.stopReason });
+        if (envelopeId !== undefined) {
+          const msg = error instanceof Error ? error.message : String(error);
+          record.acp.respondError(envelopeId, errorCode(msg), msg);
+        }
       }
       return;
     }
@@ -558,19 +479,19 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (envelope.method && envelope.method !== "session/event") return;
     const runId = stringValue(params.runId) ?? stringValue(envelope.runId);
     if (!runId) {
-      this.rejectDownstreamEvent(record, inboundRequestId, new Error("RUN_ID_REQUIRED"));
+      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
       return;
     }
 
     // Drop events for runs that have been cancelled
     if (await this.isRunCancelled(runId)) {
-      this.rejectDownstreamEvent(record, inboundRequestId, new Error("RUN_ALREADY_CANCELLED"));
+      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ALREADY_CANCELLED", "RUN_ALREADY_CANCELLED");
       return;
     }
 
     const eventType = stringValue(params.type) ?? stringValue(params.eventType) ?? stringValue(envelope.type);
     if (!eventType) {
-      this.rejectDownstreamEvent(record, inboundRequestId, new Error("EVENT_TYPE_REQUIRED"));
+      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "EVENT_TYPE_REQUIRED", "EVENT_TYPE_REQUIRED");
       return;
     }
     const payload = asRecord(params.payload ?? params);
@@ -603,34 +524,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           stringValue(payload.message) ?? "run failed",
         );
       }
-      this.ackDownstreamEvent(record, inboundRequestId);
+      if (envelopeId !== undefined) record.acp.respond(envelopeId);
     } catch (error) {
-      this.rejectDownstreamEvent(record, inboundRequestId, error);
+      if (envelopeId !== undefined) {
+        const msg = error instanceof Error ? error.message : String(error);
+        record.acp.respondError(envelopeId, errorCode(msg), msg);
+      }
     }
-  }
-
-  /** 发送 ACP 确认响应 */
-  private ackDownstreamEvent(record: ConnectionRecord, id?: string | number) {
-    if (id === undefined) return;
-    record.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id,
-      result: { ok: true },
-    });
-  }
-
-  /** 发送 ACP 错误响应 */
-  private rejectDownstreamEvent(record: ConnectionRecord, id: string | number | undefined, error: unknown) {
-    if (id === undefined) return;
-    const message = error instanceof Error ? error.message : String(error);
-    record.socket.emit("acp:message", {
-      jsonrpc: "2.0",
-      id,
-      error: {
-        code: errorCode(message),
-        message,
-      },
-    });
   }
 
   /** Mock 模式模拟运行：未配置下游时生成示例事件 */
@@ -845,7 +745,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       if (record.loadedActiveRun.runId !== runId) throw new Error("DOWNSTREAM_ACTIVE_RUN_MISMATCH");
       return record.loadedActiveRun.status ?? "running";
     }
-    const result = await this.requestDownstream(record, "run/status", { runId });
+    const result = await record.acp.request("run/status", { runId });
     const statusRun = asRecord(result.run ?? result.activeRun ?? result);
     const statusRunId = stringValue(statusRun.runId) ?? stringValue(statusRun.id);
     if (statusRunId && statusRunId !== runId) throw new Error("DOWNSTREAM_RUN_STATUS_MISMATCH");
