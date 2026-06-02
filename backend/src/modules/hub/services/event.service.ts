@@ -17,6 +17,7 @@ type MessageBuffer = {
   startedAt: Date;
 };
 
+/** 事件服务：接收下游事件、去重排序、应用副作用（消息缓冲、文件变更、产物管理等） */
 @Injectable()
 export class HubEventService {
   private readonly messageBuffers = new Map<string, Map<string, MessageBuffer>>();
@@ -35,6 +36,7 @@ export class HubEventService {
     private readonly context: HubContextService,
   ) {}
 
+  /** 接收并处理事件：去重、排序、持久化、触发副作用 */
   async append(input: {
     sessionId: string;
     runId: string;
@@ -108,6 +110,7 @@ export class HubEventService {
     return dto;
   }
 
+  /** 获取下一次事件的序号 */
   private async nextSeq(runId: string): Promise<number> {
     const result = await this.prisma.agentEvent.aggregate({
       where: { runId },
@@ -116,10 +119,12 @@ export class HubEventService {
     return Math.max(Number(result._max.seq ?? 0n), this.runSeqWatermarks.get(runId) ?? 0) + 1;
   }
 
+  /** 更新内存序号水位标记 */
   private markSeq(runId: string, seq: number) {
     this.runSeqWatermarks.set(runId, Math.max(this.runSeqWatermarks.get(runId) ?? 0, seq));
   }
 
+  /** 创建不持久化的瞬时事件 DTO（用于 message.delta） */
   private transientEvent(
     input: {
       sessionId: string;
@@ -151,6 +156,7 @@ export class HubEventService {
     };
   }
 
+  /** 根据事件类型应用副作用：消息缓冲、持久化、文件变更、产物处理、Git 推送、运行清理 */
   private async applySideEffects(event: HubEventDto) {
     const payload = event.payload;
 
@@ -274,6 +280,7 @@ export class HubEventService {
 
   // ---- Message Buffer Management (dual-track) ----
 
+  /** 将流式 delta 追加到消息缓冲区 */
   private upsertMessageBuffer(event: HubEventDto, speakerAgentId: number | null, speakerKey: string, delta: string) {
     let runBuffers = this.messageBuffers.get(event.runId);
     if (!runBuffers) {
@@ -298,6 +305,7 @@ export class HubEventService {
     buffer.payload = event.payload;
   }
 
+  /** 持久化完成的流式消息，清理缓冲区，记录上下文 */
   private async persistCompletedMessage(event: HubEventDto) {
     const text = textFromPayload(event.payload);
     const speakerAgentId = event.speakerAgentId ?? null;
@@ -350,6 +358,7 @@ export class HubEventService {
     });
   }
 
+  /** 将产物部件附加到最新的助手消息 */
   private async attachArtifactPart(event: HubEventDto, artifact: HubArtifactDto) {
     if (!hasArtifactSpeaker(event)) return;
     const part = artifactMessagePart(artifact);
@@ -370,6 +379,7 @@ export class HubEventService {
     this.gateway.emitMessage(mapMessage(updated));
   }
 
+  /** 查找产物应附着的助手消息 */
   private async findAssistantMessageForArtifact(event: HubEventDto) {
     if (!event.speakerAgentId) return null;
     if (event.speakerAgentId) {
@@ -385,6 +395,7 @@ export class HubEventService {
     }
   }
 
+  /** 缓冲产物部件，等消息持久化时再附加 */
   private bufferArtifactPart(runId: string, key: string, part: HubMessagePartDto) {
     let runParts = this.artifactPartBuffers.get(runId);
     if (!runParts) {
@@ -394,6 +405,7 @@ export class HubEventService {
     runParts.set(key, upsertPart(runParts.get(key) ?? [], part));
   }
 
+  /** 取出并清理缓冲的产物部件 */
   private takeBufferedArtifactParts(runId: string, speakerKey: string) {
     const runParts = this.artifactPartBuffers.get(runId);
     if (!runParts) return [];
@@ -403,6 +415,7 @@ export class HubEventService {
     return parts;
   }
 
+  /** 持久化文件变更记录 */
   private async persistFileChange(event: HubEventDto) {
     const payload = event.payload;
     const before = asObject(payload.before);
@@ -435,6 +448,7 @@ export class HubEventService {
     return mapFileChange(created);
   }
 
+  /** 更新文件变更的 diff 应用状态 */
   private async updateDiffApplyStatus(event: HubEventDto) {
     const ids = fileChangeIdsFromPayload(event.payload);
     if (ids.length === 0) return [];
@@ -471,6 +485,7 @@ export class HubEventService {
     return updates;
   }
 
+  /** 快照时发送会话的产物和文件变更 */
   async emitSnapshotArtifacts(sessionId: string) {
     const [artifacts, fileChanges] = await Promise.all([
       this.prisma.artifact.findMany({ where: { sessionId }, orderBy: { updatedAt: "desc" }, take: 20 }),
