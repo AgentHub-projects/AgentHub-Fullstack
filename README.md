@@ -23,7 +23,8 @@ AgentHub-Fullstack/
 ├── backend/             # NestJS 后端
 │   ├── prisma/          # 数据库 Schema、迁移和 seed
 │   └── src/modules/hub/ # 核心 Hub 模块（REST、WebSocket、上下文、下游连接）
-│       ├── controllers/ # HTTP API 控制器
+│       ├── auth/         # 认证（session、guard、密码工具）
+│       ├── controllers/  # HTTP API 控制器
 │       ├── gateways/    # Socket.IO 实时推送
 │       ├── mappers/     # Prisma 模型到 DTO 的映射
 │       ├── services/    # 会话、事件、上下文、Agent、artifact 等业务服务
@@ -116,6 +117,7 @@ pnpm dev
 | POST | `/api/auth/logout` | 登出 |
 | GET | `/api/agents` | 列出 Agent 实例 |
 | GET | `/api/agents/:id/detail` | Agent 详情，含 `agent`、`template`、下游最小可执行 `config` |
+| GET | `/api/agents/:id/prompt` | 获取 Agent system prompt |
 | POST | `/api/agents` | 从模板创建会话内 Agent 实例 |
 | PATCH | `/api/agents/:id` | 更新实例名称、描述、provider |
 | DELETE | `/api/agents/:id` | 逻辑删除 Agent 实例 |
@@ -123,8 +125,15 @@ pnpm dev
 | POST | `/api/agent-templates` | 创建 Agent 模板 |
 | PATCH | `/api/agent-templates/:id` | 更新 Agent 模板 |
 | DELETE | `/api/agent-templates/:id` | 停用 Agent 模板 |
+| GET | `/api/agent-templates/build` | 列出构建会话 |
+| POST | `/api/agent-templates/build/start` | 开始 Agent 模板构建会话 |
+| GET | `/api/agent-templates/build/:buildId` | 获取构建会话详情 |
+| GET | `/api/agent-templates/build/:buildId/messages` | 获取构建会话消息 |
+| POST | `/api/agent-templates/build/:buildId/messages` | 发送构建消息 |
+| POST | `/api/agent-templates/build/:buildId/confirm` | 确认构建并创建模板 |
 | GET | `/api/downstream/agents/:agentId/config` | 下游公开配置接口；无鉴权，按 `agentId` 参数校验 |
 | GET | `/api/artifacts/:id/content` | 获取产物内容 |
+| GET | `/api/artifacts/:id/versions` | 列出产物版本历史 |
 | GET | `/api/sessions` | 列出会话 |
 | POST | `/api/sessions` | 创建会话 |
 | GET | `/api/sessions/:id` | 会话详情（含消息、事件、产物） |
@@ -135,12 +144,14 @@ pnpm dev
 | POST | `/api/sessions/:id/messages/:mid/pin` | Pin/Unpin 消息 |
 | POST | `/api/sessions/:id/messages/:mid/regenerate` | 基于用户消息重新生成 |
 | POST | `/api/sessions/:id/participants` | 添加 Agent 到群聊 |
+| POST | `/api/sessions/:id/project` | 绑定项目到会话 |
 | POST | `/api/sessions/:id/runs/:rid/cancel` | 取消 Run |
 | POST | `/api/sessions/:id/uploads` | 上传消息附件，最大 50MB |
 | GET | `/api/sessions/:id/events` | 列出事件 |
 | GET | `/api/sessions/:id/artifacts` | 列出产物 |
 | GET | `/api/sessions/:id/file-changes` | 列出文件变更 |
 | POST | `/api/sessions/:id/file-changes/:fid/apply` | 请求下游执行一键应用 Diff |
+| GET | `/api/sessions/:id/deployments/preflight` | 部署前置条件检查 |
 | POST | `/api/sessions/:id/deployments` | 手动触发当前项目最新成功 push commit 的 Vercel Production 部署 |
 | GET/POST/PATCH/DELETE | `/api/projects` | 项目 GitHub 地址绑定所需的最小 CRUD |
 
@@ -160,6 +171,10 @@ pnpm dev
 - 前端调用 `GET /api/agents/:id/detail` 读取实例详情和 `config`
 - 下游运行时调用公开的 `GET /api/downstream/agents/:agentId/config` 获取最小可执行配置
 - 群聊参与者通过 `POST /api/sessions/:id/participants` 动态添加；删除是逻辑删除，历史消息不物理删除
+
+### Agent 模板构建器
+
+通过多轮 LLM 对话引导用户逐步创建 Agent 模板。构建助手依次收集 Agent 名称、描述、System Prompt、工具集和 Provider，最终生成可实例化的模板。支持用户点选预设选项或手动输入。构建会话可通过 REST API 持久化和恢复。
 
 ## 开发命令
 

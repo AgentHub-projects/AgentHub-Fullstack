@@ -19,6 +19,49 @@ Frontend POST /api/sessions/:id/messages
 
 When `DOWNSTREAM_ORCHESTRATOR_WS_URL` is not configured, the backend uses the built-in mock Orchestrator path. That path emits `message.delta`, `file.change`, `artifact.upsert`, `message.completed`, and `run.completed`, so the frontend and persistence flow can be demonstrated without a real Agent runtime.
 
+## Directory Structure
+
+```
+backend/src/
+├── main.ts                      # 应用入口
+├── types/
+│   └── ali-oss.d.ts             # 阿里云 OSS 类型声明
+└── modules/
+    ├── app.module.ts            # 根模块
+    └── hub/
+        ├── hub.module.ts        # Hub 核心模块
+        ├── auth/                # 鉴权
+        │   ├── auth-session.service.ts  # Redis 会话管理
+        │   ├── auth.guard.ts           # 全局鉴权守卫
+        │   ├── auth.utils.ts           # 密码哈希/验证工具
+        │   └── public.decorator.ts     # @PublicRoute 装饰器
+        ├── controllers/         # HTTP 控制器
+        │   ├── hub.controller.ts       # 会话、Agent、项目、产物、上传等 6 个控制器
+        │   ├── auth.controller.ts      # 登录/登出
+        │   ├── agent-template.controller.ts  # 模板 CRUD
+        │   └── builder.controller.ts          # 模板构建器
+        ├── gateways/
+        │   └── hub-realtime.gateway.ts # Socket.IO 实时推送
+        ├── mappers/
+        │   └── hub.mappers.ts         # DB 行 → DTO 映射
+        ├── services/            # 业务服务
+        │   ├── hub-session.service.ts           # 会话管理
+        │   ├── agent-registry.service.ts        # Agent 注册中心
+        │   ├── agent-template.service.ts        # 模板管理
+        │   ├── downstream-orchestrator.service.ts  # 下游编排
+        │   ├── event.service.ts                 # 事件处理
+        │   ├── context.service.ts               # 上下文记忆
+        │   ├── artifact-storage.service.ts      # 产物存储
+        │   ├── builder.service.ts               # 模板构建器
+        │   ├── deployment.service.ts            # Vercel 部署
+        │   └── prisma.service.ts                # 数据库连接
+        ├── types/
+        │   └── downstream-orchestrator.types.ts # ACP 协议类型
+        └── utils/
+            ├── message-parts.ts                 # 消息部件解析
+            └── downstream-orchestrator.utils.ts # 连接工具
+```
+
 ## Stack
 
 - NestJS 11
@@ -131,10 +174,17 @@ pnpm acceptance
 | `POST` | `/api/agents` | Create a session-owned Agent instance from a template |
 | `PATCH` | `/api/agents/:agentId` | Update instance name, description, or provider |
 | `DELETE` | `/api/agents/:agentId` | Logically delete an Agent instance |
+| `GET` | `/api/agents/:agentId/prompt` | Read Agent system prompt |
 | `GET` | `/api/agent-templates` | List Agent templates |
 | `POST` | `/api/agent-templates` | Create an Agent template |
 | `PATCH` | `/api/agent-templates/:templateId` | Update an Agent template |
 | `DELETE` | `/api/agent-templates/:templateId` | Disable an Agent template |
+| `GET` | `/api/agent-templates/build` | List all Agent template build sessions |
+| `POST` | `/api/agent-templates/build/start` | Start a new Agent template build session |
+| `GET` | `/api/agent-templates/build/:buildId` | Read a build session |
+| `GET` | `/api/agent-templates/build/:buildId/messages` | Read build session messages |
+| `POST` | `/api/agent-templates/build/:buildId/messages` | Send a message in a build session |
+| `POST` | `/api/agent-templates/build/:buildId/confirm` | Confirm and create the Agent template from a build session |
 | `GET` | `/api/downstream/agents/:agentId/config` | Public downstream config endpoint; validates `agentId` but does not require frontend auth |
 | `GET` | `/api/sessions` | List sessions |
 | `POST` | `/api/sessions` | Create a session |
@@ -150,7 +200,9 @@ pnpm acceptance
 | `GET` | `/api/sessions/:sessionId/events` | Replay persisted events |
 | `GET` | `/api/sessions/:sessionId/artifacts` | List artifacts |
 | `GET` | `/api/sessions/:sessionId/file-changes` | List file changes |
+| `POST` | `/api/sessions/:sessionId/project` | Bind/unbind a project to the session |
 | `POST` | `/api/sessions/:sessionId/file-changes/:fileChangeId/apply` | Ask downstream to apply a file change |
+| `GET` | `/api/sessions/:sessionId/deployments/preflight` | Check deployment prerequisites |
 | `POST` | `/api/sessions/:sessionId/deployments` | Trigger Vercel Production deployment for the latest successful pushed commit |
 | `GET` | `/api/projects` | List active projects |
 | `POST` | `/api/projects` | Create a project binding target |
