@@ -54,6 +54,7 @@ export type BuilderAssistantContent = {
   draft: BuildTemplateDraft | null;
 };
 
+/** Agent 模板构建器：通过多轮 LLM 对话引导用户创建 Agent 模板，支持 mock 回退 */
 @Injectable()
 export class BuilderService {
   private readonly summaryApiKey = process.env.SUMMARY_API_KEY ?? process.env.OPENAI_API_KEY;
@@ -67,6 +68,7 @@ export class BuilderService {
     @Inject(AgentTemplateService) private readonly templates: AgentTemplateService,
   ) {}
 
+  /** 列出最近的构建会话（最多 50 个） */
   async listSessions(): Promise<ListBuildSessionsResponse> {
     const sessions = await this.prisma.buildSession.findMany({
       orderBy: { updatedAt: "desc" },
@@ -96,6 +98,7 @@ export class BuilderService {
     };
   }
 
+  /** 开始新的构建会话：保存用户消息，调用 LLM 获取首次回复 */
   async startBuild(input: StartBuildRequest): Promise<StartBuildResponse> {
     const session = await this.prisma.buildSession.create({
       data: {
@@ -133,6 +136,7 @@ export class BuilderService {
     };
   }
 
+  /** 发送构建消息并获取 LLM 回复，提取上下文更新会话 */
   async sendMessage(
     buildId: string,
     input: SendBuildMessageRequest,
@@ -191,6 +195,7 @@ export class BuilderService {
     };
   }
 
+  /** 获取构建会话详情 */
   async getSession(buildId: string): Promise<BuildSessionDto> {
     const session = await this.prisma.buildSession.findUnique({
       where: { id: buildId },
@@ -207,6 +212,7 @@ export class BuilderService {
     };
   }
 
+  /** 获取构建会话的所有消息 */
   async getMessages(buildId: string): Promise<BuildMessageDto[]> {
     const messages = await this.prisma.buildMessage.findMany({
       where: { buildSessionId: buildId },
@@ -215,6 +221,7 @@ export class BuilderService {
     return messages.map(toDto);
   }
 
+  /** 确认构建结果：调用 AgentTemplateService 创建模板，标记会话为完成 */
   async confirmBuild(
     buildId: string,
     input: ConfirmBuildRequest,
@@ -253,6 +260,7 @@ export class BuilderService {
     return { template };
   }
 
+  /** 从对话中提取收集到的模板字段（优先使用 draft，回退到启发式正则） */
   private extractContext(
     messages: Array<{ role: string; content: string }>,
   ): CollectedContext {
@@ -286,6 +294,7 @@ export class BuilderService {
     return ctx;
   }
 
+  /** 调用 OpenAI 兼容的 LLM API，失败时回退到 mockReply */
   private async chatLLM(
     buildId: string,
     systemPrompt: string,
@@ -325,6 +334,7 @@ export class BuilderService {
     }
   }
 
+  /** Mock LLM 回复：根据对话轮数逐步引导收集模板信息 */
   private mockReply(
     _buildId: string,
     messages: Array<{ role: string; content: string }>,
@@ -385,6 +395,7 @@ export class BuilderService {
   }
 }
 
+/** 解析构建助手回复 JSON 为 BuilderAssistantContent */
 export function parseBuilderAssistantContent(content: string): BuilderAssistantContent {
   try {
     const parsed = JSON.parse(content.trim()) as Record<string, unknown>;
@@ -398,6 +409,7 @@ export function parseBuilderAssistantContent(content: string): BuilderAssistantC
   }
 }
 
+/** 标准化构建助手回复，如果包含 draft 则用对话上下文丰富 */
 export function normalizeBuilderAssistantReply(
   content: string,
   messages: Array<{ role: string; content: string }>,
@@ -412,6 +424,7 @@ export function normalizeBuilderAssistantReply(
   });
 }
 
+/** 根据对话上下文增强 draft 草稿的字段 */
 export function normalizeDraftForConversation(
   draft: BuildTemplateDraft,
   messages: Array<{ role: string; content: string }>,
