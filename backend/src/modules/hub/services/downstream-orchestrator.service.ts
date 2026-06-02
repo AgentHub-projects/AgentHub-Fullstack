@@ -13,6 +13,9 @@ import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../uti
 const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
 const RECOVERY_TIMEOUT_MS = 3000;
+const ENABLE_SESSION_LOAD = "DOWNSTREAM_ENABLE_SESSION_LOAD";
+const ENABLE_CONTEXT_DELTA = "DOWNSTREAM_ENABLE_CONTEXT_DELTA";
+const ENABLE_FILE_APPLY_DIFF = "DOWNSTREAM_ENABLE_FILE_APPLY_DIFF";
 
 /** 下游编排服务：通过 Socket.IO ACP 协议与下游 Agent 通信，管理连接生命周期和运行编排 */
 @Injectable()
@@ -70,7 +73,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     try {
-      const reusableDownstreamSessionId = await this.findReusableDownstreamSessionId(input.sessionId);
+      const reusableDownstreamSessionId = downstreamFeatureEnabled(ENABLE_SESSION_LOAD)
+        ? await this.findReusableDownstreamSessionId(input.sessionId)
+        : null;
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
         downstreamSessionId: reusableDownstreamSessionId,
       });
@@ -135,7 +140,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
     const record = this.connections.get(sessionId);
     if (record?.activeRunId === runId) record.activeRunId = undefined;
-    record?.acp.notify("session/cancel", { runId });
+    record?.acp.notify("session/cancel", {
+      sessionId: record.downstreamSessionId,
+      runId,
+      _meta: { source: "agenthub", agenthubSessionId: sessionId, runId },
+    });
     if (record?.socket.connected) this.markDownstreamActivity(record);
     await this.events.append({
       sessionId,
@@ -169,15 +178,21 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     fileChangeIds: string[];
     changes: Array<{ id: string; path: string; patch?: string | null; beforeContent?: string | null; afterContent?: string | null }>;
   }) {
+    if (!downstreamFeatureEnabled(ENABLE_FILE_APPLY_DIFF)) {
+      throw new Error("DOWNSTREAM_APPLY_NOT_SUPPORTED");
+    }
     const record = await this.ensureApplyConnection(input.sessionId, input.runId);
     const downstreamSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
     if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
     record.acp.notify("file/apply_diff", {
       sessionId: downstreamSessionId,
-      agenthubSessionId: input.sessionId,
-      runId: input.runId,
       fileChangeIds: input.fileChangeIds,
       changes: input.changes,
+      _meta: {
+        source: "agenthub",
+        agenthubSessionId: input.sessionId,
+        runId: input.runId,
+      },
     });
     this.markDownstreamActivity(record);
   }
@@ -189,6 +204,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
     if (!downstreamUrl) throw new Error("DOWNSTREAM_NOT_CONNECTED");
+    if (!downstreamFeatureEnabled(ENABLE_SESSION_LOAD)) throw new Error("DOWNSTREAM_SESSION_LOAD_NOT_ENABLED");
 
     const run = await this.prisma.agentRun.findUnique({
       where: { id: runId },
@@ -215,17 +231,17 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
   /** 通知下游置顶状态更新 */
   notifyPinUpdated(sessionId: string, payload: { messageId: string; partId?: string; pinned: boolean }) {
-    this.sendSessionDelta(sessionId, "pin.updated", payload);
+    if (downstreamFeatureEnabled(ENABLE_CONTEXT_DELTA)) this.sendSessionDelta(sessionId, "pin.updated", payload);
   }
 
   /** 通知下游成员已加入 */
   notifyMemberAdded(sessionId: string, payload: { agentId: AgentId; description: string }) {
-    this.sendSessionDelta(sessionId, "member.added", payload);
+    if (downstreamFeatureEnabled(ENABLE_CONTEXT_DELTA)) this.sendSessionDelta(sessionId, "member.added", payload);
   }
 
   /** 通知下游成员已离开 */
   notifyMemberDeleted(sessionId: string, payload: { agentId: AgentId }) {
-    this.sendSessionDelta(sessionId, "member.deleted", payload);
+    if (downstreamFeatureEnabled(ENABLE_CONTEXT_DELTA)) this.sendSessionDelta(sessionId, "member.deleted", payload);
   }
 
   /** 发送 session/context_delta 给下游 */
@@ -234,9 +250,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (!record?.socket.connected) return;
     record.acp.notify("session/context_delta", {
       sessionId: record.downstreamSessionId,
-      agenthubSessionId: sessionId,
       type,
       ...payload,
+      _meta: {
+        source: "agenthub",
+        agenthubSessionId: sessionId,
+      },
     });
     this.markDownstreamActivity(record);
   }
@@ -298,11 +317,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     };
     this.connections.set(sessionId, record);
 
-    // 注册 old-style 事件监听（socket.io 自定义事件名兼容）
-    socket.on("session/event", (event) => void this.handleDownstreamEvent(sessionId, event));
-    socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event));
-    socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event));
-
     socket.on("disconnect", () => {
       this.clearIdleTimer(record);
       record.needsBootstrap = true;
@@ -310,13 +324,23 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         this.connections.delete(sessionId);
       }
       if (record.activeRunId && !record.closing) {
-        void this.recoverActiveRunAfterDisconnect({
-          sessionId,
-          runId: record.activeRunId,
-          orchestratorAgentId: record.activeOrchestratorAgentId ?? 1,
-          downstreamSessionId: record.downstreamSessionId,
-          downstreamUrl,
-        });
+        if (downstreamFeatureEnabled(ENABLE_SESSION_LOAD)) {
+          void this.recoverActiveRunAfterDisconnect({
+            sessionId,
+            runId: record.activeRunId,
+            orchestratorAgentId: record.activeOrchestratorAgentId ?? 1,
+            downstreamSessionId: record.downstreamSessionId,
+            downstreamUrl,
+          });
+        } else {
+          void this.failRun(
+            sessionId,
+            record.activeRunId,
+            record.activeOrchestratorAgentId ?? 1,
+            "DOWNSTREAM_DISCONNECTED",
+            "downstream disconnected",
+          );
+        }
       }
     });
 
@@ -325,7 +349,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     // ACP handshake
-    const loadSessionId = record.downstreamSessionId;
+    const loadSessionId = downstreamFeatureEnabled(ENABLE_SESSION_LOAD) ? record.downstreamSessionId : undefined;
     acp.notify("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
@@ -336,7 +360,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         loadSessionId ? "session/load" : "session/new",
         loadSessionId
           ? { sessionId: loadSessionId }
-          : { _meta: { agentId: agent.id }, mcpServers: [] },
+          : { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] },
       );
       const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
       if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
@@ -350,7 +374,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         record.needsBootstrap = true;
         try {
           const result = await acp.request("session/new", {
-            _meta: { agentId: agent.id },
+            _meta: { agentId: String(agent.id), agenthubSessionId: sessionId },
             mcpServers: [],
           });
           const resultSessionId = stringValue(result.sessionId);
@@ -439,11 +463,15 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       try {
         const update = params.update;
         const content = asRecord(typeof update === "object" ? update : {});
+        const meta = asRecord(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
-        const runId = record.activeRunId;
+        const runId = stringValue(meta.runId);
+        if (!runId) {
+          if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
+          return;
+        }
         if (text && runId) {
-          const meta = asRecord(params._meta ?? (content as any)._meta);
           const speaker = stringValue(meta.agentId) ?? "agent";
           const speakerAgentId = agentIdValue(meta.agentId);
           await this.events.append({
@@ -475,9 +503,10 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       return;
     }
 
-    // Legacy session/event handling
+    // Handle structured session/event reports from downstream agents.
     if (envelope.method && envelope.method !== "session/event") return;
-    const runId = stringValue(params.runId) ?? stringValue(envelope.runId);
+    const meta = asRecord(params._meta);
+    const runId = stringValue(meta.runId);
     if (!runId) {
       if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
       return;
@@ -489,17 +518,14 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       return;
     }
 
-    const eventType = stringValue(params.type) ?? stringValue(params.eventType) ?? stringValue(envelope.type);
+    const eventType = stringValue(params.type) ?? stringValue(params.eventType);
     if (!eventType) {
       if (envelopeId !== undefined) record.acp.respondError(envelopeId, "EVENT_TYPE_REQUIRED", "EVENT_TYPE_REQUIRED");
       return;
     }
     const payload = asRecord(params.payload ?? params);
 
-    const speakerAgentId =
-      agentIdValue(params.speaker) ??
-      agentIdValue(payload.speaker) ??
-      agentIdValue(envelope.speaker);
+    const speakerAgentId = agentIdValue(meta.agentId);
 
     try {
       await this.events.append({
@@ -843,39 +869,43 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     bootstrap: boolean,
   ) {
     const snapshot = input.context?.snapshotJson;
-
-    const base = {
-      sessionId: downstreamSessionId,
-      runId: input.runId,
-      agenthubSessionId: input.sessionId,
-      messageId: input.userMessageId,
-      agentId: input.orchestrator.id,
-      prompt: [{ text: input.promptText, type: "text" }],
-      mentionedAgentIds: input.mentionedAgents.map((agent) => agent.id),
-      messageContext: input.messageContext ?? {},
-    };
-
-    if (!bootstrap) {
-      return {
-        ...base,
-        promptMode: "incremental",
-      };
-    }
-
-    const systemPrompt = input.orchestrator.template?.systemPrompt;
-    const agents = await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id);
+    const promptMode = bootstrap ? "bootstrap" : "incremental";
+    const agents = bootstrap ? await this.loadSessionAgentBriefs(input.sessionId, input.orchestrator.id) : [];
+    const promptText = renderAgentGatewayPrompt({
+      promptText: input.promptText,
+      promptMode,
+      contextText: bootstrap ? input.context?.promptText : undefined,
+      messageContext: input.messageContext,
+      mentionedAgents: input.mentionedAgents,
+      agents,
+    });
 
     return {
-      ...base,
-      promptMode: "bootstrap",
-      contextSnapshotId: input.context?.id ?? null,
-      ...(systemPrompt ? { orchestratorSystemPrompt: systemPrompt } : {}),
-      ...(agents.length > 0 ? { agents } : {}),
-      pins: snapshot?.pins ?? [],
-      memory: {
-        summary: snapshot?.summary ?? "",
-        recent: snapshot?.recent ?? [],
-        retrieved: snapshot?.retrieved ?? [],
+      sessionId: downstreamSessionId,
+      prompt: [{ type: "text", text: promptText }],
+      _meta: {
+        source: "agenthub",
+        agenthubSessionId: input.sessionId,
+        runId: input.runId,
+        messageId: input.userMessageId,
+        orchestratorAgentId: String(input.orchestrator.id),
+        mentionedAgentIds: input.mentionedAgents.map((agent) => String(agent.id)),
+        contextSnapshotId: input.context?.id ?? null,
+        promptMode,
+        ...(bootstrap && input.orchestrator.template?.systemPrompt
+          ? { orchestratorSystemPrompt: input.orchestrator.template.systemPrompt }
+          : {}),
+        ...(bootstrap && agents.length > 0 ? { agents } : {}),
+        ...(bootstrap
+          ? {
+              pins: snapshot?.pins ?? [],
+              memory: {
+                summary: snapshot?.summary ?? "",
+                recent: snapshot?.recent ?? [],
+                retrieved: snapshot?.retrieved ?? [],
+              },
+            }
+          : {}),
       },
     };
   }
@@ -946,6 +976,54 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       if (session) this.gateway.emitSession(mapSession(session));
     }
   }
+}
+
+function renderAgentGatewayPrompt(input: {
+  promptText: string;
+  promptMode: "bootstrap" | "incremental";
+  contextText?: string;
+  messageContext?: Record<string, unknown>;
+  mentionedAgents: AgentInstanceDto[];
+  agents: Array<{ agentId: AgentId; description: string }>;
+}) {
+  const sections = [
+    `# AgentHub Request (${input.promptMode})`,
+    input.contextText ? `## Session Context\n${input.contextText}` : "",
+    input.mentionedAgents.length > 0
+      ? `## Mentioned Agents\n${input.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
+      : "",
+    input.agents.length > 0
+      ? `## Available Worker Agents\n${input.agents.map((agent) => `- ${agent.agentId}: ${agent.description}`).join("\n")}`
+      : "",
+    messageContextPrompt(input.messageContext),
+    `## Current User Request\n${input.promptText}`,
+  ];
+  return sections.filter((section) => section.trim().length > 0).join("\n\n");
+}
+
+function messageContextPrompt(context?: Record<string, unknown>) {
+  if (!context || Object.keys(context).length === 0) return "";
+  const text = safeJson(context, 12000);
+  return text ? `## Current Message Context\n${text}` : "";
+}
+
+function safeJson(value: unknown, maxLength: number) {
+  try {
+    const rendered = JSON.stringify(value, jsonReplacer, 2);
+    return rendered.length > maxLength ? `${rendered.slice(0, maxLength)}\n...[truncated]` : rendered;
+  } catch {
+    return "";
+  }
+}
+
+function jsonReplacer(_key: string, value: unknown) {
+  if (typeof value === "string" && value.length > 4000) return `${value.slice(0, 4000)}...[truncated]`;
+  return value;
+}
+
+function downstreamFeatureEnabled(name: string) {
+  const value = process.env[name];
+  return value === "1" || value === "true" || value === "yes";
 }
 
 function agentIdValue(value: unknown): AgentId | undefined {

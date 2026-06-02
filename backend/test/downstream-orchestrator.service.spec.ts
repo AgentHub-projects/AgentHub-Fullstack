@@ -69,19 +69,28 @@ type StartRunInput = Parameters<DownstreamOrchestratorService["startRun"]>[0];
 
 describe("DownstreamOrchestratorService prompt transfer", () => {
   const originalUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
+  const originalSessionLoad = process.env.DOWNSTREAM_ENABLE_SESSION_LOAD;
+  const originalContextDelta = process.env.DOWNSTREAM_ENABLE_CONTEXT_DELTA;
+  const originalApplyDiff = process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF;
 
   beforeEach(() => {
     socketMock.sockets.length = 0;
     socketMock.io.mockClear();
     process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL = "http://downstream.test/acp";
+    delete process.env.DOWNSTREAM_ENABLE_SESSION_LOAD;
+    delete process.env.DOWNSTREAM_ENABLE_CONTEXT_DELTA;
+    delete process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF;
   });
 
   afterEach(() => {
     process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL = originalUrl;
+    restoreEnv("DOWNSTREAM_ENABLE_SESSION_LOAD", originalSessionLoad);
+    restoreEnv("DOWNSTREAM_ENABLE_CONTEXT_DELTA", originalContextDelta);
+    restoreEnv("DOWNSTREAM_ENABLE_FILE_APPLY_DIFF", originalApplyDiff);
     vi.useRealTimers();
   });
 
-  it("sends bootstrap payload on the first downstream prompt", async () => {
+  it("sends Gateway-friendly bootstrap payload on the first downstream prompt", async () => {
     const service = createService();
 
     await startRunWithDownstreamSession(service, createRunInput("run-1", "请实现登录页"), "downstream-session-1");
@@ -91,31 +100,38 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       reconnection: false,
     });
     const params = lastPromptParams();
+    expect(Object.keys(params).sort()).toEqual(["_meta", "prompt", "sessionId"]);
     expect(params.sessionId).toBe("downstream-session-1");
-    expect(params.agenthubSessionId).toBe("session-1");
-    expect(params.promptMode).toBe("bootstrap");
-    expect(params.prompt).toEqual([{ text: "请实现登录页", type: "text" }]);
-    expect(params.mentionedAgentIds).toEqual([]);
-    expect(params.messageId).toBe("message-run-1");
-    expect(params.agentId).toBe(1);
-    expect(params.contextSnapshotId).toBe("context-id");
-    expect(params.orchestratorSystemPrompt).toBe("orchestrator system prompt");
-    expect(params.agents).toEqual([
+    expect(params.prompt[0].type).toBe("text");
+    expect(params.prompt[0].text).toContain("请实现登录页");
+    expect(params.prompt[0].text).toContain("rendered context prompt should not be sent");
+    expect(params.prompt[0].text).toContain("前端成员描述");
+    expect(params._meta).toEqual(expect.objectContaining({
+      source: "agenthub",
+      agenthubSessionId: "session-1",
+      runId: "run-1",
+      messageId: "message-run-1",
+      orchestratorAgentId: "1",
+      mentionedAgentIds: [],
+      contextSnapshotId: "context-id",
+      promptMode: "bootstrap",
+      orchestratorSystemPrompt: "orchestrator system prompt",
+    }));
+    expect(params._meta.agents).toEqual([
       { agentId: 2, description: "前端成员描述" },
       { agentId: 3, description: "后端模板描述" },
     ]);
-    expect(params.memory.summary).toBe("摘要记忆");
-    expect(params.memory.retrieved).toEqual([
+    expect(params._meta.memory.summary).toBe("摘要记忆");
+    expect(params._meta.memory.retrieved).toEqual([
       expect.objectContaining({ id: "retrieved-1", text: "召回记忆" }),
     ]);
-    expect(params.memory.recent).toEqual([
+    expect(params._meta.memory.recent).toEqual([
       expect.objectContaining({ id: "recent-1", text: "最近历史" }),
     ]);
-    expect(params.pins).toEqual([
+    expect(params._meta.pins).toEqual([
       expect.objectContaining({ id: "pin-1", kind: "message", text: "本轮 pin" }),
     ]);
-    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 1 });
-    expect(JSON.stringify(params)).not.toContain("rendered context prompt should not be sent");
+    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: "1", agenthubSessionId: "session-1" });
   });
 
   it("uses the current run agent id when creating a downstream session", async () => {
@@ -128,7 +144,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       "downstream-session-1",
     );
 
-    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: 9 });
+    expect(firstRequestParams("session/new")._meta).toEqual({ agentId: "9", agenthubSessionId: "session-1" });
   });
 
   it("passes mentioned agent ids to the downstream prompt", async () => {
@@ -150,7 +166,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       "downstream-session-1",
     );
 
-    expect(lastPromptParams().mentionedAgentIds).toEqual([2]);
+    expect(lastPromptParams()._meta.mentionedAgentIds).toEqual(["2"]);
+    expect(lastPromptParams().prompt[0].text).toContain("frontend-agent (2)");
   });
 
   it("sends only the current prompt while the downstream connection is alive", async () => {
@@ -162,10 +179,10 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(1);
     expect(params.sessionId).toBe("downstream-session-1");
-    expect(params.promptMode).toBe("incremental");
-    expect(params.prompt).toEqual([{ text: "第二次需求", type: "text" }]);
-    expect(params.pins).toBeUndefined();
-    expect(params.memory).toBeUndefined();
+    expect(params._meta.promptMode).toBe("incremental");
+    expect(params.prompt[0].text).toContain("第二次需求");
+    expect(params._meta.pins).toBeUndefined();
+    expect(params._meta.memory).toBeUndefined();
     expect(JSON.stringify(params)).not.toContain("最近历史");
     expect(JSON.stringify(params)).not.toContain("摘要记忆");
   });
@@ -180,12 +197,14 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     const params = lastPromptParams();
     expect(socketMock.io).toHaveBeenCalledTimes(2);
     expect(params.sessionId).toBe("downstream-session-2");
-    expect(params.promptMode).toBe("bootstrap");
-    expect(params.prompt).toEqual([{ text: "断线后的需求", type: "text" }]);
-    expect(params.memory.summary).toBe("摘要记忆");
-    expect(params.memory.recent).toEqual([
+    expect(params._meta.promptMode).toBe("bootstrap");
+    expect(params.prompt[0].text).toContain("断线后的需求");
+    expect(params.prompt[0].text).toContain("rendered context prompt should not be sent");
+    expect(params._meta.memory.summary).toBe("摘要记忆");
+    expect(params._meta.memory.recent).toEqual([
       expect.objectContaining({ id: "recent-1", text: "最近历史" }),
     ]);
+    expect(requestFor(socketMock.sockets[1], "session/load")).toBeUndefined();
   });
 
   it("keeps idle downstream connections while frontend subscribers exist", async () => {
@@ -195,7 +214,16 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 
     gateway.hasSessionSubscribers.mockReturnValue(true);
     await startRunWithDownstreamSession(service, createRunInput("run-1", "保持连接"), "downstream-session-1");
-    socketMock.sockets[0].trigger("acp:message", { jsonrpc: "2.0", id: 99, result: { stopReason: "end_turn" } });
+    socketMock.sockets[0].trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 99,
+      method: "session/event",
+      params: {
+        type: "run.completed",
+        _meta: { runId: "run-1" },
+        payload: { status: "completed" },
+      },
+    });
     await flushMicrotasks();
 
     await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS);
@@ -204,6 +232,71 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     gateway.hasSessionSubscribers.mockReturnValue(false);
     await vi.advanceTimersByTimeAsync(IDLE_RECHECK_MS);
     expect(socketMock.sockets[0].disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles session/update chunks with _meta run and speaker ids", async () => {
+    const events = { append: vi.fn().mockResolvedValue({}) };
+    const service = createService({ events });
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "流式回复"), "downstream-session-1");
+    events.append.mockClear();
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 55,
+      method: "session/update",
+      params: {
+        update: {
+          text: "完成一部分",
+          sessionUpdate: "agent_message_stop",
+          _meta: { runId: "run-1", agentId: "2" },
+        },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(events.append).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      eventType: "message.delta",
+      speakerAgentId: 2,
+      payload: { text: "完成一部分", speaker: "2" },
+    }));
+    expect(events.append).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      eventType: "message.completed",
+      speakerAgentId: 2,
+      payload: { text: "完成一部分", speaker: "2" },
+    }));
+    expect(responseFor(socket, 55)).toEqual({ jsonrpc: "2.0", id: 55, result: { ok: true } });
+  });
+
+  it("rejects session/update chunks without _meta.runId", async () => {
+    const events = { append: vi.fn().mockResolvedValue({}) };
+    const service = createService({ events });
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "缺少 run"), "downstream-session-1");
+    events.append.mockClear();
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 56,
+      method: "session/update",
+      params: {
+        update: {
+          text: "不会落库",
+          _meta: { agentId: "2" },
+        },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(events.append).not.toHaveBeenCalled();
+    expect(responseFor(socket, 56)).toEqual({
+      jsonrpc: "2.0",
+      id: 56,
+      error: {
+        code: "RUN_ID_REQUIRED",
+        message: "RUN_ID_REQUIRED",
+      },
+    });
   });
 
   it("acks inbound session events only after persistence succeeds", async () => {
@@ -217,8 +310,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       id: 77,
       method: "session/event",
       params: {
-        runId: "run-1",
         type: "message.completed",
+        _meta: { runId: "run-1", agentId: "2" },
         payload: { text: "完成" },
       },
     });
@@ -227,6 +320,7 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(events.append).toHaveBeenCalledWith(expect.objectContaining({
       runId: "run-1",
       eventType: "message.completed",
+      speakerAgentId: 2,
       payload: { text: "完成" },
     }));
     expect(responseFor(socket, 77)).toEqual({ jsonrpc: "2.0", id: 77, result: { ok: true } });
@@ -243,8 +337,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       id: "event-1",
       method: "session/event",
       params: {
-        runId: "run-1",
         type: "message.completed",
+        _meta: { runId: "run-1" },
         payload: { text: "完成" },
       },
     });
@@ -260,6 +354,35 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     });
   });
 
+  it("rejects session events without _meta.runId", async () => {
+    const events = { append: vi.fn().mockResolvedValue({}) };
+    const service = createService({ events });
+    const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "事件缺少 run"), "downstream-session-1");
+    events.append.mockClear();
+
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: 66,
+      method: "session/event",
+      params: {
+        runId: "run-1",
+        type: "message.completed",
+        payload: { text: "不会落库" },
+      },
+    });
+    await flushMicrotasks();
+
+    expect(events.append).not.toHaveBeenCalled();
+    expect(responseFor(socket, 66)).toEqual({
+      jsonrpc: "2.0",
+      id: 66,
+      error: {
+        code: "RUN_ID_REQUIRED",
+        message: "RUN_ID_REQUIRED",
+      },
+    });
+  });
+
   it("does not append downstream terminal run events twice", async () => {
     const { service, prisma, events } = createServiceHarness();
     const socket = await startRunWithDownstreamSession(service, createRunInput("run-1", "终态事件"), "downstream-session-1");
@@ -270,8 +393,8 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
       id: 88,
       method: "session/event",
       params: {
-        runId: "run-1",
         type: "run.completed",
+        _meta: { runId: "run-1" },
         payload: { status: "completed" },
       },
     });
@@ -286,7 +409,21 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(responseFor(socket, 88)).toEqual({ jsonrpc: "2.0", id: 88, result: { ok: true } });
   });
 
-  it("loads the downstream session before applying a diff when no socket is connected", async () => {
+  it("rejects diff apply by default while AgentGateway does not support it", async () => {
+    const { service } = createServiceHarness();
+
+    await expect(service.applyFileChanges({
+      sessionId: "session-1",
+      runId: "run-1",
+      fileChangeIds: ["change-1"],
+      changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+    })).rejects.toThrow("DOWNSTREAM_APPLY_NOT_SUPPORTED");
+    expect(socketMock.sockets.length).toBe(0);
+  });
+
+  it("loads the downstream session before applying a diff when optional support is enabled", async () => {
+    process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF = "true";
+    process.env.DOWNSTREAM_ENABLE_SESSION_LOAD = "true";
     const { service, prisma } = createServiceHarness();
     prisma.agentRun.findUnique.mockResolvedValue({
       orchestratorAgentId: 1,
@@ -303,23 +440,29 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 
     const socket = socketMock.sockets.at(-1);
     expect(socket).toBeDefined();
-    expect(firstRequestParams("session/load")).toEqual({ sessionId: "downstream-session-1" });
+    const load = requestFor(socket!, "session/load");
+    expect(load?.params).toEqual({ sessionId: "downstream-session-1" });
 
-    socket!.trigger("acp:message", { jsonrpc: "2.0", id: 2, result: { sessionId: "downstream-session-1" } });
+    socket!.trigger("acp:message", { jsonrpc: "2.0", id: load!.id, result: { sessionId: "downstream-session-1" } });
     await pending;
 
     const apply = requestFor(socket!, "file/apply_diff");
     expect(apply?.params).toEqual({
       sessionId: "downstream-session-1",
-      agenthubSessionId: "session-1",
-      runId: "run-1",
       fileChangeIds: ["change-1"],
       changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+      _meta: {
+        source: "agenthub",
+        agenthubSessionId: "session-1",
+        runId: "run-1",
+      },
     });
     expect(requestFor(socket!, "session/new")).toBeUndefined();
   });
 
   it("does not create a new downstream session when diff apply session load fails", async () => {
+    process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF = "true";
+    process.env.DOWNSTREAM_ENABLE_SESSION_LOAD = "true";
     const { service, prisma } = createServiceHarness();
     prisma.agentRun.findUnique.mockResolvedValue({
       orchestratorAgentId: 1,
@@ -336,9 +479,10 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
 
     const socket = socketMock.sockets.at(-1);
     expect(socket).toBeDefined();
+    const load = requestFor(socket!, "session/load");
     socket!.trigger("acp:message", {
       jsonrpc: "2.0",
-      id: 2,
+      id: load!.id,
       error: { code: "SESSION_NOT_FOUND", message: "SESSION_NOT_FOUND" },
     });
 
@@ -512,9 +656,19 @@ async function startRunWithDownstreamSession(
   await flushMicrotasks();
   const socket = socketMock.sockets.at(-1);
   expect(socket).toBeDefined();
-  socket!.trigger("acp:message", { jsonrpc: "2.0", id: 2, result: { sessionId: downstreamSessionId } });
+  const request = requestFor(socket!, "session/new") ?? requestFor(socket!, "session/load");
+  expect(request).toBeDefined();
+  socket!.trigger("acp:message", { jsonrpc: "2.0", id: request!.id, result: { sessionId: downstreamSessionId } });
   await pending;
   return socket!;
+}
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }
 
 async function flushMicrotasks() {
