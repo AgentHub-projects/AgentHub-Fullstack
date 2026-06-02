@@ -26,6 +26,7 @@ import { HubEventService } from "./services/event.service";
 import { HubSessionService } from "./services/hub-session.service";
 import { PrismaService } from "./services/prisma.service";
 
+/** Hub 核心模块，注册所有控制器、服务、网关和全局鉴权守卫 */
 @Module({
   controllers: [
     AuthController,
