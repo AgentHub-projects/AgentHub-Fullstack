@@ -29,6 +29,7 @@ const PINNED_PART_TEXT_LIMIT = 20_000;
 const RECENT_CODE_PART_LIMIT = 3;
 const RECENT_CODE_PART_TEXT_LIMIT = 2_000;
 
+/** 上下文服务：管理会话上下文记忆，包括短期缓冲压缩、向量召回、快照构建 */
 @Injectable()
 export class HubContextService {
   private readonly tokenBudget = Number(process.env.CONTEXT_TOKEN_BUDGET ?? 9000);
@@ -41,10 +42,12 @@ export class HubContextService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /** 粗略估算 token 数量：字符数 / 4 */
   estimateTokens(text: string): number {
     return Math.max(1, Math.ceil(text.length / 4));
   }
 
+  /** 记录一条上下文条目：持久化、存储嵌入向量、追加到短期缓冲 */
   async recordContextItem(input: {
     sessionId: string;
     sourceType: string;
@@ -73,6 +76,7 @@ export class HubContextService {
     return item;
   }
 
+  /** 设置消息的置顶状态 */
   async setMessagePinned(sessionId: string, messageId: string, pinned: boolean) {
     const message = await this.prisma.message.update({
       where: { id: messageId },
@@ -101,6 +105,7 @@ export class HubContextService {
     return message;
   }
 
+  /** 设置消息部件的置顶状态 */
   async setMessagePartPinned(sessionId: string, messageId: string, partId: string, pinned: boolean) {
     const message = await this.prisma.message.findFirst({ where: { id: messageId, sessionId } });
     if (!message) throw new Error("Message not found");
@@ -145,6 +150,7 @@ export class HubContextService {
     });
   }
 
+  /** 构建上下文快照：收集置顶、近期消息、向量召回和摘要，按 token 预算裁剪 */
   async buildSnapshot(input: {
     sessionId: string;
     runId?: string;
@@ -240,6 +246,7 @@ export class HubContextService {
 
   // ---- Incremental Summary Chain ----
 
+  /** 加载会话的长期摘要链 */
   async loadSummaryChain(sessionId: string): Promise<LongTermSummaryDto[]> {
     const rows = await this.prisma.longTermSummary.findMany({
       where: { sessionId },
@@ -248,6 +255,7 @@ export class HubContextService {
     return rows.map(mapLongTermSummary);
   }
 
+  /** 追加文本到短期缓冲，达到限制时触发压缩 */
   private async appendShortTermBuffer(sessionId: string, text: string) {
     let buffer = shortTermBuffers.get(sessionId);
     if (!buffer) {
@@ -263,6 +271,7 @@ export class HubContextService {
     }
   }
 
+  /** 压缩短期缓冲：调用 LLM 生成摘要并存储到长期摘要链 */
   private async compressShortTerm(
     sessionId: string,
     buffer: { events: string[]; tokenCount: number },
@@ -285,6 +294,7 @@ export class HubContextService {
     buffer.tokenCount = 0;
   }
 
+  /** 调用摘要 LLM 生成中文摘要，失败时回退到截断 */
   private async invokeSummaryLLM(text: string): Promise<string> {
     if (!this.summaryApiKey || !this.summaryBaseUrl) {
       // Fallback: simple truncation
@@ -322,6 +332,7 @@ export class HubContextService {
     }
   }
 
+  /** 获取下一个长期摘要序号 */
   private async getNextSeq(sessionId: string): Promise<number> {
     const result = await this.prisma.longTermSummary.aggregate({
       where: { sessionId },
@@ -332,6 +343,7 @@ export class HubContextService {
 
   // ---- Embedding & Vector Recall ----
 
+  /** 从候选项中按 token 预算贪婪选择条目 */
   private selectWithinBudget(
     items: ContextSnapshotItem[],
     budget: number,
@@ -351,6 +363,7 @@ export class HubContextService {
     return result;
   }
 
+  /** 通过 pgvector 向量检索上下文，回退到词法搜索 */
   private async recallByPgvector(sessionId: string, text: string, limit: number): Promise<ContextRow[]> {
     const embedding = await this.createEmbedding(text);
     if (embedding) {
@@ -397,6 +410,7 @@ export class HubContextService {
       .slice(0, limit);
   }
 
+  /** 生成并存储上下文条目的嵌入向量 */
   private async persistEmbedding(contextItemId: string, sessionId: string, text: string) {
     const embedding = await this.createEmbedding(text);
     if (!embedding) return;
@@ -420,6 +434,7 @@ export class HubContextService {
     }
   }
 
+  /** 调用 OpenAI 兼容嵌入 API 生成向量 */
   private async createEmbedding(text: string): Promise<number[] | null> {
     const apiKey = process.env.OPENAI_API_KEY ?? process.env.OPENAI_COMPATIBLE_API_KEY;
     const baseUrl = (process.env.OPENAI_COMPATIBLE_BASE_URL ?? process.env.OPENAI_BASE_URL)?.replace(/\/$/, "");
@@ -493,6 +508,7 @@ function partText(part: Record<string, unknown>) {
   return messagePartContextText(part);
 }
 
+/** 将消息部件序列化为上下文文本 */
 export function messagePartContextText(part: Record<string, unknown>) {
   const metadata = objectValue(part.metadata);
   const lines = [
@@ -520,6 +536,7 @@ export function messagePartContextText(part: Record<string, unknown>) {
   return lines.join("\n").slice(0, PINNED_PART_TEXT_LIMIT);
 }
 
+/** 将消息对象序列化为快照上下文文本，附带最近代码部件摘要 */
 export function snapshotMessageContextText(message: {
   role?: unknown;
   agentId?: unknown;
