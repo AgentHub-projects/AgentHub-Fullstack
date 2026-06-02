@@ -47,7 +47,7 @@ describe("Hub controller session write guards", () => {
     const deployments = { start: vi.fn() };
     const controller = new HubSessionController({} as any, prisma as any, {} as any, deployments as any);
 
-    await expect(controller.startDeployment("session-1", { target: "static" })).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
+    await expect(controller.startDeployment("session-1", {})).rejects.toThrow("SESSION_HAS_ACTIVE_RUN");
 
     expect(deployments.start).not.toHaveBeenCalled();
   });

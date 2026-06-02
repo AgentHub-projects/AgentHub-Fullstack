@@ -3,7 +3,6 @@ import type {
   AddParticipantRequest,
   AgentInstanceDto,
   CreateHubSessionRequest,
-  DeploymentTarget,
   HubMessagePartDto,
   PinHubMessageRequest,
   SendHubMessageRequest,
@@ -320,7 +319,7 @@ export class HubSessionService {
     await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
-    const deploymentTarget = parseDeploymentCommandTarget(text);
+    const deploymentCommand = parseDeploymentCommand(text);
     const directAgentId = numberMetadataValue(metadata.directAgentId);
     const isDirect = metadata.mode === "direct" || Boolean(directAgentId);
     const runAgent = isDirect
@@ -397,8 +396,7 @@ export class HubSessionService {
       source: "agenthub_backend",
       payload: {
         status: "queued",
-        command: deploymentTarget ? "deployment" : undefined,
-        deploymentTarget,
+        command: deploymentCommand ? "deployment" : undefined,
         orchestratorAgentId: runAgent.id,
         mode: isDirect ? "direct" : "group",
         mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
@@ -406,10 +404,10 @@ export class HubSessionService {
       },
     });
 
-    if (deploymentTarget) {
+    if (deploymentCommand) {
       let deploymentResult: Awaited<ReturnType<DeploymentService["start"]>>;
       try {
-        deploymentResult = await this.deployments.start(sessionId, { target: deploymentTarget });
+        deploymentResult = await this.deployments.start(sessionId, {});
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
         await this.prisma.agentRun.update({
@@ -430,7 +428,6 @@ export class HubSessionService {
           payload: {
             status: "failed",
             command: "deployment",
-            deploymentTarget,
             message: messageText,
           },
         });
@@ -449,7 +446,6 @@ export class HubSessionService {
         payload: {
           status: "completed",
           command: "deployment",
-          deploymentTarget,
         },
       });
       return {
@@ -798,27 +794,28 @@ function normalizeReferences(input: SendHubMessageRequest) {
   return [...deduped.values()];
 }
 
-export function parseDeploymentCommandTarget(text: string): DeploymentTarget | null {
+export function parseDeploymentCommand(text: string) {
   const normalized = text.replace(/\s+/g, "").toLowerCase();
-  if (!normalized || normalized.length > 32) return null;
-  if (normalized.includes("不是") || normalized.includes("不要") || normalized.includes("解释")) return null;
-  const isDeployCommand =
-    normalized.includes("部署") ||
-    normalized.includes("发布") ||
-    normalized.includes("deploy") ||
-    normalized.includes("打包") ||
-    normalized.includes("源码包");
-  if (!isDeployCommand) return null;
-  if (normalized.includes("容器") || normalized.includes("container") || normalized.includes("docker")) return "container";
+  if (!normalized || normalized.length > 32) return false;
+  if (normalized.includes("不是") || normalized.includes("不要") || normalized.includes("解释")) return false;
   if (
+    normalized.includes("容器") ||
+    normalized.includes("container") ||
+    normalized.includes("docker") ||
     normalized.includes("源码") ||
     normalized.includes("打包") ||
     normalized.includes("archive") ||
     normalized.includes("source")
   ) {
-    return "source_archive";
+    return false;
   }
-  return "static";
+  const isDeployCommand =
+    normalized.includes("部署") ||
+    normalized.includes("发布") ||
+    normalized.includes("上线") ||
+    normalized.includes("deploy") ||
+    normalized.includes("vercel");
+  return isDeployCommand;
 }
 
 export function referencedPartText(contentJson: unknown, partId: string) {

@@ -2,19 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HubSessionService,
   deriveTitle,
-  parseDeploymentCommandTarget,
+  parseDeploymentCommand,
   referencedPartText,
 } from "../src/modules/hub/services/hub-session.service";
 
 const now = new Date("2026-06-02T09:00:00.000Z");
 
 describe("HubSessionService deployment command parsing", () => {
-  it("maps chat deployment commands to deployment targets", () => {
-    expect(parseDeploymentCommandTarget("部署")).toBe("static");
-    expect(parseDeploymentCommandTarget("请部署到容器")).toBe("container");
-    expect(parseDeploymentCommandTarget("源码打包")).toBe("source_archive");
-    expect(parseDeploymentCommandTarget("deploy container")).toBe("container");
-    expect(parseDeploymentCommandTarget("帮我解释一下部署流程，这不是触发部署")).toBeNull();
+  it("detects generic Vercel deployment commands only", () => {
+    expect(parseDeploymentCommand("部署")).toBe(true);
+    expect(parseDeploymentCommand("发布到 Vercel")).toBe(true);
+    expect(parseDeploymentCommand("请部署到容器")).toBe(false);
+    expect(parseDeploymentCommand("源码打包")).toBe(false);
+    expect(parseDeploymentCommand("deploy container")).toBe(false);
+    expect(parseDeploymentCommand("帮我解释一下部署流程，这不是触发部署")).toBe(false);
   });
 });
 
@@ -233,14 +234,15 @@ describe("HubSessionService deployment command lifecycle", () => {
   it("completes the command run after deployment starts successfully", async () => {
     const run = runRow({ status: "queued" });
     const completedRun = runRow({ status: "completed", completedAt: now });
-    const deploymentMessage = messageRow({ id: "deployment-message", role: "system", contentText: "静态站点排队" });
+    const deploymentMessage = messageRow({ id: "deployment-message", role: "system", contentText: "Vercel 部署排队" });
     const prisma = createDeploymentCommandPrisma(run, completedRun);
-    const service = createDeploymentCommandService(prisma, {
+    const deployments = {
       start: vi.fn().mockResolvedValue({
         deployment: { id: "deployment-1", commitSha: "abcdef123456" },
         message: deploymentMessage,
       }),
-    });
+    };
+    const service = createDeploymentCommandService(prisma, deployments);
 
     const result = await service.sendMessage("session-1", { content: "部署" });
 
@@ -253,6 +255,7 @@ describe("HubSessionService deployment command lifecycle", () => {
     }));
     expect(result.run.status).toBe("completed");
     expect(result.messages?.map((message) => message.id)).toEqual(["message-1", "deployment-message"]);
+    expect(deployments.start).toHaveBeenCalledWith("session-1", {});
   });
 
   it("marks the command run failed when deployment cannot start", async () => {

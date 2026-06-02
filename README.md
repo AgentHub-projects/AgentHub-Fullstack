@@ -76,9 +76,10 @@ SUMMARY_API_KEY=sk-xxx
 SUMMARY_BASE_URL=https://api.deepseek.com/v1
 CONTEXT_SUMMARY_MODEL=deepseek-chat
 
-# 可选：部署服务
-DEPLOY_SERVICE_URL=http://localhost:4001
-DEPLOY_SERVICE_API_KEY=change-me
+# 可选：Vercel 一键部署
+VERCEL_TOKEN=vercel_xxx
+VERCEL_TEAM_ID=team_xxx
+VERCEL_DEPLOY_ENV_KEYS=NEXT_PUBLIC_API_URL
 ```
 
 ### 安装与启动
@@ -140,7 +141,7 @@ pnpm dev
 | GET | `/api/sessions/:id/artifacts` | 列出产物 |
 | GET | `/api/sessions/:id/file-changes` | 列出文件变更 |
 | POST | `/api/sessions/:id/file-changes/:fid/apply` | 请求下游执行一键应用 Diff |
-| POST | `/api/sessions/:id/deployments` | 手动触发当前项目最新成功 push commit 的部署 |
+| POST | `/api/sessions/:id/deployments` | 手动触发当前项目最新成功 push commit 的 Vercel Production 部署 |
 | GET/POST/PATCH/DELETE | `/api/projects` | 项目 GitHub 地址绑定所需的最小 CRUD |
 
 ## 核心概念

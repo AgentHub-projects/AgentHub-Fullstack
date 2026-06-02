@@ -165,6 +165,11 @@ export class HubSessionController {
     return this.sessions.applyFileChange(sessionId, fileChangeId);
   }
 
+  @Get(":sessionId/deployments/preflight")
+  preflightDeployment(@Param("sessionId") sessionId: string) {
+    return this.deployments.preflight(sessionId);
+  }
+
   @Post(":sessionId/deployments")
   async startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
     await assertSessionWritable(this.prisma, sessionId);

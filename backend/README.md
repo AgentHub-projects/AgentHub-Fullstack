@@ -61,9 +61,10 @@ ALIYUN_OSS_ACCESS_KEY_ID=...
 ALIYUN_OSS_ACCESS_KEY_SECRET=...
 ARTIFACT_OSS_PREFIX=agenthub/artifacts
 
-# Optional deployment service. AgentHub polls this service every 3 seconds.
-DEPLOY_SERVICE_URL=http://localhost:4001
-DEPLOY_SERVICE_API_KEY=change-me
+# Optional Vercel one-click deployment.
+VERCEL_TOKEN=vercel_xxx
+VERCEL_TEAM_ID=team_xxx
+VERCEL_DEPLOY_ENV_KEYS=NEXT_PUBLIC_API_URL
 ```
 
 ## Local Setup
@@ -150,7 +151,7 @@ pnpm acceptance
 | `GET` | `/api/sessions/:sessionId/artifacts` | List artifacts |
 | `GET` | `/api/sessions/:sessionId/file-changes` | List file changes |
 | `POST` | `/api/sessions/:sessionId/file-changes/:fileChangeId/apply` | Ask downstream to apply a file change |
-| `POST` | `/api/sessions/:sessionId/deployments` | Trigger deployment for the latest successful pushed commit |
+| `POST` | `/api/sessions/:sessionId/deployments` | Trigger Vercel Production deployment for the latest successful pushed commit |
 | `GET` | `/api/projects` | List active projects |
 | `POST` | `/api/projects` | Create a project binding target |
 | `PATCH` | `/api/projects/:projectId` | Update project metadata |
