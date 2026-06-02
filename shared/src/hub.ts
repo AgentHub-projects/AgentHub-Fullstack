@@ -129,15 +129,20 @@ export interface DeploymentDto {
   completedAt?: ISODateString | null;
 }
 
-export type DeploymentTarget = "static" | "container" | "source_archive";
-
-export interface StartDeploymentRequest {
-  target?: DeploymentTarget;
-}
+export interface StartDeploymentRequest {}
 
 export interface StartDeploymentResponse {
   deployment: DeploymentDto;
   message: HubMessageDto;
+}
+
+export interface DeploymentPreflightResponse {
+  canDeploy: boolean;
+  missing: string[];
+  projectBound: boolean;
+  latestSuccessfulPushCommitSha: string | null;
+  vercelConfigured: boolean;
+  vercelProjectBound: boolean;
 }
 
 export interface HubMessageDto {
@@ -223,6 +228,7 @@ export type HubEventType =
   | "artifact.upsert"
   | "artifact.chunk"
   | "artifact.complete"
+  | "git.push.completed"
   | "run.completed"
   | "run.failed"
   | "run.cancelled"

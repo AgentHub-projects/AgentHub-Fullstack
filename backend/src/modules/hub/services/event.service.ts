@@ -3,7 +3,7 @@ import type { HubArtifactDto, HubEventDto, HubEventType, HubMessagePartDto } fro
 import { ArtifactStorageService } from "./artifact-storage.service";
 import { HubContextService } from "./context.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
-import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage } from "../mappers/hub.mappers";
+import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage, mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { messageJsonWithParts } from "../utils/message-parts";
 
@@ -247,16 +247,21 @@ export class HubEventService {
           select: { metadata: true },
         });
         const metadata = asObject(session?.metadata);
-        await this.prisma.session.update({
+        const updated = await this.prisma.session.update({
           where: { id: event.sessionId },
           data: {
+            updatedAt: new Date(),
             metadata: {
               ...metadata,
               latestSuccessfulPushCommitSha: commitSha,
+              latestSuccessfulPushBranch: stringValue(payload.branch) ?? metadata.latestSuccessfulPushBranch ?? null,
+              latestSuccessfulPushRemoteUrl: stringValue(payload.remoteUrl) ?? metadata.latestSuccessfulPushRemoteUrl ?? null,
               latestSuccessfulPushRunId: event.runId,
             } as any,
           },
+          include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
         });
+        this.gateway.emitSession(mapSession(updated));
       }
     }
 

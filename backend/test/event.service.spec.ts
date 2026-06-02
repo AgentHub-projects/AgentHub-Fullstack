@@ -276,6 +276,42 @@ describe("HubEventService artifact message parts", () => {
       sourceId: "change-before-after",
     }));
   });
+
+  it("stores pushed commit metadata and broadcasts the updated session", async () => {
+    const { service, prisma, gateway } = createService();
+    prisma.session.findUnique.mockResolvedValue({ metadata: { mode: "group" } });
+    prisma.session.update.mockImplementation(async ({ data }: any) =>
+      sessionRow({ metadata: data.metadata, updatedAt: now }),
+    );
+
+    await service.append({
+      sessionId: "session-1",
+      runId: "run-1",
+      eventType: "git.push.completed",
+      payload: {
+        commitSha: "abcdef1234567890",
+        branch: "main",
+        remoteUrl: "https://github.com/acme/agenthub",
+      },
+    });
+
+    expect(prisma.session.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "session-1" },
+      data: expect.objectContaining({
+        metadata: expect.objectContaining({
+          latestSuccessfulPushCommitSha: "abcdef1234567890",
+          latestSuccessfulPushBranch: "main",
+          latestSuccessfulPushRemoteUrl: "https://github.com/acme/agenthub",
+          latestSuccessfulPushRunId: "run-1",
+        }),
+      }),
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    }));
+    expect(gateway.emitSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: "session-1",
+      metadata: expect.objectContaining({ latestSuccessfulPushCommitSha: "abcdef1234567890" }),
+    }));
+  });
 });
 
 function createService() {
@@ -312,12 +348,17 @@ function createService() {
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    session: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
   };
   const gateway = {
     emitEvent: vi.fn(),
     emitArtifact: vi.fn(),
     emitMessage: vi.fn(),
     emitFileChange: vi.fn(),
+    emitSession: vi.fn(),
   };
   const artifacts = {
     upsertArtifact: vi.fn(),
@@ -334,6 +375,20 @@ function createService() {
     artifacts,
     context,
     service: new HubEventService(prisma as any, gateway as any, artifacts as any, context as any),
+  };
+}
+
+function sessionRow(overrides: Record<string, any> = {}) {
+  return {
+    id: "session-1",
+    title: "测试会话",
+    status: "active",
+    projectId: null,
+    metadata: {},
+    runs: [],
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
   };
 }
 
