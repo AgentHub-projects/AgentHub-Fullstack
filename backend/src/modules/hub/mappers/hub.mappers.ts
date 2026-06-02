@@ -17,25 +17,30 @@ import type {
 
 type Row = Record<string, any>;
 
+/** 安全转换为对象，非对象值返回 {} */
 export function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+/** 安全转换为数组，非数组值返回 [] */
 export function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/** 将 Date/字符串/null 转换为 ISO 字符串，空值返回 epoch */
 export function iso(value: Date | string | null | undefined): string {
   if (!value) return new Date(0).toISOString();
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+/** 将 Date/字符串/null 转换为 ISO 字符串或 null */
 export function maybeIso(value: Date | string | null | undefined): string | null {
   return value ? iso(value) : null;
 }
 
+/** 将数据库行映射为 AgentTemplateDto */
 export function mapTemplate(row: Row, providerNames?: Map<number, string>): AgentTemplateDto {
   return {
     id: row.id,
@@ -53,6 +58,7 @@ export function mapTemplate(row: Row, providerNames?: Map<number, string>): Agen
   };
 }
 
+/** 将数据库行映射为 AgentInstanceDto */
 export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentInstanceDto {
   return {
     id: row.id,
@@ -69,6 +75,7 @@ export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentIn
   };
 }
 
+/** 将数据库行映射为 HubSessionDto */
 export function mapSession(row: Row): HubSessionDto {
   const metadata = asObject(row.metadata);
   return {
@@ -84,6 +91,7 @@ export function mapSession(row: Row): HubSessionDto {
   };
 }
 
+/** 将数据库行映射为 ProjectDto */
 export function mapProject(row: Row): ProjectDto {
   return {
     id: row.id,
@@ -97,6 +105,7 @@ export function mapProject(row: Row): ProjectDto {
   };
 }
 
+/** 将数据库行映射为 DeploymentDto */
 export function mapDeployment(row: Row): DeploymentDto {
   return {
     id: row.id,
@@ -115,6 +124,7 @@ export function mapDeployment(row: Row): DeploymentDto {
   };
 }
 
+/** 将数据库行映射为 HubMessageDto，含 parts 解析 */
 export function mapMessage(row: Row): HubMessageDto {
   const contentJson = asObject(row.contentJson);
   const contentText = row.contentText ?? "";
@@ -137,6 +147,7 @@ export function mapMessage(row: Row): HubMessageDto {
   };
 }
 
+/** 从 contentJson 和 contentText 提取消息部件数组 */
 function messageParts(contentJson: Record<string, unknown>, contentText: string): HubMessagePartDto[] {
   const pinnedPartIds = new Set(
     Array.isArray(contentJson.pinnedPartIds)
@@ -151,6 +162,7 @@ function messageParts(contentJson: Record<string, unknown>, contentText: string)
   return [{ id: "part_1", type: "text", text: contentText, pinned: pinnedPartIds.has("part_1") }];
 }
 
+/** 标准化单个消息部件 */
 function normalizeMessagePart(value: unknown, index: number, pinnedPartIds: Set<string>): HubMessagePartDto | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -168,6 +180,7 @@ function normalizeMessagePart(value: unknown, index: number, pinnedPartIds: Set<
   };
 }
 
+/** 将数据库行映射为 HubRunDto */
 export function mapRun(row: Row): HubRunDto {
   return {
     id: row.id,
@@ -189,6 +202,7 @@ export function mapRun(row: Row): HubRunDto {
   };
 }
 
+/** 将数据库行映射为 HubEventDto */
 export function mapEvent(row: Row): HubEventDto {
   return {
     id: row.id,
@@ -206,6 +220,7 @@ export function mapEvent(row: Row): HubEventDto {
   };
 }
 
+/** 将数据库行映射为 HubArtifactDto */
 export function mapArtifact(row: Row): HubArtifactDto {
   return {
     id: row.id,
@@ -229,6 +244,7 @@ export function mapArtifact(row: Row): HubArtifactDto {
   };
 }
 
+/** 将数据库行映射为 HubArtifactVersionDto */
 export function mapArtifactVersion(row: Row): HubArtifactVersionDto {
   return {
     id: row.id,
@@ -249,6 +265,7 @@ export function mapArtifactVersion(row: Row): HubArtifactVersionDto {
   };
 }
 
+/** 将数据库行映射为 HubFileChangeDto */
 export function mapFileChange(row: Row): HubFileChangeDto {
   return {
     id: row.id,
@@ -273,6 +290,7 @@ export function mapFileChange(row: Row): HubFileChangeDto {
   };
 }
 
+/** 将数据库行映射为 HubContextSnapshotDto */
 export function mapContextSnapshot(row: Row): HubContextSnapshotDto {
   return {
     id: row.id,
@@ -288,6 +306,7 @@ export function mapContextSnapshot(row: Row): HubContextSnapshotDto {
   };
 }
 
+/** 将数据库行映射为 LongTermSummaryDto */
 export function mapLongTermSummary(row: Row): LongTermSummaryDto {
   return {
     id: row.id,
