@@ -12,6 +12,7 @@ import type {
 } from "@agenthub/shared";
 import { BuilderService } from "../services/builder.service";
 
+/** Agent 构建器控制器：管理模板创建会话的多轮对话 */
 @Controller("agent-templates/build")
 export class BuilderController {
   constructor(@Inject(BuilderService) private readonly builder: BuilderService) {}
