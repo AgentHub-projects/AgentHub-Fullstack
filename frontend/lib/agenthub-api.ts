@@ -19,13 +19,13 @@ import type {
   HubSessionDto,
   ListBuildSessionsResponse,
   PinHubMessageRequest,
+  DeploymentPreflightResponse,
   ProjectDto,
   SendBuildMessageRequest,
   SendBuildMessageResponse,
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
-  StartDeploymentRequest,
   StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
@@ -223,11 +223,17 @@ export function applyFileChange(sessionId: string, fileChangeId: string) {
   );
 }
 
-export function startDeployment(sessionId: string, body: StartDeploymentRequest = {}) {
+export function startDeployment(sessionId: string) {
   return requestJson<StartDeploymentResponse>(`/sessions/${encodeURIComponent(sessionId)}/deployments`, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({}),
   });
+}
+
+export function getDeploymentPreflight(sessionId: string) {
+  return requestJson<DeploymentPreflightResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/deployments/preflight`,
+  );
 }
 
 export function listAgents() {
@@ -320,7 +326,7 @@ export function getBuildMessages(buildId: string) {
 }
 
 export function connectHubSocket(
-  sessionId: string | null,
+  sessionId: string | string[] | null,
   handlers: {
     onState: (state: SocketState) => void;
     onEvent: (event: HubEventDto) => void;
@@ -345,7 +351,7 @@ export function connectHubSocket(
 
   socket.on("connect", () => {
     handlers.onState("connected");
-    if (sessionId) socket?.emit("session.subscribe", { sessionId });
+    for (const id of normalizeSessionIds(sessionId)) socket?.emit("session.subscribe", { sessionId: id });
   });
   socket.on("disconnect", () => handlers.onState("disconnected"));
   socket.on("connect_error", () => handlers.onState("unavailable"));
@@ -368,6 +374,11 @@ export function connectHubSocket(
   return () => {
     socket?.disconnect();
   };
+}
+
+function normalizeSessionIds(sessionId: string | string[] | null) {
+  if (!sessionId) return [];
+  return Array.isArray(sessionId) ? sessionId.filter(Boolean) : [sessionId];
 }
 
 export type TimelineItem =

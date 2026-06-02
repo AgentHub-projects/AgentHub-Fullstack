@@ -602,10 +602,105 @@ textarea:focus-visible {
 
 .conversationPane {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--surface);
+}
+
+.sessionTabs {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  padding: 7px clamp(12px, 2vw, 18px) 6px;
+}
+
+.sessionTab {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  min-width: 150px;
+  max-width: 260px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.sessionTab.active {
+  border-color: rgba(36, 87, 214, 0.28);
+  background: #eef4ff;
+  color: var(--ink);
+}
+
+.sessionTab.unread:not(.active) {
+  border-color: rgba(44, 109, 103, 0.28);
+  background: #f1fbf8;
+}
+
+.sessionTabMain,
+.sessionTab .tabClose {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.sessionTabMain {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 30px;
+  gap: 7px;
+  padding: 0 4px 0 9px;
+  text-align: left;
+}
+
+.sessionTabMain > span:not(.tabStatus) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionTabMain strong {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font-size: 11px;
+}
+
+.tabStatus {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.tabStatus.running {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(148, 98, 0, 0.12);
+}
+
+.sessionTab .tabClose {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+}
+
+.sessionTab .tabClose:hover {
+  background: rgba(38, 50, 66, 0.08);
+  color: var(--ink);
 }
 
 .conversationHeader {
@@ -672,45 +767,21 @@ textarea:focus-visible {
   flex: 0 0 auto;
 }
 
-.deployMenuWrap {
+.deployActionWrap {
   position: relative;
 }
 
-.deployMenu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
-  right: 0;
-  display: grid;
-  width: 184px;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-menu);
-  padding: 6px;
+.deployHint {
+  display: block;
+  max-width: 220px;
+  margin-top: 5px;
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 760;
+  text-align: right;
 }
 
-.deployMenu button {
-  display: flex;
-  width: 100%;
-  min-height: 34px;
-  align-items: center;
-  gap: 9px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--ink);
-  padding: 0 9px;
-  text-align: left;
-}
-
-.deployMenu button:hover {
-  background: var(--surface-muted);
-}
-
-.deployMenuWrap .ghostButton span,
-.deployMenu button span {
+.deployActionWrap .ghostButton span {
   display: inline;
   margin-top: 0;
   overflow: visible;
@@ -2970,6 +3041,7 @@ textarea:focus-visible {
 
 .artifactCodeBar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }

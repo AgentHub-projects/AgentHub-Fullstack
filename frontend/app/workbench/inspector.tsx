@@ -22,6 +22,7 @@ import {
   SelectOutlined,
 } from "@ant-design/icons";
 import { artifactContentUrl, listArtifactVersions } from "../../lib/agenthub-api";
+import { publicArtifactUrlFromArtifact, pptSlidesFromMetadata } from "../../lib/workbench/artifact-preview";
 import {
   buildDiffLines,
   buildFileTreeRows,
@@ -142,9 +143,11 @@ export function DiffPanel({
 export function ArtifactPanel({
   artifacts,
   onUseSelection,
+  onUseDraft,
 }: {
   artifacts: HubArtifactDto[];
   onUseSelection?: (artifact: HubArtifactDto, selectedText: string) => void;
+  onUseDraft?: (artifact: HubArtifactDto, editedText: string) => void;
 }) {
   const [activeArtifact, setActiveArtifact] = useState<HubArtifactDto | null>(null);
 
@@ -182,6 +185,7 @@ export function ArtifactPanel({
           artifact={activeArtifact}
           onClose={() => setActiveArtifact(null)}
           onUseSelection={onUseSelection}
+          onUseDraft={onUseDraft}
         />
       )}
     </div>
@@ -192,13 +196,16 @@ export function ArtifactViewerLayer({
   artifact,
   onClose,
   onUseSelection,
+  onUseDraft,
 }: {
   artifact: HubArtifactDto;
   onClose: () => void;
   onUseSelection?: (artifact: HubArtifactDto, selectedText: string) => void;
+  onUseDraft?: (artifact: HubArtifactDto, editedText: string) => void;
 }) {
   const [viewerMode, setViewerMode] = useState<"preview" | "code">("preview");
   const [selectedText, setSelectedText] = useState("");
+  const [draftText, setDraftText] = useState("");
   const [versions, setVersions] = useState<HubArtifactVersionDto[]>([]);
   const [activeVersion, setActiveVersion] = useState<HubArtifactVersionDto | null>(null);
 
@@ -222,6 +229,12 @@ export function ArtifactViewerLayer({
   }, [artifact.id]);
 
   const displayedArtifact = activeVersion ? artifactFromVersion(artifact, activeVersion) : artifact;
+  const sourceText = displayedArtifact.textContent ?? "";
+  const draftChanged = draftText !== sourceText;
+
+  useEffect(() => {
+    setDraftText(displayedArtifact.textContent ?? "");
+  }, [displayedArtifact.id, displayedArtifact.version, displayedArtifact.textContent]);
 
   return (
     <div className="artifactViewerLayer" role="presentation" onMouseDown={onClose}>
@@ -289,8 +302,8 @@ export function ArtifactViewerLayer({
             <div className="artifactCodeEditor">
               <textarea
                 spellCheck={false}
-                value={displayedArtifact.textContent}
-                readOnly
+                value={draftText}
+                onChange={(event) => setDraftText(event.target.value)}
                 onSelect={(event) =>
                   setSelectedText(
                     event.currentTarget.value.slice(event.currentTarget.selectionStart, event.currentTarget.selectionEnd),
@@ -298,7 +311,10 @@ export function ArtifactViewerLayer({
                 }
               />
               <div className="artifactCodeBar">
-                <button type="button" onClick={() => void navigator.clipboard?.writeText(displayedArtifact.textContent ?? "")}>
+                <button type="button" disabled={!draftChanged} onClick={() => setDraftText(sourceText)}>
+                  <span>重置</span>
+                </button>
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(draftText)}>
                   <CopyOutlined />
                   <span>复制全部</span>
                 </button>
@@ -313,6 +329,19 @@ export function ArtifactViewerLayer({
                   >
                     <SelectOutlined />
                     <span>引用选区</span>
+                  </button>
+                )}
+                {onUseDraft && (
+                  <button
+                    type="button"
+                    disabled={!draftChanged || !draftText.trim()}
+                    onClick={() => {
+                      onUseDraft(displayedArtifact, draftText.trim());
+                      onClose();
+                    }}
+                  >
+                    <SelectOutlined />
+                    <span>引用修改继续对话</span>
                   </button>
                 )}
               </div>
@@ -371,7 +400,7 @@ function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifact
   }
 
   if (artifact.kind === "docx") {
-    const publicUrl = publicArtifactUrl(artifact);
+    const publicUrl = publicArtifactUrlFromArtifact(artifact);
     const officeUrl = publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
     if (officeUrl) {
       return <iframe className={`documentFrame ${expanded ? "expanded" : ""}`} title={artifact.title} src={officeUrl} />;
@@ -387,7 +416,9 @@ function ArtifactPreview({ artifact, expanded = false }: { artifact: HubArtifact
     return artifact.kind === "log" ? <pre>{artifact.textContent}</pre> : <RichText text={artifact.textContent} />;
   }
 
-  return <code>{artifact.storageUri ?? "inline artifact"}</code>;
+  if (artifact.storageUri) return <code>{artifact.storageUri}</code>;
+
+  return <DocumentFallback title="暂无可预览内容" text="下游尚未提供文本、公开 URL 或可渲染 metadata。" />;
 }
 
 function PptxPreview({
@@ -399,11 +430,11 @@ function PptxPreview({
   contentUrl: string;
   expanded: boolean;
 }) {
-  const slides = pptSlides(artifact.metadata);
+  const slides = pptSlidesFromMetadata(artifact.metadata);
   const [index, setIndex] = useState(0);
   const current = slides[index] ?? null;
-  const publicUrl = publicArtifactUrl(artifact) ?? contentUrl;
-  const officeUrl = publicUrl.startsWith("http") ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
+  const publicUrl = publicArtifactUrlFromArtifact(artifact);
+  const officeUrl = publicUrl ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}` : null;
 
   if (slides.length > 0 && current) {
     return (
@@ -488,29 +519,6 @@ function artifactIcon(kind: HubArtifactDto["kind"]) {
   if (label === "markdown") return <FileMarkdownOutlined />;
   if (label === "document") return <FileDoneOutlined />;
   return <CodeOutlined />;
-}
-
-function pptSlides(metadata: Record<string, unknown>) {
-  const raw = metadata.slides;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const row = item as Record<string, unknown>;
-      return {
-        title: typeof row.title === "string" ? row.title : "",
-        text: typeof row.text === "string" ? row.text : typeof row.notes === "string" ? row.notes : "",
-        imageUrl: typeof row.imageUrl === "string" ? row.imageUrl : "",
-      };
-    })
-    .filter((item): item is { title: string; text: string; imageUrl: string } => Boolean(item));
-}
-
-function publicArtifactUrl(artifact: HubArtifactDto) {
-  const metadataUrl = artifact.metadata.url;
-  if (typeof metadataUrl === "string" && /^https?:\/\//.test(metadataUrl)) return metadataUrl;
-  if (artifact.storageUri && /^https?:\/\//.test(artifact.storageUri)) return artifact.storageUri;
-  return null;
 }
 
 function artifactFromVersion(artifact: HubArtifactDto, version: HubArtifactVersionDto): HubArtifactDto {

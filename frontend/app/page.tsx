@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
   CreateSessionAgentRequest,
-  DeploymentTarget,
+  DeploymentPreflightResponse,
   HubArtifactDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -20,7 +20,6 @@ import type {
 import {
   BranchesOutlined,
   CheckCircleOutlined,
-  CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -48,6 +47,7 @@ import {
   deleteSession,
   deleteAgent,
   getAuthState,
+  getDeploymentPreflight,
   getSessionDetail,
   listAgents,
   listAgentTemplates,
@@ -89,6 +89,13 @@ import {
   findActiveMention,
   parseMentionedAgentIds,
 } from "../lib/workbench/mentions";
+import {
+  EMPTY_SESSION_TABS,
+  activateSessionTab,
+  closeSessionTab,
+  markSessionTabUpdated,
+  openSessionTab,
+} from "../lib/workbench/session-tabs";
 import { buildConversationItems } from "../lib/workbench/timeline";
 import type { InspectorTab, MentionMatch } from "../lib/workbench/types";
 
@@ -106,6 +113,22 @@ type ReplyTarget = {
   preview: string;
 };
 
+type SessionWorkspace = {
+  detail: SessionDetailDto | null;
+  composer: string;
+  attachments: UploadedAttachmentDto[];
+  replyTargets: ReplyTarget[];
+  inspectorTab: InspectorTab;
+};
+
+const EMPTY_WORKSPACE: SessionWorkspace = {
+  detail: null,
+  composer: "",
+  attachments: [],
+  replyTargets: [],
+  inspectorTab: "diff",
+};
+
 export default function WorkbenchPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
@@ -118,23 +141,19 @@ export default function WorkbenchPage() {
   const [sessionSearch, setSessionSearch] = useState("");
   const [includeArchivedSessions, setIncludeArchivedSessions] = useState(false);
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<SessionDetailDto | null>(null);
+  const [sessionTabs, setSessionTabs] = useState(EMPTY_SESSION_TABS);
+  const [workspaces, setWorkspaces] = useState<Record<string, SessionWorkspace>>({});
   const [agents, setAgents] = useState<AgentInstanceDto[]>([]);
   const [templates, setTemplates] = useState<AgentTemplateDto[]>([]);
-  const [composer, setComposer] = useState("");
-  const [attachments, setAttachments] = useState<UploadedAttachmentDto[]>([]);
-  const [replyTargets, setReplyTargets] = useState<ReplyTarget[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("diff");
+  const [deploymentPreflights, setDeploymentPreflights] = useState<Record<string, DeploymentPreflightResponse>>({});
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
-  const [deploymentMenuOpen, setDeploymentMenuOpen] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
@@ -172,6 +191,15 @@ export default function WorkbenchPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
+  const activeSessionId = sessionTabs.activeId;
+  const openSessionIds = sessionTabs.openIds;
+  const activeWorkspace = activeSessionId ? workspaces[activeSessionId] : null;
+  const detail = activeWorkspace?.detail ?? null;
+  const composer = activeWorkspace?.composer ?? "";
+  const attachments = activeWorkspace?.attachments ?? [];
+  const replyTargets = activeWorkspace?.replyTargets ?? [];
+  const inspectorTab = activeWorkspace?.inspectorTab ?? "diff";
+  const deploymentPreflight = activeSessionId ? deploymentPreflights[activeSessionId] : undefined;
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
   const activeArtifactViewer = activeArtifactViewerId
     ? (detail?.artifacts.find((artifact) => artifact.id === activeArtifactViewerId) ?? null)
@@ -204,6 +232,74 @@ export default function WorkbenchPage() {
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
 
+  function ensureWorkspace(sessionId: string, patch: Partial<SessionWorkspace> = {}) {
+    setWorkspaces((current) => ({
+      ...current,
+      [sessionId]: { ...EMPTY_WORKSPACE, ...current[sessionId], ...patch },
+    }));
+  }
+
+  function updateWorkspace(sessionId: string, updater: (current: SessionWorkspace) => SessionWorkspace) {
+    setWorkspaces((current) => {
+      const existing = current[sessionId] ?? EMPTY_WORKSPACE;
+      return { ...current, [sessionId]: updater(existing) };
+    });
+  }
+
+  function updateActiveWorkspace(updater: (current: SessionWorkspace) => SessionWorkspace) {
+    if (!activeSessionId) return;
+    updateWorkspace(activeSessionId, updater);
+  }
+
+  function setActiveSessionId(sessionId: string | null) {
+    setSessionTabs((current) => activateSessionTab(current, sessionId));
+    if (sessionId) ensureWorkspace(sessionId);
+  }
+
+  function closeOpenSession(sessionId: string) {
+    setSessionTabs((current) => closeSessionTab(current, sessionId));
+    setWorkspaces((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    setDeploymentPreflights((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+  }
+
+  function setDetail(value: SetStateAction<SessionDetailDto | null>) {
+    updateActiveWorkspace((current) => ({
+      ...current,
+      detail: resolveState(value, current.detail),
+    }));
+  }
+
+  function setWorkspaceDetail(sessionId: string, value: SetStateAction<SessionDetailDto | null>) {
+    updateWorkspace(sessionId, (current) => ({
+      ...current,
+      detail: resolveState(value, current.detail),
+    }));
+  }
+
+  function setComposer(value: SetStateAction<string>) {
+    updateActiveWorkspace((current) => ({ ...current, composer: resolveState(value, current.composer) }));
+  }
+
+  function setAttachments(value: SetStateAction<UploadedAttachmentDto[]>) {
+    updateActiveWorkspace((current) => ({ ...current, attachments: resolveState(value, current.attachments) }));
+  }
+
+  function setReplyTargets(value: SetStateAction<ReplyTarget[]>) {
+    updateActiveWorkspace((current) => ({ ...current, replyTargets: resolveState(value, current.replyTargets) }));
+  }
+
+  function setInspectorTab(value: SetStateAction<InspectorTab>) {
+    updateActiveWorkspace((current) => ({ ...current, inspectorTab: resolveState(value, current.inspectorTab) }));
+  }
+
   useEffect(() => {
     void checkAuth();
   }, []);
@@ -217,42 +313,45 @@ export default function WorkbenchPage() {
   }, [authenticated, authChecked, sessionSearch, includeArchivedSessions]);
 
   useEffect(() => {
-    if (!authenticated || !activeSessionId) return;
-    const disconnect = connectHubSocket(activeSessionId, {
+    if (!authenticated || openSessionIds.length === 0) return;
+    const disconnect = connectHubSocket(openSessionIds, {
       onState: () => undefined,
       onEvent: (event) => {
-        setDetail((current) =>
+        setWorkspaceDetail(event.sessionId, (current) =>
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,
         );
-        if (event.eventType === "artifact.upsert" || event.eventType === "artifact.complete") {
-          setInspectorTab("artifacts");
-        }
-        if (event.eventType === "file.change") {
-          setInspectorTab("diff");
-        }
+        setSessionTabs((current) => markSessionTabUpdated(current, event.sessionId));
+        if (event.sessionId !== activeSessionId) return;
+        if (event.eventType === "artifact.upsert" || event.eventType === "artifact.complete") setInspectorTab("artifacts");
+        if (event.eventType === "file.change") setInspectorTab("diff");
       },
       onSession: (session) => {
         setSessions((current) => upsertById(current, session).sort(sortSession));
-        setDetail((current) => (current?.session.id === session.id ? { ...current, session } : current));
+        setWorkspaceDetail(session.id, (current) => (current ? { ...current, session } : current));
+        setSessionTabs((current) => markSessionTabUpdated(current, session.id));
+        void refreshDeploymentPreflight(session.id);
       },
       onMessage: (message) => {
-        setDetail((current) =>
+        setWorkspaceDetail(message.sessionId, (current) =>
           current ? { ...current, messages: upsertById(current.messages, message).sort(sortMessage) } : current,
         );
+        setSessionTabs((current) => markSessionTabUpdated(current, message.sessionId));
       },
       onArtifact: (artifact) => {
-        setDetail((current) =>
+        setWorkspaceDetail(artifact.sessionId, (current) =>
           current ? { ...current, artifacts: upsertById(current.artifacts, artifact).sort(sortArtifact) } : current,
         );
+        setSessionTabs((current) => markSessionTabUpdated(current, artifact.sessionId));
       },
       onFileChange: (fileChange) => {
-        setDetail((current) =>
+        setWorkspaceDetail(fileChange.sessionId, (current) =>
           current ? { ...current, fileChanges: upsertById(current.fileChanges, fileChange).sort(sortFileChange) } : current,
         );
+        setSessionTabs((current) => markSessionTabUpdated(current, fileChange.sessionId));
       },
     });
     return disconnect;
-  }, [authenticated, activeSessionId]);
+  }, [authenticated, activeSessionId, openSessionIds.join("|")]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -270,10 +369,14 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     if (!runActionLocked) return;
-    setDeploymentMenuOpen(false);
     setMentionMatch(null);
     setActiveMentionIndex(0);
   }, [runActionLocked]);
+
+  useEffect(() => {
+    if (!authenticated || !activeSessionId) return;
+    void refreshDeploymentPreflight(activeSessionId);
+  }, [authenticated, activeSessionId, activeSession?.projectId, activeSession?.metadata.latestSuccessfulPushCommitSha]);
 
   async function checkAuth() {
     const result = await getAuthState();
@@ -328,11 +431,11 @@ export default function WorkbenchPage() {
     const items = sessionRes.data.items;
     setSessions(items);
     const selected = items[0]?.id ?? null;
-    setActiveSessionId(selected);
     if (selected) {
       await loadSession(selected);
     } else {
-      setDetail(null);
+      setSessionTabs(EMPTY_SESSION_TABS);
+      setWorkspaces({});
     }
   }
 
@@ -368,19 +471,27 @@ export default function WorkbenchPage() {
     }
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
+    await refreshDeploymentPreflight(activeSessionId);
+  }
+
+  async function refreshDeploymentPreflight(sessionId: string) {
+    const result = await getDeploymentPreflight(sessionId);
+    if (result.ok) {
+      setDeploymentPreflights((current) => ({ ...current, [sessionId]: result.data }));
+    }
   }
 
   async function loadSession(sessionId: string) {
-    setActiveSessionId(sessionId);
     setRenamingSession(false);
-    setAttachments([]);
-    setReplyTargets([]);
+    setSessionTabs((current) => activateSessionTab(openSessionTab(current, sessionId), sessionId));
+    ensureWorkspace(sessionId);
     const result = await getSessionDetail(sessionId);
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
       return;
     }
-    setDetail(result.data);
+    updateWorkspace(sessionId, (current) => ({ ...current, detail: result.data }));
+    void refreshDeploymentPreflight(sessionId);
     closeMentionMenu();
   }
 
@@ -445,8 +556,7 @@ export default function WorkbenchPage() {
       }
       if (activeSessionId === session.id && !includeArchivedSessions) {
         const next = nextSessions[0] ?? null;
-        setActiveSessionId(next?.id ?? null);
-        setDetail(null);
+        closeOpenSession(session.id);
         if (next) await loadSession(next.id);
       }
     } finally {
@@ -468,8 +578,7 @@ export default function WorkbenchPage() {
       setSessions(nextSessions);
       if (activeSessionId === session.id) {
         const next = nextSessions[0] ?? null;
-        setActiveSessionId(next?.id ?? null);
-        setDetail(null);
+        closeOpenSession(session.id);
         if (next) await loadSession(next.id);
       }
     } finally {
@@ -515,8 +624,8 @@ export default function WorkbenchPage() {
       return;
     }
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
-    setDetail({ session: result.data, ...EMPTY_DETAIL });
-    setActiveSessionId(result.data.id);
+    setSessionTabs((current) => activateSessionTab(openSessionTab(current, result.data.id), result.data.id));
+    updateWorkspace(result.data.id, (current) => ({ ...current, detail: { session: result.data, ...EMPTY_DETAIL } }));
     const agentRes = await listAgents();
     if (agentRes.ok) setAgents(agentRes.data.items);
     closeMentionMenu();
@@ -735,20 +844,24 @@ export default function WorkbenchPage() {
     }
   }
 
-  async function handleStartDeployment(target: DeploymentTarget) {
+  async function handleStartDeployment() {
     if (!activeSessionId || runActionLocked || deployingSessionId) return;
-    setDeploymentMenuOpen(false);
+    if (!canDeploy(deploymentPreflight)) {
+      setNotice(deploymentPreflightText(deploymentPreflight));
+      return;
+    }
     setDeployingSessionId(activeSessionId);
     try {
-      const result = await startDeployment(activeSessionId, { target });
+      const result = await startDeployment(activeSessionId);
       if (!result.ok) {
-        setNotice(`${deploymentTargetLabel(target)}失败：${result.error}`);
+        setNotice(`Vercel 部署失败：${result.error}`);
         return;
       }
       setDetail((current) =>
         current ? { ...current, messages: upsertById(current.messages, result.data.message).sort(sortMessage) } : current,
       );
-      setNotice(`${deploymentTargetLabel(target)}已触发：${result.data.deployment.commitSha.slice(0, 12)}`);
+      await refreshDeploymentPreflight(activeSessionId);
+      setNotice(`Vercel 部署已触发：${result.data.deployment.commitSha.slice(0, 12)}`);
     } finally {
       setDeployingSessionId(null);
     }
@@ -768,6 +881,31 @@ export default function WorkbenchPage() {
       "",
       "修改要求：",
     ].join("\n");
+    setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function handleArtifactDraft(artifact: HubArtifactDto, editedText: string) {
+    if (!sessionWritable) {
+      setNotice("归档会话为只读，不能继续修改产物");
+      return;
+    }
+    const original = artifact.textContent?.trim();
+    const prompt = [
+      `我编辑了产物「${artifact.title}」v${artifact.version} 的草稿，请基于编辑后的内容继续处理：`,
+      "",
+      original ? "原始内容摘要：" : "",
+      original ? "```" : "",
+      original ? clipForPrompt(original, 2000) : "",
+      original ? "```" : "",
+      "",
+      "编辑后内容：",
+      "```",
+      clipForPrompt(editedText, 12000),
+      "```",
+      "",
+      "请根据这份编辑后内容继续修改或生成后续产物。",
+    ].filter((line) => line !== "").join("\n");
     setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }
@@ -997,10 +1135,7 @@ export default function WorkbenchPage() {
               const checked = event.target.checked;
               setIncludeArchivedSessions(checked);
               if (!checked && activeSession?.status === "archived") {
-                setActiveSessionId(null);
-                setDetail(null);
-                setReplyTargets([]);
-                setAttachments([]);
+                closeOpenSession(activeSession.id);
               }
             }}
           />
@@ -1071,6 +1206,43 @@ export default function WorkbenchPage() {
       </aside>
 
       <section className="conversationPane">
+        {openSessionIds.length > 0 && (
+          <nav className="sessionTabs" aria-label="已打开会话">
+            {openSessionIds.map((sessionId) => {
+              const tabSession = workspaces[sessionId]?.detail?.session ?? sessions.find((item) => item.id === sessionId);
+              const unread = sessionTabs.unreadIds.includes(sessionId);
+              const busy = isRunning(tabSession?.lastRun?.status ?? "");
+              return (
+                <div
+                  key={sessionId}
+                  className={`sessionTab ${sessionId === activeSessionId ? "active" : ""} ${unread ? "unread" : ""}`}
+                >
+                  <button
+                    className="sessionTabMain"
+                    type="button"
+                    onClick={() => {
+                      setActiveSessionId(sessionId);
+                      if (!workspaces[sessionId]?.detail) void loadSession(sessionId);
+                      else void refreshDeploymentPreflight(sessionId);
+                    }}
+                  >
+                    <span className={`tabStatus ${busy ? "running" : ""}`} />
+                    <span>{tabSession?.title ?? "未命名会话"}</span>
+                    {unread && <strong>新</strong>}
+                  </button>
+                  <button
+                    className="tabClose"
+                    type="button"
+                    title="关闭标签"
+                    onClick={() => closeOpenSession(sessionId)}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </nav>
+        )}
         <header className="conversationHeader">
           <div className="conversationTitleBlock">
             {renamingSession && activeSession ? (
@@ -1106,33 +1278,20 @@ export default function WorkbenchPage() {
                 <EditOutlined />
               </button>
             )}
-            {activeSession?.projectId && (
-              <div className="deployMenuWrap">
+            {activeSession && (
+              <div className="deployActionWrap">
                 <button
                   className="ghostButton"
                   type="button"
-                  title={activeRunInProgress ? "当前 run 运行中，完成后可部署" : "部署"}
-                  disabled={runActionLocked || deployingSessionId === activeSession.id}
-                  onClick={() => setDeploymentMenuOpen((open) => !open)}
+                  title={activeRunInProgress ? "当前 run 运行中，完成后可部署" : deploymentPreflightText(deploymentPreflight)}
+                  disabled={runActionLocked || deployingSessionId === activeSession.id || !deploymentPreflight?.canDeploy}
+                  onClick={() => void handleStartDeployment()}
                 >
                   {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
-                  <span>部署</span>
+                  <span>部署到 Vercel</span>
                 </button>
-                {deploymentMenuOpen && (
-                  <div className="deployMenu">
-                    <button type="button" onClick={() => void handleStartDeployment("static")}>
-                      <RocketOutlined />
-                      <span>静态站点</span>
-                    </button>
-                    <button type="button" onClick={() => void handleStartDeployment("container")}>
-                      <CloudUploadOutlined />
-                      <span>容器化部署</span>
-                    </button>
-                    <button type="button" onClick={() => void handleStartDeployment("source_archive")}>
-                      <FileDoneOutlined />
-                      <span>源码包下载</span>
-                    </button>
-                  </div>
+                {deploymentPreflight && !deploymentPreflight.canDeploy && (
+                  <span className="deployHint">{deploymentPreflightText(deploymentPreflight)}</span>
                 )}
               </div>
             )}
@@ -1384,7 +1543,11 @@ export default function WorkbenchPage() {
               />
             )}
             {inspectorTab === "artifacts" && (
-              <ArtifactPanel artifacts={detail?.artifacts ?? []} onUseSelection={handleArtifactSelection} />
+              <ArtifactPanel
+                artifacts={detail?.artifacts ?? []}
+                onUseSelection={handleArtifactSelection}
+                onUseDraft={handleArtifactDraft}
+              />
             )}
           </>
         )}
@@ -1395,6 +1558,7 @@ export default function WorkbenchPage() {
           artifact={activeArtifactViewer}
           onClose={() => setActiveArtifactViewerId(null)}
           onUseSelection={handleArtifactSelection}
+          onUseDraft={handleArtifactDraft}
         />
       )}
 
@@ -1864,10 +2028,29 @@ export default function WorkbenchPage() {
   );
 }
 
-function deploymentTargetLabel(target: DeploymentTarget) {
-  if (target === "container") return "容器化部署";
-  if (target === "source_archive") return "源码包";
-  return "静态站点部署";
+function canDeploy(preflight: DeploymentPreflightResponse | undefined) {
+  return Boolean(preflight?.canDeploy);
+}
+
+function deploymentPreflightText(preflight: DeploymentPreflightResponse | undefined) {
+  if (!preflight) return "正在检查 Vercel 部署条件";
+  if (preflight.canDeploy) {
+    const commit = preflight.latestSuccessfulPushCommitSha?.slice(0, 12);
+    return commit ? `将部署到 Vercel Production：${commit}` : "可部署到 Vercel";
+  }
+  if (!preflight.projectBound) return "先绑定项目";
+  if (!preflight.latestSuccessfulPushCommitSha) return "等待下游上报 push commit";
+  if (!preflight.vercelConfigured) return "后端未配置 VERCEL_TOKEN";
+  return "仅支持公开 GitHub 仓库";
+}
+
+function clipForPrompt(text: string, limit: number) {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n...（已截断 ${text.length - limit} 字符）`;
+}
+
+function resolveState<T>(value: SetStateAction<T>, current: T): T {
+  return typeof value === "function" ? (value as (previous: T) => T)(current) : value;
 }
 
 function sessionListPreview(session: HubSessionDto) {

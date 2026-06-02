@@ -477,10 +477,9 @@ function DeployStatusPart({
   const status = stringMetadata(part.metadata, "status") ?? "queued";
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
   const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
-  const target = stringMetadata(part.metadata, "target") ?? "static";
-  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? deploymentTargetLabel(target);
+  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? "Vercel Production";
   const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
-  const sourceArchiveUrl = stringMetadata(part.metadata, "sourceArchiveUrl");
+  const inspectorUrl = stringMetadata(part.metadata, "inspectorUrl");
   const shortSha = commitSha ? commitSha.slice(0, 12) : "";
   return (
     <div className={`deployStatusPart ${deployStatusClass(status)}`}>
@@ -492,14 +491,14 @@ function DeployStatusPart({
           {` · ${targetLabel}`}
           {shortSha ? ` · ${shortSha}` : ""}
         </span>
-        {part.url && target !== "source_archive" && (
+        {part.url && (
           <a href={part.url} target="_blank" rel="noreferrer">
-            预览地址：{part.url}
+            访问地址：{part.url}
           </a>
         )}
-        {sourceArchiveUrl && (
-          <a href={sourceArchiveUrl} target="_blank" rel="noreferrer">
-            下载源码包
+        {inspectorUrl && (
+          <a href={inspectorUrl} target="_blank" rel="noreferrer">
+            Vercel 部署详情
           </a>
         )}
         {status === "failed" && errorMessage && <small>{errorMessage}</small>}
@@ -734,10 +733,9 @@ function ExpandedDeployStatus({ part }: { part: HubMessagePartDto }) {
   const status = stringMetadata(part.metadata, "status") ?? "queued";
   const commitSha = stringMetadata(part.metadata, "commitSha") ?? "";
   const projectName = stringMetadata(part.metadata, "projectName") ?? "Project";
-  const target = stringMetadata(part.metadata, "target") ?? "static";
-  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? deploymentTargetLabel(target);
+  const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? "Vercel Production";
   const errorMessage = stringMetadata(part.metadata, "errorMessage") ?? part.text ?? "";
-  const sourceArchiveUrl = stringMetadata(part.metadata, "sourceArchiveUrl");
+  const inspectorUrl = stringMetadata(part.metadata, "inspectorUrl");
   return (
     <div className={`messagePartDetailCard deploy ${deployStatusClass(status)}`}>
       <strong>{part.title ?? "部署状态"}</strong>
@@ -761,14 +759,14 @@ function ExpandedDeployStatus({ part }: { part: HubMessagePartDto }) {
           </div>
         )}
       </dl>
-      {part.url && target !== "source_archive" && (
+      {part.url && (
         <a href={part.url} target="_blank" rel="noreferrer">
-          预览地址：{part.url}
+          访问地址：{part.url}
         </a>
       )}
-      {sourceArchiveUrl && (
-        <a href={sourceArchiveUrl} target="_blank" rel="noreferrer">
-          下载源码包
+      {inspectorUrl && (
+        <a href={inspectorUrl} target="_blank" rel="noreferrer">
+          Vercel 部署详情
         </a>
       )}
       {status === "failed" && errorMessage && <p>{errorMessage}</p>}
@@ -826,8 +824,8 @@ function partSubtitle(part: HubMessagePartDto) {
   if (part.type === "diff") return stringMetadata(part.metadata, "changeType") ?? "diff";
   if (part.type === "deploy_status") {
     const status = stringMetadata(part.metadata, "status") ?? "queued";
-    const target = stringMetadata(part.metadata, "target") ?? "static";
-    return `${deploymentTargetLabel(target)} · ${status}`;
+    const targetLabel = stringMetadata(part.metadata, "targetLabel") ?? "Vercel Production";
+    return `${targetLabel} · ${status}`;
   }
   if (part.type === "link_preview") return part.url ?? "Open Graph";
   if (part.type === "code") return part.language ?? "code";
@@ -871,12 +869,6 @@ function deployStatusIcon(status: string) {
   if (status === "failed") return <CloseCircleOutlined />;
   if (status === "running") return <LoadingOutlined />;
   return <RocketOutlined />;
-}
-
-function deploymentTargetLabel(target: string) {
-  if (target === "container") return "容器化部署";
-  if (target === "source_archive") return "源码包";
-  return "静态站点";
 }
 
 function formatBytes(value: number) {
