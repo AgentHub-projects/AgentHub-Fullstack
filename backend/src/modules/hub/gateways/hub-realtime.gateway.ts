@@ -21,6 +21,7 @@ import type {
 } from "@agenthub/shared";
 import { AuthSessionService } from "../auth/auth-session.service";
 
+/** WebSocket 实时网关：管理客户端连接、会话订阅和实时事件推送 */
 @WebSocketGateway({
   cors: { origin: true, credentials: true },
   path: "/socket.io",
@@ -33,6 +34,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
 
   constructor(@Optional() @Inject(AuthSessionService) private readonly authSessions?: AuthSessionService) {}
 
+  /** 客户端连接时认证 Cookie，失败则发送 auth.required 并断开 */
   async handleConnection(client: Socket) {
     if (!this.authSessions || !(await this.authSessions.authenticateCookie(client.handshake.headers.cookie))) {
       client.emit("auth.required", { message: "AUTH_REQUIRED" });
@@ -42,6 +44,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     client.emit("realtime.ready", { ok: true });
   }
 
+  /** 客户端断开时清理订阅追踪 */
   handleDisconnect(client: Socket) {
     const sessions = this.clientSessions.get(client.id);
     if (!sessions) return;
@@ -51,6 +54,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.clientSessions.delete(client.id);
   }
 
+  /** 客户端订阅会话房间 */
   @SubscribeMessage("session.subscribe")
   subscribe(@ConnectedSocket() client: Socket, @MessageBody() body: FrontendRealtimeSubscribe) {
     if (body?.sessionId) {
@@ -60,6 +64,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     }
   }
 
+  /** 客户端取消订阅会话房间 */
   @SubscribeMessage("session.unsubscribe")
   unsubscribe(@ConnectedSocket() client: Socket, @MessageBody() body: FrontendRealtimeSubscribe) {
     if (body?.sessionId) {
@@ -68,6 +73,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     }
   }
 
+  /** 兼容旧前端 joinConversation 事件名 */
   // 兼容旧前端事件名，迁移完后可以移除。
   @SubscribeMessage("joinConversation")
   joinConversation(@ConnectedSocket() client: Socket, @MessageBody() body: { conversationId?: string }) {
@@ -77,14 +83,17 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     }
   }
 
+  /** 检查会话是否有 WebSocket 订阅者 */
   hasSessionSubscribers(sessionId: string) {
     return this.getSessionSubscriberCount(sessionId) > 0;
   }
 
+  /** 获取会话订阅人数 */
   getSessionSubscriberCount(sessionId: string) {
     return this.sessionSubscriberCounts.get(sessionId) ?? 0;
   }
 
+  /** 推送事件到会话房间 */
   emitEvent(event: HubEventDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "event",
@@ -95,6 +104,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(event.sessionId)).emit("run.event", event);
   }
 
+  /** 推送会话更新 */
   emitSession(session: HubSessionDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "session",
@@ -104,6 +114,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(session.id)).emit("hub:session", envelope);
   }
 
+  /** 推送消息到会话房间 */
   emitMessage(message: HubMessageDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "message",
@@ -113,6 +124,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(message.sessionId)).emit("hub:message", envelope);
   }
 
+  /** 推送产物更新 */
   emitArtifact(sessionId: string, artifact: HubArtifactDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "artifact",
@@ -122,6 +134,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(sessionId)).emit("hub:artifact", envelope);
   }
 
+  /** 推送文件变更 */
   emitFileChange(sessionId: string, fileChange: HubFileChangeDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "file_change",
@@ -131,6 +144,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(sessionId)).emit("hub:file_change", envelope);
   }
 
+  /** 推送上下文快照 */
   emitContext(sessionId: string, context: HubContextSnapshotDto) {
     const envelope: FrontendRealtimeEnvelope = {
       type: "context",
@@ -140,6 +154,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.server.to(sessionRoom(sessionId)).emit("hub:context", envelope);
   }
 
+  /** 追踪客户端订阅并更新计数 */
   private trackSubscription(client: Socket, sessionId: string) {
     let sessions = this.clientSessions.get(client.id);
     if (!sessions) {
@@ -151,6 +166,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.sessionSubscriberCounts.set(sessionId, this.getSessionSubscriberCount(sessionId) + 1);
   }
 
+  /** 清理客户端订阅追踪并递减计数 */
   private untrackSubscription(client: Socket, sessionId: string) {
     const sessions = this.clientSessions.get(client.id);
     if (!sessions?.delete(sessionId)) return;
@@ -158,6 +174,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
     this.decrementSessionSubscriber(sessionId);
   }
 
+  /** 递减会话订阅者计数 */
   private decrementSessionSubscriber(sessionId: string) {
     const next = this.getSessionSubscriberCount(sessionId) - 1;
     if (next > 0) {
@@ -168,6 +185,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   }
 }
 
+/** 生成 Socket.IO 房间名 */
 function sessionRoom(sessionId: string) {
   return `session:${sessionId}`;
 }
