@@ -1,8 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import type { HubArtifactDto, HubArtifactKind, HubArtifactVersionDto, UploadedAttachmentDto } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { asObject, mapArtifact, mapArtifactVersion } from "../mappers/hub.mappers";
@@ -20,7 +18,7 @@ export const TEXT_ATTACHMENT_PREVIEW_CHAR_LIMIT = 100 * 1024;
 export class ArtifactStorageService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  /** 创建用户上传的附件：存储到 OSS 或本地，记录 artifact 和版本 */
+  /** 创建用户上传的附件：必须存储到 OSS，记录 artifact 和版本 */
   async createAttachment(input: {
     sessionId: string;
     name: string;
@@ -33,8 +31,8 @@ export class ArtifactStorageService {
     const kind = inferKindFromMime(input.mimeType);
     const textPreview = buildTextAttachmentPreview(input.mimeType, input.data);
     const uploaded = await this.uploadToOss(input.sessionId, "attachments", input.name, input.data, input.mimeType);
-    const localPath = uploaded ? null : await this.writeLocalUpload(artifactId, input.name, input.data);
-    const publicUrl = uploaded ? (await this.getSignedOssUrl(uploaded.uri)) ?? uploaded.uri : this.localUploadUrl(artifactId);
+    if (!uploaded) throw new ServiceUnavailableException("ARTIFACT_OSS_REQUIRED");
+    const publicUrl = (await this.getSignedOssUrl(uploaded.uri)) ?? uploaded.uri;
 
     const artifact = await this.prisma.artifact.create({
       data: {
@@ -44,8 +42,8 @@ export class ArtifactStorageService {
         kind,
         title: input.name,
         mimeType: input.mimeType,
-        storageKind: uploaded ? "oss_object" : "remote_url",
-        storageUri: uploaded?.uri ?? publicUrl,
+        storageKind: "oss_object",
+        storageUri: uploaded.uri,
         textContent: textPreview,
         sha256,
         sizeBytes: BigInt(sizeBytes),
@@ -54,7 +52,6 @@ export class ArtifactStorageService {
           attachment: true,
           originalName: input.name,
           url: publicUrl,
-          localPath: uploaded ? undefined : localPath,
           textPreview,
         } as any,
       },
@@ -102,17 +99,12 @@ export class ArtifactStorageService {
 
     if (binary) {
       const uploaded = await this.uploadToOss(input.sessionId, input.runId, artifactKey, binary, mimeType);
-      if (uploaded) {
-        storageKind = "oss_object";
-        storageUri = uploaded.uri;
-        textContent = null;
-        sha256 = uploaded.sha256;
-        sizeBytes = BigInt(binary.length);
-      } else {
-        textContent = binary.toString("base64");
-        sha256 = sha256Buffer(binary);
-        sizeBytes = BigInt(binary.length);
-      }
+      if (!uploaded) throw new ServiceUnavailableException("ARTIFACT_OSS_REQUIRED");
+      storageKind = "oss_object";
+      storageUri = uploaded.uri;
+      textContent = null;
+      sha256 = uploaded.sha256;
+      sizeBytes = BigInt(binary.length);
     } else if (!content && remoteUrl) {
       storageKind = remoteUrl.startsWith("oss://") ? "oss_object" : "remote_url";
       storageUri = remoteUrl;
@@ -298,19 +290,8 @@ export class ArtifactStorageService {
     };
   }
 
-  /** 获取上传内容：优先从本地文件读取，否则走 getContent */
+  /** 获取上传内容：附件与产物统一走 OSS 或内联内容 */
   async getUploadedContent(artifactId: string) {
-    const artifact = await this.prisma.artifact.findUnique({ where: { id: artifactId } });
-    if (!artifact) return null;
-    const metadata = asObject(artifact.metadata);
-    const localPath = typeof metadata.localPath === "string" ? metadata.localPath : null;
-    if (localPath) {
-      return {
-        artifact: mapArtifact(artifact),
-        body: await readFile(localPath),
-        contentType: artifact.mimeType,
-      };
-    }
     return this.getContent(artifactId);
   }
 
@@ -338,21 +319,6 @@ export class ArtifactStorageService {
       uri: `oss://${bucket}/${objectKey}`,
       sha256: sha256Buffer(data),
     };
-  }
-
-  /** 将上传文件写入本地 .uploads 目录 */
-  private async writeLocalUpload(artifactId: string, fileName: string, data: Buffer) {
-    const dir = join(process.cwd(), ".uploads");
-    await mkdir(dir, { recursive: true });
-    const filePath = join(dir, `${artifactId}-${safeKey(fileName)}`);
-    await writeFile(filePath, data);
-    return filePath;
-  }
-
-  /** 构建本地上传文件的公开访问 URL */
-  private localUploadUrl(artifactId: string) {
-    const baseUrl = (process.env.AGENTHUB_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3001}/api`).replace(/\/$/, "");
-    return `${baseUrl}/uploads/${artifactId}/content`;
   }
 
   /** 获取 OSS 签名 URL，过期时间 600 秒 */
