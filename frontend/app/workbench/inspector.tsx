@@ -125,7 +125,7 @@ export function DiffPanel({
                     <span className="remove">-{countChangeLines(change, "remove")}</span>
                   </span>
                 </div>
-                {expanded && <DiffFileDetails change={change} applyingId={applyingId} onApply={onApply} />}
+                <DiffFileDetails change={change} expanded={expanded} applyingId={applyingId} onApply={onApply} />
               </article>
             );
           })}
@@ -137,10 +137,12 @@ export function DiffPanel({
 
 function DiffFileDetails({
   change,
+  expanded,
   applyingId,
   onApply,
 }: {
   change: HubFileChangeDto;
+  expanded: boolean;
   applyingId?: string | null;
   onApply?: (change: HubFileChangeDto) => void;
 }) {
@@ -149,7 +151,7 @@ function DiffFileDetails({
   const applyLocked = applyStatus === "queued" || applyStatus === "applied";
 
   return (
-    <section className="diffViewerCard">
+    <section className={`diffViewerCard ${expanded ? "expanded" : "collapsed"}`} hidden={!expanded}>
       <div className="diffStats diffContentToolbar">
         <span className={`changeType ${change.changeType}`}>{change.changeType}</span>
         {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}

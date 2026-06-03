@@ -4652,9 +4652,6 @@ div.agentChoice {
 }
 
 .diffReviewFile {
-  position: sticky;
-  top: 0;
-  z-index: 3;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
@@ -4725,6 +4722,10 @@ div.agentChoice {
   border: 0;
   border-radius: 0;
   overflow: hidden;
+}
+
+.diffViewerCard.collapsed {
+  display: none;
 }
 
 .diffViewerTop {
