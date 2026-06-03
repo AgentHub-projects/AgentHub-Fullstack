@@ -4582,12 +4582,14 @@ div.agentChoice {
 
 .panelScroll.diffPanelLayout {
   gap: 0;
-  align-content: stretch;
+  align-content: start;
   padding: 0;
 }
 
 .diffReviewOverview {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 8px;
   min-width: 0;
   border-bottom: 1px solid #ececec;
@@ -4652,17 +4654,23 @@ div.agentChoice {
 
 .diffReviewFiles {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 4px;
   min-width: 0;
 }
 
 .diffFileBlock {
   display: grid;
+  align-content: start;
+  align-self: start;
+  grid-auto-rows: max-content;
   min-width: 0;
 }
 
 .diffReviewFile {
   display: grid;
+  align-self: start;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 0;
