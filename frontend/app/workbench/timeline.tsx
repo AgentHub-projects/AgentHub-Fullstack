@@ -11,14 +11,10 @@ import type {
   HubRunDto,
 } from "@agenthub/shared";
 import {
-  ApiOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  CodeOutlined,
   CommentOutlined,
   CopyOutlined,
-  ExpandOutlined,
   FileDoneOutlined,
   LoadingOutlined,
   MessageOutlined,
@@ -27,26 +23,20 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { AgentReplyBlockModel } from "../../lib/workbench/types";
-import type { DiffLine } from "../../lib/workbench/types";
-import { buildDiffLines, countChangeLines, diffMarker } from "../../lib/workbench/diff";
 import {
   buildAgentReplyBlocks,
   eventText,
   messageToReplyBlock,
-  payloadString,
   runStageLabel,
 } from "../../lib/workbench/timeline";
 import {
   agentColor,
-  fileChangeApplyLabel,
-  fileChangeApplyMessage,
-  fileChangeApplyStatus,
   formatElapsed,
   formatTime,
   initials,
   isRunning,
 } from "../../lib/workbench/format";
-import { ArtifactPart, MessageParts, RichText } from "./rich-text";
+import { MessageParts, RichText } from "./rich-text";
 
 export function TimelineMessage({
   message,
@@ -57,6 +47,8 @@ export function TimelineMessage({
   onRegenerate,
   onOpenArtifact,
   onOpenPart,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
   agents,
 }: {
   message: HubMessageDto;
@@ -67,6 +59,8 @@ export function TimelineMessage({
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
   agents: AgentInstanceDto[];
 }) {
   if (message.role === "user") {
@@ -80,6 +74,8 @@ export function TimelineMessage({
         onRegenerate={onRegenerate}
         onOpenArtifact={onOpenArtifact}
         onOpenPart={onOpenPart}
+        onOpenDiffPanel={onOpenDiffPanel}
+        onOpenArtifactsPanel={onOpenArtifactsPanel}
       />
     );
   }
@@ -93,6 +89,8 @@ export function TimelineMessage({
       onRegenerate={canRegenerate && onRegenerate ? () => onRegenerate(message) : undefined}
       onOpenArtifact={onOpenArtifact}
       onOpenPart={onOpenPart}
+      onOpenDiffPanel={onOpenDiffPanel}
+      onOpenArtifactsPanel={onOpenArtifactsPanel}
     />
   );
 }
@@ -108,10 +106,10 @@ export function RunThread({
   onReply,
   onReferencePart,
   onRegenerate,
-  onApplyFileChange,
   onOpenArtifact,
   onOpenPart,
-  applyingFileChangeId,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
 }: {
   run: HubRunDto;
   events: HubEventDto[];
@@ -123,17 +121,16 @@ export function RunThread({
   onReply?: (message: HubMessageDto) => void;
   onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onRegenerate?: (message: HubMessageDto) => void;
-  onApplyFileChange?: (change: HubFileChangeDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
-  applyingFileChangeId?: string | null;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
   const hasPersistedReplies = persistedReplies.length > 0 && !isRunning(run.status);
   const replyBlocks = hasPersistedReplies
     ? persistedReplies.map((message) => messageToReplyBlock(message, agents))
     : buildAgentReplyBlocks(events, agents);
-  const activityEvents = events.filter((event) => event.eventType !== "message.delta");
 
   return (
     <section className="runThread">
@@ -157,213 +154,53 @@ export function RunThread({
             onRegenerate={message && canRegenerateMessage(message) && onRegenerate ? () => onRegenerate(message) : undefined}
             onOpenArtifact={onOpenArtifact}
             onOpenPart={onOpenPart}
+            onOpenDiffPanel={onOpenDiffPanel}
+            onOpenArtifactsPanel={onOpenArtifactsPanel}
           />
         );
       })}
-      {fileChanges.length > 0 && (
-        <RunDiffCards
-          changes={fileChanges}
-          applyingId={applyingFileChangeId}
-          onApply={onApplyFileChange}
+      {(fileChanges.length > 0 || artifacts.length > 0) && (
+        <RunOutputLinks
+          fileChangeCount={fileChanges.length}
+          artifactCount={artifacts.length}
+          onOpenDiffPanel={onOpenDiffPanel}
+          onOpenArtifactsPanel={onOpenArtifactsPanel}
         />
       )}
-      {artifacts.length > 0 && <RunArtifactCards artifacts={artifacts} onOpenArtifact={onOpenArtifact} />}
-      {activityEvents.length > 0 && <RunActivityTimeline events={activityEvents} defaultOpen={isRunning(run.status)} />}
       {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
       {run.status === "failed" && <RunFailureBlock run={run} events={events} />}
     </section>
   );
 }
 
-function RunArtifactCards({
-  artifacts,
-  onOpenArtifact,
+function RunOutputLinks({
+  fileChangeCount,
+  artifactCount,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
 }: {
-  artifacts: HubArtifactDto[];
-  onOpenArtifact?: (artifactId: string) => void;
+  fileChangeCount: number;
+  artifactCount: number;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   return (
-    <details className="runArtifactCards">
-      <summary>
-        <span>
-          <FileDoneOutlined />
-          <strong>Run 产物</strong>
-        </span>
-        <small>{artifacts.length} artifacts</small>
-      </summary>
-      <div className="runArtifactList">
-        {artifacts.map((artifact) => (
-          <ArtifactPart key={artifact.id} part={artifactToPart(artifact)} onOpenArtifact={onOpenArtifact} />
-        ))}
+    <div className="runOutputLinks">
+      <span>本次运行产出</span>
+      <div>
+        {fileChangeCount > 0 && (
+          <button type="button" onClick={onOpenDiffPanel} disabled={!onOpenDiffPanel}>
+            <BranchesOutlined />
+            <span>右侧 Diff · {fileChangeCount}</span>
+          </button>
+        )}
+        {artifactCount > 0 && (
+          <button type="button" onClick={onOpenArtifactsPanel} disabled={!onOpenArtifactsPanel}>
+            <FileDoneOutlined />
+            <span>右侧 Artifacts · {artifactCount}</span>
+          </button>
+        )}
       </div>
-    </details>
-  );
-}
-
-function RunDiffCards({
-  changes,
-  applyingId,
-  onApply,
-}: {
-  changes: HubFileChangeDto[];
-  applyingId?: string | null;
-  onApply?: (change: HubFileChangeDto) => void;
-}) {
-  const [activeChange, setActiveChange] = useState<HubFileChangeDto | null>(null);
-  return (
-    <>
-      <div className="runDiffCards">
-        {changes.map((change) => {
-          const status = fileChangeApplyStatus(change);
-          const message = fileChangeApplyMessage(change);
-          const applyLocked = status === "queued" || status === "applied";
-          return (
-            <details className="runDiffCard" key={change.id}>
-              <summary>
-                <span>
-                  <BranchesOutlined />
-                  <strong>{change.path}</strong>
-                </span>
-                <span className="runDiffSummaryBadges">
-                  {status && <span className={`applyStatus ${status}`}>{fileChangeApplyLabel(status)}</span>}
-                  <code>{change.changeType}</code>
-                  <button
-                    type="button"
-                    title="展开 Diff"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setActiveChange(change);
-                    }}
-                  >
-                    <ExpandOutlined />
-                  </button>
-                </span>
-              </summary>
-              <div className="runDiffBody">
-                {message && <div className={`diffApplyMessage ${status ?? ""}`}>{message}</div>}
-                <pre>{change.patch ?? buildBeforeAfterPreview(change)}</pre>
-                {onApply && (
-                  <button
-                    className="ghostButton"
-                    type="button"
-                    disabled={applyingId === change.id || applyLocked}
-                    onClick={() => onApply(change)}
-                  >
-                    <CheckCircleOutlined />
-                    <span>
-                      {applyingId === change.id
-                        ? "应用中"
-                        : status === "queued"
-                          ? "等待结果"
-                          : status === "applied"
-                            ? "已应用"
-                            : "应用 Diff"}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </details>
-          );
-        })}
-      </div>
-      {activeChange && (
-        <FileChangeViewerLayer
-          change={activeChange}
-          applyingId={applyingId}
-          onApply={onApply}
-          onClose={() => setActiveChange(null)}
-        />
-      )}
-    </>
-  );
-}
-
-function FileChangeViewerLayer({
-  change,
-  applyingId,
-  onApply,
-  onClose,
-}: {
-  change: HubFileChangeDto;
-  applyingId?: string | null;
-  onApply?: (change: HubFileChangeDto) => void;
-  onClose: () => void;
-}) {
-  const status = fileChangeApplyStatus(change);
-  const message = fileChangeApplyMessage(change);
-  const applyLocked = status === "queued" || status === "applied";
-  const additions = countChangeLines(change, "add");
-  const deletions = countChangeLines(change, "remove");
-  return (
-    <div className="messagePartViewerLayer" role="presentation" onMouseDown={onClose}>
-      <section
-        className="messagePartViewer fileChangeViewer"
-        role="dialog"
-        aria-modal="true"
-        aria-label={change.path}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <strong>{change.path}</strong>
-            <span>{change.oldPath ? `${change.oldPath} -> ${change.path}` : change.changeType}</span>
-          </div>
-          <div className="messagePartViewerActions">
-            <button type="button" title="复制 Diff" onClick={() => copyText(change.patch ?? buildBeforeAfterPreview(change))}>
-              <CopyOutlined />
-              <span>复制</span>
-            </button>
-            {onApply && (
-              <button
-                type="button"
-                disabled={applyingId === change.id || applyLocked}
-                onClick={() => onApply(change)}
-              >
-                <CheckCircleOutlined />
-                <span>
-                  {applyingId === change.id
-                    ? "应用中"
-                    : status === "queued"
-                      ? "等待结果"
-                      : status === "applied"
-                        ? "已应用"
-                        : "应用 Diff"}
-                </span>
-              </button>
-            )}
-            <button type="button" title="关闭" onClick={onClose}>
-              ×
-            </button>
-          </div>
-        </header>
-        <div className="messagePartViewerBody fileChangeViewerBody">
-          <div className="diffStats">
-            <span className="add">+{additions}</span>
-            <span className="remove">-{deletions}</span>
-            {change.afterTruncated || change.beforeTruncated ? <span>内容已截断</span> : null}
-            {message ? <span className={`diffApplyMessage ${status ?? ""}`}>{message}</span> : null}
-          </div>
-          <div className="messagePartDiffPreview">
-            <TimelineDiffLines lines={buildDiffLines(change)} />
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function TimelineDiffLines({ lines }: { lines: DiffLine[] }) {
-  return (
-    <div className="unifiedDiff" role="table">
-      {lines.map((line, index) => (
-        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
-          <span className="lineNo">{line.oldLine ?? ""}</span>
-          <span className="lineNo">{line.newLine ?? ""}</span>
-          <span className="lineMarker">{diffMarker(line.kind)}</span>
-          <code>{line.text || " "}</code>
-        </div>
-      ))}
     </div>
   );
 }
@@ -386,6 +223,8 @@ function UserMessage({
   onRegenerate,
   onOpenArtifact,
   onOpenPart,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
@@ -395,6 +234,8 @@ function UserMessage({
   onRegenerate?: (message: HubMessageDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   return (
     <article className="timelineRow userRow">
@@ -426,6 +267,8 @@ function UserMessage({
           onReferencePart={onReferencePart ? (part) => onReferencePart(message, part) : undefined}
           onOpenArtifact={onOpenArtifact}
           onOpenPart={onOpenPart}
+          onOpenDiffPanel={onOpenDiffPanel}
+          onOpenArtifactsPanel={onOpenArtifactsPanel}
         />
       </div>
     </article>
@@ -440,6 +283,8 @@ function AgentReplyBlock({
   onRegenerate,
   onOpenArtifact,
   onOpenPart,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
 }: {
   block: AgentReplyBlockModel;
   onPinPart?: (part: HubMessagePartDto) => void;
@@ -448,6 +293,8 @@ function AgentReplyBlock({
   onRegenerate?: () => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
   return (
@@ -482,40 +329,14 @@ function AgentReplyBlock({
             onReferencePart={block.messageId ? onReferencePart : undefined}
             onOpenArtifact={onOpenArtifact}
             onOpenPart={onOpenPart}
+            onOpenDiffPanel={onOpenDiffPanel}
+            onOpenArtifactsPanel={onOpenArtifactsPanel}
           />
         ) : (
           <RichText text={block.text} />
         )}
       </div>
     </article>
-  );
-}
-
-function RunActivityTimeline({ events, defaultOpen }: { events: HubEventDto[]; defaultOpen: boolean }) {
-  return (
-    <details className="runActivity" open={defaultOpen}>
-      <summary>
-        <span>运行时间线</span>
-        <small>{events.length} events</small>
-      </summary>
-      <div className="runActivityList">
-        {events.map((event) => (
-          <RunActivityEvent key={event.id} event={event} />
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function RunActivityEvent({ event }: { event: HubEventDto }) {
-  return (
-    <div className={`runActivityEvent ${activityVariant(event)}`}>
-      <span className="activityIcon">{activityIcon(event)}</span>
-      <div>
-        <strong>{activityTitle(event)}</strong>
-        <small>{event.eventType} · {formatTime(event.occurredAt ?? event.persistedAt)}</small>
-      </div>
-    </div>
   );
 }
 
@@ -550,67 +371,8 @@ function RunFailureBlock({ run, events }: { run: HubRunDto; events: HubEventDto[
   );
 }
 
-function activityVariant(event: HubEventDto) {
-  if (event.eventType.includes("failed")) return "danger";
-  if (event.eventType.includes("completed")) return "success";
-  if (event.eventType === "file.change" || event.eventType.startsWith("artifact")) return "artifact";
-  return "normal";
-}
-
-function activityIcon(event: HubEventDto) {
-  if (event.eventType.includes("failed")) return <CloseCircleOutlined />;
-  if (event.eventType.includes("completed")) return <CheckCircleOutlined />;
-  if (event.eventType === "file.change") return <CodeOutlined />;
-  if (event.eventType.startsWith("artifact")) return <FileDoneOutlined />;
-  if (event.eventType.startsWith("tool")) return <ApiOutlined />;
-  return <MessageOutlined />;
-}
-
-function activityTitle(event: HubEventDto) {
-  if (event.eventType === "tool.call") return `调用 ${payloadString(event.payload, "tool") ?? "工具"}`;
-  if (event.eventType === "tool.result") return `工具返回 ${payloadString(event.payload, "status") ?? "结果"}`;
-  if (event.eventType === "file.change") return payloadString(event.payload, "path") ?? "文件变更";
-  if (event.eventType.startsWith("artifact")) return payloadString(event.payload, "title") ?? "Artifact 更新";
-  if (event.eventType === "run.completed") return "Run 完成";
-  if (event.eventType === "run.failed") return "Run 失败";
-  if (event.eventType === "run.cancelled") return "Run 已取消";
-  return payloadString(event.payload, "message") ?? payloadString(event.payload, "status") ?? event.eventType;
-}
-
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
-}
-
-function buildBeforeAfterPreview(change: HubFileChangeDto) {
-  const before = change.beforeContent ? `--- before\n${change.beforeContent}` : "";
-  const after = change.afterContent ? `+++ after\n${change.afterContent}` : "";
-  return [before, after].filter(Boolean).join("\n\n") || "Diff 内容为空";
-}
-
-function artifactToPart(artifact: HubArtifactDto): HubMessagePartDto {
-  return {
-    id: `artifact_${artifact.id}`,
-    type: "artifact",
-    title: artifact.title,
-    text: artifactTextPreview(artifact),
-    metadata: {
-      artifactId: artifact.id,
-      artifactKey: artifact.artifactKey,
-      kind: artifact.kind,
-      mimeType: artifact.mimeType,
-      storageKind: artifact.storageKind,
-      final: artifact.final,
-      version: artifact.version,
-      sizeBytes: artifact.sizeBytes,
-      updatedAt: artifact.updatedAt,
-    },
-  };
-}
-
-function artifactTextPreview(artifact: HubArtifactDto) {
-  const text = artifact.textContent?.trim();
-  if (!text) return undefined;
-  return text.length > 1200 ? `${text.slice(0, 1200)}\n...` : text;
 }
 
 function referenceCount(message: HubMessageDto) {

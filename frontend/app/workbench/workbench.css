@@ -126,7 +126,6 @@
 .artifactTop small,
 .contextSummary span,
 .runThreadTop,
-.runActivityEvent small,
 .runStatusPill small {
   color: var(--muted);
 }
@@ -608,111 +607,14 @@ textarea:focus-visible {
 
 .conversationPane {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--surface);
 }
 
-.sessionTabs {
-  display: flex;
-  grid-row: 1;
-  min-width: 0;
-  gap: 6px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  padding: 7px clamp(12px, 2vw, 18px) 6px;
-}
-
-.sessionTab {
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1fr) 24px;
-  align-items: center;
-  min-width: 150px;
-  max-width: 260px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-}
-
-.sessionTab.active {
-  border-color: var(--brand);
-  background: var(--surface);
-  box-shadow: inset 0 -2px 0 var(--brand);
-  color: var(--ink);
-}
-
-.sessionTab.unread:not(.active) {
-  border-color: rgba(44, 109, 103, 0.28);
-  background: var(--surface);
-}
-
-.sessionTabMain,
-.sessionTab .tabClose {
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.sessionTabMain {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  height: 30px;
-  gap: 7px;
-  padding: 0 4px 0 9px;
-  text-align: left;
-}
-
-.sessionTabMain > span:not(.tabStatus) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sessionTabMain strong {
-  display: inline-grid;
-  min-width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--green);
-  color: #fff;
-  font-size: 11px;
-}
-
-.tabStatus {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--line-strong);
-}
-
-.tabStatus.running {
-  background: var(--amber);
-  box-shadow: 0 0 0 3px rgba(148, 98, 0, 0.12);
-}
-
-.sessionTab .tabClose {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  font-size: 15px;
-}
-
-.sessionTab .tabClose:hover {
-  background: rgba(38, 50, 66, 0.08);
-  color: var(--ink);
-}
-
 .conversationHeader {
-  grid-row: 2;
+  grid-row: 1;
   flex-wrap: wrap;
   align-items: flex-start;
   min-height: 58px;
@@ -860,7 +762,7 @@ textarea:focus-visible {
 }
 
 .timeline {
-  grid-row: 4;
+  grid-row: 3;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1008,124 +910,6 @@ textarea:focus-visible {
   color: var(--red);
 }
 
-.runActivity,
-.runArtifactCards {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.runActivity summary,
-.runArtifactCards summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 36px;
-  cursor: pointer;
-  padding: 0 11px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.runActivity summary small,
-.runArtifactCards summary small {
-  color: var(--muted-soft);
-  font-weight: 700;
-}
-
-.runArtifactCards summary > span {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-}
-
-.runArtifactCards summary strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink-soft);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runArtifactList {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--line);
-  padding: 8px;
-}
-
-.runActivityList {
-  display: grid;
-  border-top: 1px solid var(--line);
-}
-
-.runActivityEvent {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 9px;
-  align-items: start;
-  min-width: 0;
-  padding: 9px 11px;
-}
-
-.runActivityEvent + .runActivityEvent {
-  border-top: 1px solid var(--line);
-}
-
-.activityIcon {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-}
-
-.runActivityEvent strong,
-.runActivityEvent small {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runActivityEvent strong {
-  font-size: 13px;
-  font-weight: 760;
-}
-
-.runActivityEvent small {
-  margin-top: 2px;
-  font-size: 11px;
-}
-
-.runActivityEvent.success .activityIcon {
-  border-color: rgba(24, 121, 78, 0.22);
-  background: var(--green-soft);
-  color: var(--green);
-}
-
-.runActivityEvent.danger .activityIcon {
-  border-color: rgba(180, 35, 24, 0.2);
-  background: var(--red-soft);
-  color: var(--red);
-}
-
-.runActivityEvent.artifact .activityIcon {
-  border-color: var(--line-strong);
-  background: var(--surface);
-  color: var(--brand);
-}
-
 .runStatusPill {
   display: inline-flex;
   align-items: center;
@@ -1187,89 +971,55 @@ textarea:focus-visible {
   background: #fffafa;
 }
 
-.runDiffCards {
-  display: grid;
-  gap: 8px;
-}
-
-.runDiffCard {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.runDiffCard summary {
+.runOutputLinks {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 38px;
-  cursor: pointer;
-  padding: 0 11px;
-}
-
-.runDiffCard summary > span {
-  display: flex;
-  align-items: center;
   min-width: 0;
-  gap: 8px;
-}
-
-.runDiffCard summary strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink-soft);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runDiffCard summary code {
-  flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--muted);
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: 8px 9px;
 }
 
-.runDiffSummaryBadges {
-  justify-content: flex-end;
+.runOutputLinks > span {
   flex: 0 0 auto;
-}
-
-.runDiffSummaryBadges button {
-  display: grid;
-  width: 26px;
-  height: 24px;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
 }
 
-.runDiffSummaryBadges button:hover {
-  border-color: var(--line);
+.runOutputLinks > div {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.runOutputLinks button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: var(--surface);
+  color: var(--ink-soft);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.runOutputLinks button:hover:not(:disabled) {
+  border-color: var(--line-strong);
   color: var(--ink);
 }
 
-.runDiffBody {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--line);
-  padding: 9px 11px 11px;
-}
-
-.runDiffBody pre {
-  max-height: 260px;
-}
-
-.runDiffBody .ghostButton {
-  justify-self: end;
+.runOutputLinks button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .richText {
@@ -1319,8 +1069,6 @@ textarea:focus-visible {
 }
 
 .codeBlock {
-  display: grid;
-  gap: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -1332,12 +1080,38 @@ textarea:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
+  cursor: pointer;
+  list-style: none;
   padding: 4px 5px 4px 9px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.codeBlock[open] .codeBlockHeader {
+  border-bottom: 1px solid var(--line);
+}
+
+.codeBlockHeader::-webkit-details-marker {
+  display: none;
+}
+
+.codeBlockMeta {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.codeBlockMeta > span {
+  color: var(--ink-soft);
+}
+
+.codeBlockMeta small {
+  color: var(--muted-soft);
+  font-size: 11px;
+  font-weight: 760;
 }
 
 .codeBlockHeader > div {
@@ -1366,6 +1140,7 @@ textarea:focus-visible {
 .codeBlock pre {
   border: 0;
   border-radius: 0;
+  max-height: 360px;
 }
 
 .messageCardPart {
@@ -1563,6 +1338,8 @@ textarea:focus-visible {
 
 .diffMessageTop > div:last-child {
   display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 2px;
 }
 
@@ -1583,6 +1360,29 @@ textarea:focus-visible {
   border-color: var(--line);
   background: var(--surface);
   color: var(--ink);
+}
+
+.diffMessageTop .partPanelButton,
+.artifactMessageActions .partPanelButton {
+  display: inline-flex;
+  width: auto;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.diffMessageTop .partPanelButton span,
+.artifactMessageActions .partPanelButton span {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.partMessageHint {
+  margin: 0 8px 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .diffMessagePart .unifiedDiff {
@@ -1660,22 +1460,11 @@ textarea:focus-visible {
 
 .artifactMessagePart {
   display: grid;
-  gap: 8px;
+  gap: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
-}
-
-.artifactMessagePart.clickable {
-  cursor: pointer;
-}
-
-.artifactMessagePart.clickable:hover,
-.artifactMessagePart.clickable:focus-visible {
-  border-color: var(--line-strong);
-  box-shadow: var(--focus);
-  outline: none;
 }
 
 .artifactMessageTop {
@@ -1742,42 +1531,9 @@ textarea:focus-visible {
   color: var(--ink);
 }
 
-.artifactMessageMedia,
-.artifactMessageText,
 .artifactMessageHint {
   margin: 0 8px 8px;
-}
-
-.artifactMessageMedia {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.artifactMessageMedia img {
-  display: block;
-  width: 100%;
-  max-height: 220px;
-  object-fit: contain;
-}
-
-.artifactMessageFrame {
-  width: calc(100% - 16px);
-  height: 220px;
-  margin: 0 8px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.artifactMessageText {
-  max-height: 220px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  padding: 8px;
+  font-size: 12px;
 }
 
 .deployStatusPart {
@@ -2002,7 +1758,7 @@ textarea:focus-visible {
 }
 
 .composer {
-  grid-row: 5;
+  grid-row: 4;
   border-top: 1px solid var(--line);
   background: var(--surface);
   box-shadow: none;
@@ -2265,7 +2021,7 @@ textarea:focus-visible {
 
 .pinnedKeyMessages {
   display: grid;
-  grid-row: 3;
+  grid-row: 2;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: 12px;
@@ -4323,4 +4079,777 @@ div.agentChoice {
   .builderChatMessage {
     max-width: 100%;
   }
+}
+
+/* Codex-like desktop workbench refresh */
+.agenthubShell {
+  grid-template-columns: 320px minmax(0, 1fr) 390px;
+  background: #ffffff;
+}
+
+.agenthubShell.diffActive {
+  grid-template-columns: 320px minmax(0, 1fr) clamp(520px, 42vw, 760px);
+}
+
+.agenthubShell.inspectorCollapsed,
+.agenthubShell.diffActive.inspectorCollapsed,
+.agenthubShell.artifactsActive.inspectorCollapsed {
+  grid-template-columns: 320px minmax(0, 1fr) 56px;
+}
+
+.sessionRail {
+  gap: 8px;
+  border-right: 1px solid #cfe5df;
+  background: #eaf9f6;
+  padding: 18px 8px 10px;
+}
+
+.imRailTop {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 0;
+}
+
+.railNavButton {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #243331;
+  padding: 0 12px;
+  font-size: 15px;
+  text-align: left;
+}
+
+.railNavButton:hover,
+.sessionSearch:focus-within {
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.railNavButton.primary {
+  color: #17211f;
+  font-weight: 650;
+}
+
+.sessionSearch {
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0 12px;
+}
+
+.sessionSearch:hover {
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.railHeader {
+  display: grid;
+  min-height: 44px;
+  padding: 16px 12px 2px;
+}
+
+.railHeader span {
+  color: rgba(36, 51, 49, 0.48);
+  font-size: 13px;
+}
+
+.railHeader strong {
+  margin-top: 10px;
+  color: rgba(36, 51, 49, 0.78);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.statusStack {
+  gap: 6px;
+  padding: 0 4px 8px;
+}
+
+.projectBinder {
+  grid-template-columns: minmax(0, 1fr) 30px;
+  padding: 0 0 2px;
+}
+
+.projectBinder select,
+.projectBinder .iconButton {
+  border-color: transparent;
+  background: transparent;
+}
+
+.projectBinder select {
+  height: 34px;
+  color: #243331;
+  font-size: 13px;
+}
+
+.projectBinder:hover select,
+.projectBinder:hover .iconButton {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.groupSummary {
+  border: 0;
+  background: transparent;
+  padding: 4px;
+}
+
+.groupSummaryHeader {
+  min-height: 32px;
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.groupSummaryHeader:hover {
+  background: rgba(255, 255, 255, 0.48);
+  color: #17211f;
+}
+
+.memberList {
+  max-height: 164px;
+  overflow: auto;
+  padding: 2px 0 0;
+}
+
+.memberRow,
+.addMemberRow {
+  border: 0;
+  border-radius: 10px;
+  padding: 6px 8px;
+}
+
+.archiveToggle {
+  padding: 0 12px;
+  color: rgba(36, 51, 49, 0.68);
+  font-weight: 560;
+}
+
+.archiveToggle input {
+  display: none;
+}
+
+.sessionList {
+  gap: 2px;
+  padding: 2px 0 12px;
+}
+
+.sessionItem {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 40px;
+  border-radius: 11px;
+  margin: 0;
+  padding: 7px 28px 7px 12px;
+}
+
+.sessionAvatar {
+  display: none;
+}
+
+.sessionItem:hover {
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.sessionItem.active {
+  background: rgba(36, 51, 49, 0.08);
+  box-shadow: none;
+}
+
+.sessionItem.active::after {
+  position: absolute;
+  top: 17px;
+  right: 12px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6f7f7c;
+  content: "";
+}
+
+.sessionTitle {
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.sessionItemTop time {
+  color: rgba(36, 51, 49, 0.56);
+  font-size: 12px;
+}
+
+.sessionItemBottom small {
+  color: rgba(36, 51, 49, 0.58);
+  font-size: 13px;
+}
+
+.sessionItemActions {
+  right: 12px;
+  border-color: rgba(36, 51, 49, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.sessionItem:focus-within .sessionItemActions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sessionItem:hover .sessionItemActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.conversationPane {
+  border-right: 1px solid #e9e9e9;
+  background: #ffffff;
+}
+
+.conversationHeader {
+  align-items: center;
+  min-height: 56px;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 0 20px;
+}
+
+.conversationTitleBlock {
+  gap: 0;
+}
+
+.conversationHeader strong {
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.conversationHeader span {
+  margin-top: 2px;
+  color: rgba(17, 17, 17, 0.52);
+  font-size: 12px;
+}
+
+.headerActions {
+  gap: 6px;
+}
+
+.headerActions .iconButton,
+.headerActions .ghostButton,
+.deployActionWrap .ghostButton {
+  border-color: transparent;
+  background: transparent;
+  color: #6b6b6b;
+}
+
+.headerActions .iconButton:hover,
+.headerActions .ghostButton:hover,
+.deployActionWrap .ghostButton:hover {
+  background: #f4f4f4;
+  color: #111111;
+}
+
+.timeline {
+  gap: 18px;
+  background: #ffffff;
+  padding: 26px clamp(28px, 6vw, 96px);
+}
+
+.timelineRow,
+.runThread,
+.agentReply {
+  max-width: min(920px, 100%);
+}
+
+.bubble,
+.agentReplyBody {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.userRow {
+  max-width: min(680px, 86%);
+}
+
+.userBubble {
+  border: 0;
+  border-radius: 16px;
+  background: #f4f4f4;
+  padding: 10px 14px;
+}
+
+.agentReply {
+  gap: 12px;
+}
+
+.agentReply .avatar {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 8px;
+  opacity: 0.92;
+}
+
+.bubbleMeta {
+  min-height: 28px;
+  margin-bottom: 6px;
+  color: rgba(17, 17, 17, 0.48);
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.bubbleMeta button {
+  border-color: transparent;
+  background: transparent;
+  color: #8c8c8c;
+  opacity: 0.74;
+}
+
+.bubbleMeta button:hover {
+  background: #f4f4f4;
+  color: #111111;
+  opacity: 1;
+}
+
+.runThread {
+  gap: 12px;
+  border-left: 1px solid #d9d9d9;
+  padding-left: 16px;
+}
+
+.runOutputLinks {
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.pinnedKeyMessages {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 8px clamp(28px, 6vw, 96px);
+}
+
+.pinnedKeyHeader {
+  min-height: 24px;
+}
+
+.pinnedKeyHeader strong {
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.pinnedKeyList {
+  max-height: 58px;
+  gap: 6px;
+}
+
+.pinnedKeyItem {
+  min-width: min(280px, 48%);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 7px 9px;
+}
+
+.composer {
+  border-top: 0;
+  background: #ffffff;
+  padding: 14px clamp(28px, 6vw, 96px) 16px;
+}
+
+.replyBanner,
+.composerInputWrap,
+.composerBar,
+.attachmentTray {
+  width: min(920px, 100%);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.composer textarea {
+  min-height: 86px;
+  resize: none;
+  border: 1px solid #dddddd;
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  padding: 16px 16px 8px;
+  font-size: 15px;
+}
+
+.composer textarea:focus {
+  border-color: #d4d4d4;
+  box-shadow: none;
+}
+
+.composerBar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 48px;
+  border: 1px solid #dddddd;
+  border-top: 0;
+  border-radius: 0 0 22px 22px;
+  background: #ffffff;
+  padding: 0 10px 8px 12px;
+}
+
+.composerBar > span {
+  grid-column: 2;
+  color: #777777;
+  font-size: 13px;
+}
+
+.composerBar .iconButton {
+  grid-column: 1;
+  grid-row: 1;
+  border-color: transparent;
+}
+
+.composerBar .primaryButton {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 44px;
+  height: 36px;
+  border-radius: 999px;
+  padding: 0 12px;
+}
+
+.composerBar .primaryButton:disabled {
+  border-color: #777777;
+  background: #777777;
+  color: #ffffff;
+  opacity: 1;
+}
+
+.composerBar .primaryButton:not(:disabled) {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.composerBar .primaryButton > span:not(.anticon) {
+  display: none;
+}
+
+.composerBar .primaryButton .anticon {
+  display: inline-flex;
+  font-size: 15px;
+}
+
+.inspector {
+  border-left: 1px solid #e5e5e5;
+  background: #ffffff;
+}
+
+.inspectorTabs {
+  grid-template-columns: auto repeat(2, auto) minmax(0, 1fr);
+  justify-content: start;
+  gap: 6px;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.inspectorTabs button {
+  min-height: 34px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #6b6b6b;
+  padding: 0 12px;
+  font-weight: 620;
+}
+
+.inspectorTabs button.active {
+  border-color: transparent;
+  background: #f1f1f1;
+  color: #111111;
+}
+
+.inspectorTabs .inspectorToggle {
+  width: 34px;
+  padding: 0;
+}
+
+.panelScroll.diffPanelLayout {
+  gap: 0;
+  align-content: stretch;
+  padding: 0;
+}
+
+.diffReviewOverview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 14px 18px 12px;
+}
+
+.diffReviewTop,
+.diffReviewStats,
+.diffReviewBranch,
+.diffReviewFile,
+.diffReviewFileStats,
+.diffReviewFileMain,
+.diffFileToggle,
+.diffHunkToggle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.diffReviewTop {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reviewPill {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  border-radius: 999px;
+  background: #f1f1f1;
+  color: #111111;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.diffReviewStats,
+.diffReviewFileStats {
+  justify-content: flex-end;
+  gap: 7px;
+  color: #777777;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diffReviewStats .add,
+.diffReviewFileStats .add {
+  color: #008a3d;
+}
+
+.diffReviewStats .remove,
+.diffReviewFileStats .remove {
+  color: #c21f1f;
+}
+
+.diffReviewBranch {
+  gap: 8px;
+  color: #8a8a8a;
+  font-size: 13px;
+}
+
+.diffReviewFiles {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diffFileBlock {
+  display: grid;
+  min-width: 0;
+}
+
+.diffReviewFile {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #242424;
+  padding: 0 8px 0 0;
+  text-align: left;
+}
+
+.diffReviewFile:hover,
+.diffFileBlock.active > .diffReviewFile,
+.diffFileBlock.expanded > .diffReviewFile {
+  background: #f1f1f1;
+}
+
+.diffFileToggle,
+.diffHunkToggle {
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #666666;
+  padding: 0;
+}
+
+.diffFileToggle:hover,
+.diffHunkToggle:hover {
+  background: #e7e7e7;
+  color: #111111;
+}
+
+.diffReviewFileMain {
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #242424;
+  padding: 0 8px 0 0;
+  font: inherit;
+  text-align: left;
+}
+
+.diffReviewFileMain > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffReviewActiveDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: #2f80ed;
+}
+
+.diffViewerCard {
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.diffViewerTop {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-items: center;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 10px 18px;
+}
+
+.diffViewerTop strong {
+  color: #242424;
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.diffViewerActions {
+  gap: 6px;
+}
+
+.diffViewerActions .ghostButton {
+  min-height: 30px;
+  border-color: #dedede;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 0 10px;
+}
+
+.changeType,
+.applyStatus {
+  border-color: #dedede;
+  background: #ffffff;
+}
+
+.diffStats {
+  gap: 9px;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 7px 18px;
+}
+
+.diffApplyMessage {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.unifiedDiff {
+  max-height: none;
+  overflow: auto;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.62;
+}
+
+.diffLine {
+  grid-template-columns: 36px 36px 20px minmax(0, 1fr);
+  border-bottom: 0;
+}
+
+.diffLine .lineNo,
+.diffLine .lineMarker {
+  color: #a0a0a0;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+
+.diffLine code {
+  color: #242424;
+  padding: 1px 10px;
+}
+
+.diffLine.add {
+  background: #f2fbf5;
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.diffLine.add .lineMarker,
+.diffLine.add code {
+  color: #087a35;
+}
+
+.diffLine.remove {
+  background: #fff4f3;
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.diffLine.remove .lineMarker,
+.diffLine.remove code {
+  color: #b42318;
+}
+
+.diffLine.meta {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  min-width: calc(100% - 16px);
+  margin: 8px 8px 6px;
+  border-radius: 8px;
+  background: #f1f1f1;
+}
+
+.diffLine.meta code {
+  display: block;
+  color: #666666;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 10px 6px 0;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffLine.meta .diffHunkToggle {
+  height: 30px;
+}
+
+.diffLine.meta .diffHunkToggle.spacer {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.diffHunk.collapsed .diffLine.meta {
+  margin-bottom: 8px;
+}
+
+.artifactBlock {
+  border-radius: 14px;
 }

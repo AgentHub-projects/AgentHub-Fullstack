@@ -36,6 +36,8 @@ export function MessageParts({
   onReferencePart,
   onOpenArtifact,
   onOpenPart,
+  onOpenDiffPanel,
+  onOpenArtifactsPanel,
 }: {
   parts?: HubMessagePartDto[];
   fallbackText: string;
@@ -43,11 +45,24 @@ export function MessageParts({
   onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenDiffPanel?: () => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   if (!parts?.length) return <RichText text={fallbackText} />;
   return (
     <div className="richText">
-      {parts.flatMap((part, index) => renderMessagePart(part, index, onPinPart, onReferencePart, onOpenArtifact, onOpenPart))}
+      {parts.flatMap((part, index) =>
+        renderMessagePart(
+          part,
+          index,
+          onPinPart,
+          onReferencePart,
+          onOpenArtifact,
+          onOpenPart,
+          onOpenDiffPanel,
+          onOpenArtifactsPanel,
+        ),
+      )}
     </div>
   );
 }
@@ -59,6 +74,8 @@ function renderMessagePart(
   onReferencePart?: (part: HubMessagePartDto) => void,
   onOpenArtifact?: (artifactId: string) => void,
   onOpenPart?: (part: HubMessagePartDto) => void,
+  onOpenDiffPanel?: () => void,
+  onOpenArtifactsPanel?: () => void,
 ): React.ReactNode[] {
   if (part.type === "code") {
     return [
@@ -86,10 +103,29 @@ function renderMessagePart(
     return [<FilePart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
   }
   if (part.type === "diff") {
-    return [<DiffPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenPart={onOpenPart} />];
+    return [
+      <DiffPart
+        key={part.id || index}
+        part={part}
+        onPinPart={onPinPart}
+        onReferencePart={onReferencePart}
+        onOpenPart={onOpenPart}
+        onOpenDiffPanel={onOpenDiffPanel}
+      />,
+    ];
   }
   if (part.type === "artifact") {
-    return [<ArtifactPart key={part.id || index} part={part} onPinPart={onPinPart} onReferencePart={onReferencePart} onOpenArtifact={onOpenArtifact} onOpenPart={onOpenPart} />];
+    return [
+      <ArtifactPart
+        key={part.id || index}
+        part={part}
+        onPinPart={onPinPart}
+        onReferencePart={onReferencePart}
+        onOpenArtifact={onOpenArtifact}
+        onOpenPart={onOpenPart}
+        onOpenArtifactsPanel={onOpenArtifactsPanel}
+      />,
+    ];
   }
   if (part.type !== "text") {
     return [
@@ -129,18 +165,18 @@ function DiffPart({
   onPinPart,
   onReferencePart,
   onOpenPart,
+  onOpenDiffPanel,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenDiffPanel?: () => void;
 }) {
   const path = stringMetadata(part.metadata, "path") ?? part.title ?? "Diff";
   const changeType = stringMetadata(part.metadata, "changeType");
   const patch = part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
-  const before = stringMetadata(part.metadata, "beforeContent");
-  const after = stringMetadata(part.metadata, "afterContent");
-  const lines = patch.trim() ? parseUnifiedPatch(patch) : before || after ? beforeAfterLines(before ?? "", after ?? "") : [];
+  const lineCount = patch.trim() ? patch.replace(/\r\n/g, "\n").split("\n").length : null;
   return (
     <div className="diffMessagePart">
       <div className="diffMessageTop">
@@ -152,6 +188,12 @@ function DiffPart({
           <span>{changeType ?? "diff"}</span>
         </div>
         <div>
+          {onOpenDiffPanel && (
+            <button className="partPanelButton" type="button" title="在右侧查看 Diff" onClick={onOpenDiffPanel}>
+              <BranchesOutlined />
+              <span>右侧 Diff</span>
+            </button>
+          )}
           {onOpenPart && (
             <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
               <ExpandOutlined />
@@ -174,7 +216,9 @@ function DiffPart({
           )}
         </div>
       </div>
-      {lines.length ? <DiffLines lines={lines} /> : <pre>{JSON.stringify(part.metadata ?? {}, null, 2)}</pre>}
+      <small className="partMessageHint">
+        文件变更详情在右侧 Diff 面板查看{lineCount ? ` · ${lineCount} 行 patch` : ""}
+      </small>
     </div>
   );
 }
@@ -311,12 +355,14 @@ export function ArtifactPart({
   onReferencePart,
   onOpenArtifact,
   onOpenPart,
+  onOpenArtifactsPanel,
 }: {
   part: HubMessagePartDto;
   onPinPart?: (part: HubMessagePartDto) => void;
   onReferencePart?: (part: HubMessagePartDto) => void;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
+  onOpenArtifactsPanel?: () => void;
 }) {
   const artifactId = stringMetadata(part.metadata, "artifactId");
   const kind = stringMetadata(part.metadata, "kind") ?? "artifact";
@@ -339,21 +385,7 @@ export function ArtifactPart({
     onOpenPart?.(part);
   };
   return (
-    <div
-      className={`artifactMessagePart ${kind} ${canExpand ? "clickable" : ""}`}
-      role={canExpand ? "button" : undefined}
-      tabIndex={canExpand ? 0 : undefined}
-      onClick={canExpand ? openPreview : undefined}
-      onKeyDown={
-        canExpand
-          ? (event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              openPreview();
-            }
-          : undefined
-      }
-    >
+    <div className={`artifactMessagePart ${kind}`}>
       <div className="artifactMessageTop">
         <span className="artifactMessageIcon"><FileDoneOutlined /></span>
         <div>
@@ -364,7 +396,13 @@ export function ArtifactPart({
             {final ? " · final" : ""}
           </small>
         </div>
-        <div className="artifactMessageActions" onClick={(event) => event.stopPropagation()}>
+        <div className="artifactMessageActions">
+          {onOpenArtifactsPanel && (
+            <button className="partPanelButton" type="button" title="在右侧查看 Artifact" onClick={onOpenArtifactsPanel}>
+              <FileDoneOutlined />
+              <span>右侧查看</span>
+            </button>
+          )}
           {canExpand && (
             <button type="button" title="展开预览" onClick={openPreview}>
               <ExpandOutlined />
@@ -387,36 +425,9 @@ export function ArtifactPart({
           )}
         </div>
       </div>
-      <ArtifactInlinePreview kind={kind} title={title} contentUrl={contentUrl} text={part.text} />
+      <small className="artifactMessageHint">产物已生成，详情与预览在右侧 Artifacts 面板查看。</small>
     </div>
   );
-}
-
-function ArtifactInlinePreview({
-  kind,
-  title,
-  contentUrl,
-  text,
-}: {
-  kind: string;
-  title: string;
-  contentUrl?: string;
-  text?: string;
-}) {
-  if (kind === "image" && contentUrl) {
-    return (
-      <div className="artifactMessageMedia">
-        <img alt={title} src={contentUrl} />
-      </div>
-    );
-  }
-  if (kind === "html" && contentUrl) {
-    return <iframe className="artifactMessageFrame" title={title} src={contentUrl} sandbox="" />;
-  }
-  if (text?.trim()) {
-    return <div className="artifactMessageText"><RichText text={text} /></div>;
-  }
-  return <small className="artifactMessageHint">产物已保存，可打开预览或在右侧 Artifacts 面板展开。</small>;
 }
 
 function LinkPreviewPart({
@@ -577,33 +588,41 @@ function CodeBlock({
   onReference?: () => void;
   onExpand?: () => void;
 }) {
+  const lineCount = text ? text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n").length : 0;
   return (
-    <div className="codeBlock">
-      <div className="codeBlockHeader">
-        <span>{language || "code"}</span>
+    <details className="codeBlock">
+      <summary className="codeBlockHeader">
+        <span className="codeBlockMeta">
+          <span>{language || "code"}</span>
+          <small>{lineCount} 行</small>
+        </span>
         <div>
           {onExpand && (
-            <button type="button" title="展开预览" onClick={onExpand}>
+            <button type="button" title="展开预览" onClick={(event) => handleSummaryAction(event, onExpand)}>
               <ExpandOutlined />
             </button>
           )}
           {onPin && (
-            <button type="button" title={pinned ? "取消 Pin 这段代码" : "Pin 这段代码"} onClick={onPin}>
+            <button
+              type="button"
+              title={pinned ? "取消 Pin 这段代码" : "Pin 这段代码"}
+              onClick={(event) => handleSummaryAction(event, onPin)}
+            >
               {pinned ? <PushpinFilled /> : <PushpinOutlined />}
             </button>
           )}
-          <button type="button" title="复制代码" onClick={() => copyText(text)}>
+          <button type="button" title="复制代码" onClick={(event) => handleSummaryAction(event, () => copyText(text))}>
             <CopyOutlined />
           </button>
           {onReference && (
-            <button type="button" title="引用代码" onClick={onReference}>
+            <button type="button" title="引用代码" onClick={(event) => handleSummaryAction(event, onReference)}>
               <CommentOutlined />
             </button>
           )}
         </div>
-      </div>
+      </summary>
       <pre>{text}</pre>
-    </div>
+    </details>
   );
 }
 
@@ -841,6 +860,12 @@ function partCopyText(part: HubMessagePartDto) {
 
 function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
+}
+
+function handleSummaryAction(event: React.MouseEvent, action: () => void) {
+  event.preventDefault();
+  event.stopPropagation();
+  action();
 }
 
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {

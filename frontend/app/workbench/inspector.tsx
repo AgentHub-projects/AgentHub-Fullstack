@@ -15,17 +15,18 @@ import {
   CheckCircleOutlined,
   CodeOutlined,
   CopyOutlined,
+  DownOutlined,
   ExpandOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
   LinkOutlined,
+  RightOutlined,
   SelectOutlined,
 } from "@ant-design/icons";
 import { artifactContentUrl, listArtifactVersions } from "../../lib/agenthub-api";
 import { publicArtifactUrlFromArtifact, pptSlidesFromMetadata } from "../../lib/workbench/artifact-preview";
 import {
   buildDiffLines,
-  buildFileTreeRows,
   countChangeLines,
   diffMarker,
   parseUnifiedPatch,
@@ -49,94 +50,155 @@ export function DiffPanel({
   onApply?: (change: HubFileChangeDto) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (changes.length === 0) {
       setSelectedId(null);
+      setExpandedFileIds(new Set());
       return;
     }
     if (!selectedId || !changes.some((change) => change.id === selectedId)) {
       setSelectedId(changes[0].id);
     }
+
+    const ids = new Set(changes.map((change) => change.id));
+    setExpandedFileIds((current) => {
+      const next = new Set([...current].filter((id) => ids.has(id)));
+      if (next.size === 0) next.add(selectedId && ids.has(selectedId) ? selectedId : changes[0].id);
+      return sameStringSet(current, next) ? current : next;
+    });
   }, [changes, selectedId]);
 
   if (changes.length === 0) return <PanelEmpty icon={<BranchesOutlined />} text="暂无文件变更" />;
   const activeChange = changes.find((change) => change.id === selectedId) ?? changes[0];
-  const rows = buildFileTreeRows(changes);
-  const additions = countChangeLines(activeChange, "add");
-  const deletions = countChangeLines(activeChange, "remove");
-  const applyStatus = fileChangeApplyStatus(activeChange);
-  const applyMessage = fileChangeApplyMessage(activeChange);
-  const applyLocked = applyStatus === "queued" || applyStatus === "applied";
+  const totalAdditions = changes.reduce((sum, change) => sum + countChangeLines(change, "add"), 0);
+  const totalDeletions = changes.reduce((sum, change) => sum + countChangeLines(change, "remove"), 0);
+
+  function toggleFile(change: HubFileChangeDto) {
+    setSelectedId(change.id);
+    setExpandedFileIds((current) => {
+      const next = new Set(current);
+      if (next.has(change.id)) next.delete(change.id);
+      else next.add(change.id);
+      return next;
+    });
+  }
+
+  function openFile(change: HubFileChangeDto) {
+    setSelectedId(change.id);
+    setExpandedFileIds((current) => {
+      if (current.has(change.id)) return current;
+      return new Set(current).add(change.id);
+    });
+  }
 
   return (
     <div className="panelScroll diffPanelLayout">
-      <section className="diffFileTree" aria-label="文件变更树">
-        <div className="diffPanelHeader">
-          <strong>Files</strong>
-          <span>{changes.length}</span>
-        </div>
-        <div className="diffTreeRows">
-          {rows.map((row) =>
-            row.kind === "folder" ? (
-              <div className="diffTreeFolder" key={row.key} style={{ paddingLeft: 10 + row.depth * 14 }}>
-                {row.label}
-              </div>
-            ) : (
-              <button
-                className={`diffTreeFile ${row.change?.id === activeChange.id ? "active" : ""}`}
-                key={row.key}
-                type="button"
-                onClick={() => row.change && setSelectedId(row.change.id)}
-                style={{ paddingLeft: 10 + row.depth * 14 }}
-              >
-                <span>{row.label}</span>
-                <code>{row.change?.changeType}</code>
-              </button>
-            ),
-          )}
-        </div>
-      </section>
-
-      <section className="diffViewerCard">
-        <div className="diffViewerTop">
-          <div>
-            <strong>{activeChange.path}</strong>
-            {activeChange.oldPath && <small>{activeChange.oldPath}</small>}
-          </div>
-          <div className="diffViewerActions">
-            <span className={`changeType ${activeChange.changeType}`}>{activeChange.changeType}</span>
-            {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
-            {onApply && (
-              <button
-                className="ghostButton"
-                type="button"
-                disabled={applyingId === activeChange.id || applyLocked}
-                onClick={() => onApply(activeChange)}
-              >
-                <CheckCircleOutlined />
-                <span>
-                  {applyingId === activeChange.id
-                    ? "应用中"
-                    : applyStatus === "queued"
-                      ? "等待结果"
-                      : applyStatus === "applied"
-                        ? "已应用"
-                        : "应用 Diff"}
-                </span>
-              </button>
-            )}
+      <section className="diffReviewOverview" aria-label="文件变更总览">
+        <div className="diffReviewTop">
+          <span className="reviewPill"><BranchesOutlined /> 审查</span>
+          <div className="diffReviewStats">
+            <span>{changes.length} 文件</span>
+            <span className="add">+{totalAdditions}</span>
+            <span className="remove">-{totalDeletions}</span>
           </div>
         </div>
-        <div className="diffStats">
-          <span className="add">+{additions}</span>
-          <span className="remove">-{deletions}</span>
-          {activeChange.afterTruncated || activeChange.beforeTruncated ? <span>内容已截断</span> : null}
-          {applyMessage ? <span className={`diffApplyMessage ${applyStatus ?? ""}`}>{applyMessage}</span> : null}
+        <div className="diffReviewBranch">
+          <span>main</span>
+          <span>→</span>
+          <span>working tree</span>
         </div>
-        <UnifiedDiffView change={activeChange} />
+        <div className="diffReviewFiles">
+          {changes.map((change) => {
+            const expanded = expandedFileIds.has(change.id);
+            const active = change.id === activeChange.id;
+            return (
+              <article className={`diffFileBlock ${active ? "active" : ""} ${expanded ? "expanded" : ""}`} key={change.id}>
+                <div className="diffReviewFile">
+                  <button
+                    className="diffFileToggle"
+                    type="button"
+                    title={expanded ? "收起文件 Diff" : "展开文件 Diff"}
+                    aria-label={expanded ? `收起 ${change.path}` : `展开 ${change.path}`}
+                    aria-expanded={expanded}
+                    onClick={() => toggleFile(change)}
+                  >
+                    {expanded ? <DownOutlined /> : <RightOutlined />}
+                  </button>
+                  <button className="diffReviewFileMain" type="button" onClick={() => openFile(change)}>
+                    <span>{change.path}</span>
+                    {active && <span className="diffReviewActiveDot" aria-hidden="true" />}
+                  </button>
+                  <span className="diffReviewFileStats">
+                    <span className="add">+{countChangeLines(change, "add")}</span>
+                    <span className="remove">-{countChangeLines(change, "remove")}</span>
+                  </span>
+                </div>
+                {expanded && <DiffFileDetails change={change} applyingId={applyingId} onApply={onApply} />}
+              </article>
+            );
+          })}
+        </div>
       </section>
     </div>
+  );
+}
+
+function DiffFileDetails({
+  change,
+  applyingId,
+  onApply,
+}: {
+  change: HubFileChangeDto;
+  applyingId?: string | null;
+  onApply?: (change: HubFileChangeDto) => void;
+}) {
+  const additions = countChangeLines(change, "add");
+  const deletions = countChangeLines(change, "remove");
+  const applyStatus = fileChangeApplyStatus(change);
+  const applyMessage = fileChangeApplyMessage(change);
+  const applyLocked = applyStatus === "queued" || applyStatus === "applied";
+
+  return (
+    <section className="diffViewerCard">
+      <div className="diffViewerTop">
+        <div>
+          <strong>{change.path}</strong>
+          {change.oldPath && <small>{change.oldPath}</small>}
+        </div>
+        <div className="diffViewerActions">
+          <span className={`changeType ${change.changeType}`}>{change.changeType}</span>
+          {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
+          {onApply && (
+            <button
+              className="ghostButton"
+              type="button"
+              disabled={applyingId === change.id || applyLocked}
+              onClick={() => onApply(change)}
+            >
+              <CheckCircleOutlined />
+              <span>
+                {applyingId === change.id
+                  ? "应用中"
+                  : applyStatus === "queued"
+                    ? "等待结果"
+                    : applyStatus === "applied"
+                      ? "已应用"
+                      : "应用 Diff"}
+              </span>
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="diffStats">
+        <span className="add">+{additions}</span>
+        <span className="remove">-{deletions}</span>
+        {change.afterTruncated || change.beforeTruncated ? <span>内容已截断</span> : null}
+        {applyMessage ? <span className={`diffApplyMessage ${applyStatus ?? ""}`}>{applyMessage}</span> : null}
+      </div>
+      <UnifiedDiffView change={change} />
+    </section>
   );
 }
 
@@ -491,18 +553,113 @@ function UnifiedDiffView({ change }: { change: HubFileChangeDto }) {
 }
 
 function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
+  const [collapsedHunks, setCollapsedHunks] = useState<Set<string>>(() => new Set());
+  const items = groupDiffLines(lines);
+
+  function toggleHunk(id: string) {
+    setCollapsedHunks((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <div className="unifiedDiff" role="table">
-      {lines.map((line, index) => (
-        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
-          <span className="lineNo">{line.oldLine ?? ""}</span>
-          <span className="lineNo">{line.newLine ?? ""}</span>
-          <span className="lineMarker">{diffMarker(line.kind)}</span>
-          <code>{line.text || " "}</code>
-        </div>
-      ))}
+      {items.map((item) => {
+        if (item.kind === "line") {
+          return renderDiffLine(item.line, item.index);
+        }
+
+        const collapsed = collapsedHunks.has(item.id);
+        return (
+          <div className={`diffHunk ${collapsed ? "collapsed" : ""}`} key={item.id}>
+            <div className="diffLine meta hunkMeta" role="row">
+              <button
+                className="diffHunkToggle"
+                type="button"
+                title={collapsed ? "展开代码段" : "收起代码段"}
+                aria-label={collapsed ? "展开代码段" : "收起代码段"}
+                aria-expanded={!collapsed}
+                onClick={() => toggleHunk(item.id)}
+              >
+                {collapsed ? <RightOutlined /> : <DownOutlined />}
+              </button>
+              <code title={item.meta.text}>{diffHunkLabel(item)}</code>
+            </div>
+            {!collapsed && item.lines.map(({ line, index }) => renderDiffLine(line, index))}
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function renderDiffLine(line: DiffLine, index: number) {
+  if (line.kind === "meta") {
+    return (
+      <div className="diffLine meta fileMeta" key={`${index}-${line.text}`} role="row">
+        <span className="diffHunkToggle spacer" aria-hidden="true" />
+        <code>{diffMetaLabel(line.text)}</code>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
+      <span className="lineNo">{line.oldLine ?? ""}</span>
+      <span className="lineNo">{line.newLine ?? ""}</span>
+      <span className="lineMarker">{diffMarker(line.kind)}</span>
+      <code>{line.text || " "}</code>
+    </div>
+  );
+}
+
+type DiffRenderItem =
+  | { kind: "line"; line: DiffLine; index: number }
+  | { kind: "hunk"; id: string; meta: DiffLine; lines: Array<{ line: DiffLine; index: number }> };
+
+function groupDiffLines(lines: DiffLine[]): DiffRenderItem[] {
+  const items: DiffRenderItem[] = [];
+  let activeHunk: Extract<DiffRenderItem, { kind: "hunk" }> | null = null;
+
+  lines.forEach((line, index) => {
+    if (line.kind === "meta" && line.text.startsWith("@@")) {
+      activeHunk = { kind: "hunk", id: `${index}-${line.text}`, meta: line, lines: [] };
+      items.push(activeHunk);
+      return;
+    }
+
+    if (activeHunk && line.kind !== "meta") {
+      activeHunk.lines.push({ line, index });
+      return;
+    }
+
+    items.push({ kind: "line", line, index });
+  });
+
+  return items;
+}
+
+function diffHunkLabel(item: Extract<DiffRenderItem, { kind: "hunk" }>) {
+  const unchanged = item.lines.filter(({ line }) => line.kind === "context").length;
+  if (unchanged > 0) return `${unchanged} unmodified lines`;
+  return diffMetaLabel(item.meta.text);
+}
+
+function diffMetaLabel(text: string) {
+  if (text.startsWith("@@")) return text;
+  if (text.startsWith("diff --git")) return text.replace(/^diff --git\s+/, "");
+  return text;
+}
+
+function sameStringSet(a: Set<string>, b: Set<string>) {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
 }
 
 function PanelEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {

@@ -201,6 +201,9 @@ export default function WorkbenchPage() {
   const inspectorTab = activeWorkspace?.inspectorTab ?? "diff";
   const deploymentPreflight = activeSessionId ? deploymentPreflights[activeSessionId] : undefined;
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
+  const activeProject = activeSession?.projectId
+    ? (projects.find((project) => project.id === activeSession.projectId) ?? null)
+    : null;
   const activeArtifactViewer = activeArtifactViewerId
     ? (detail?.artifacts.find((artifact) => artifact.id === activeArtifactViewerId) ?? null)
     : null;
@@ -922,7 +925,18 @@ export default function WorkbenchPage() {
       setNotice("产物还没有同步到本地列表，请稍后再展开");
       return;
     }
+    focusArtifactsPanel();
     setActiveArtifactViewerId(artifactId);
+  }
+
+  function focusDiffPanel() {
+    setInspectorCollapsed(false);
+    setInspectorTab("diff");
+  }
+
+  function focusArtifactsPanel() {
+    setInspectorCollapsed(false);
+    setInspectorTab("artifacts");
   }
 
   function addReplyTarget(message: HubMessageDto) {
@@ -1026,9 +1040,13 @@ export default function WorkbenchPage() {
   }
 
   return (
-    <main className={`agenthubShell ${inspectorCollapsed ? "inspectorCollapsed" : ""}`}>
+    <main className={`agenthubShell ${inspectorCollapsed ? "inspectorCollapsed" : ""} ${inspectorTab === "diff" ? "diffActive" : "artifactsActive"}`}>
       <aside className="sessionRail">
         <div className="imRailTop">
+          <button className="railNavButton primary" type="button" onClick={openCreateGroupDialog}>
+            <PlusOutlined />
+            <span>新对话</span>
+          </button>
           <label className="sessionSearch">
             <SearchOutlined />
             <input
@@ -1037,18 +1055,16 @@ export default function WorkbenchPage() {
               placeholder="搜索"
             />
           </label>
-          <button className="iconButton" type="button" title="新建 Agent 模板" onClick={openAgentTemplateDialog}>
+          <button className="railNavButton" type="button" onClick={openAgentTemplateDialog}>
             <BranchesOutlined />
-          </button>
-          <button className="iconButton primaryIconButton" type="button" title="新建对话" onClick={openCreateGroupDialog}>
-            <PlusOutlined />
+            <span>Agent 模板</span>
           </button>
         </div>
 
         <div className="railHeader">
           <div>
-            <strong>AgentHub</strong>
-            <span>多 Agent 群聊</span>
+            <span>项目</span>
+            <strong>{activeProject?.name ?? "AgentHub-Fullstack"}</strong>
           </div>
         </div>
 
@@ -1213,43 +1229,6 @@ export default function WorkbenchPage() {
       </aside>
 
       <section className="conversationPane">
-        {openSessionIds.length > 0 && (
-          <nav className="sessionTabs" aria-label="已打开会话">
-            {openSessionIds.map((sessionId) => {
-              const tabSession = workspaces[sessionId]?.detail?.session ?? sessions.find((item) => item.id === sessionId);
-              const unread = sessionTabs.unreadIds.includes(sessionId);
-              const busy = isRunning(tabSession?.lastRun?.status ?? "");
-              return (
-                <div
-                  key={sessionId}
-                  className={`sessionTab ${sessionId === activeSessionId ? "active" : ""} ${unread ? "unread" : ""}`}
-                >
-                  <button
-                    className="sessionTabMain"
-                    type="button"
-                    onClick={() => {
-                      setActiveSessionId(sessionId);
-                      if (!workspaces[sessionId]?.detail) void loadSession(sessionId);
-                      else void refreshDeploymentPreflight(sessionId);
-                    }}
-                  >
-                    <span className={`tabStatus ${busy ? "running" : ""}`} />
-                    <span>{tabSession?.title ?? "未命名会话"}</span>
-                    {unread && <strong>新</strong>}
-                  </button>
-                  <button
-                    className="tabClose"
-                    type="button"
-                    title="关闭标签"
-                    onClick={() => closeOpenSession(sessionId)}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </nav>
-        )}
         <header className="conversationHeader">
           <div className="conversationTitleBlock">
             {renamingSession && activeSession ? (
@@ -1335,6 +1314,8 @@ export default function WorkbenchPage() {
                 onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
+                onOpenDiffPanel={focusDiffPanel}
+                onOpenArtifactsPanel={focusArtifactsPanel}
                 agents={agents}
               />
             ) : (
@@ -1350,10 +1331,10 @@ export default function WorkbenchPage() {
                 onReply={!runActionLocked ? addReplyTarget : undefined}
                 onReferencePart={!runActionLocked ? addReplyPartTarget : undefined}
                 onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
-                onApplyFileChange={!runActionLocked ? handleApplyFileChange : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
-                applyingFileChangeId={applyingFileChangeId}
+                onOpenDiffPanel={focusDiffPanel}
+                onOpenArtifactsPanel={focusArtifactsPanel}
               />
             ),
           )}
@@ -1534,7 +1515,7 @@ export default function WorkbenchPage() {
           </button>
           <button className={inspectorTab === "diff" ? "active" : ""} type="button" onClick={() => setInspectorTab("diff")}>
             <BranchesOutlined />
-            <span>Diff</span>
+            <span>审查</span>
           </button>
           <button
             className={inspectorTab === "artifacts" ? "active" : ""}
