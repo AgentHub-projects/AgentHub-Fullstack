@@ -8,6 +8,7 @@ import type {
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
+  SessionDiffContextDto,
   UpdateHubSessionRequest,
 } from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
@@ -184,6 +185,30 @@ export class HubSessionService {
       artifacts: artifacts.map(mapArtifact),
       fileChanges: fileChanges.map(mapFileChange),
       context: contextSnapshot ? mapContextSnapshot(contextSnapshot) : null,
+    };
+  }
+
+  /** 获取会话 Diff 审查范围说明 */
+  async getDiffContext(sessionId: string): Promise<SessionDiffContextDto> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { project: true },
+    });
+    if (!session || session.status === "deleted") {
+      throw new NotFoundException("SESSION_NOT_FOUND");
+    }
+
+    const baseRef = session.project?.defaultBranch?.trim() || "main";
+    return {
+      baseRef,
+      targetRef: "working tree",
+      projectName: session.project?.name ?? null,
+      githubUrl: session.project?.githubUrl ?? null,
+      defaultBranch: session.project?.defaultBranch ?? null,
+      explanation: session.project
+        ? "右侧 Diff 对比的是绑定项目默认分支与本次 Agent 生成的工作区改动；这里用于说明审查范围，不会切换 Git 分支。"
+        : "当前会话未绑定项目，Diff 暂以 main 作为展示基准；绑定项目后会使用项目默认分支说明审查范围。",
+      canChangeBase: false,
     };
   }
 

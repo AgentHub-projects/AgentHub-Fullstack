@@ -360,6 +360,16 @@ export interface SessionDetailDto {
   context?: HubContextSnapshotDto | null;
 }
 
+export interface SessionDiffContextDto {
+  baseRef: string;
+  targetRef: string;
+  projectName?: string | null;
+  githubUrl?: string | null;
+  defaultBranch?: string | null;
+  explanation: string;
+  canChangeBase: boolean;
+}
+
 export interface CreateHubSessionRequest {
   title?: string;
   metadata?: Record<string, unknown>;

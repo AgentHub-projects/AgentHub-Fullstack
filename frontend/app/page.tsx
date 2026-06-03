@@ -14,6 +14,7 @@ import type {
   HubSessionDto,
   ProjectDto,
   SessionDetailDto,
+  SessionDiffContextDto,
   UpdateAgentRequest,
   UploadedAttachmentDto,
 } from "@agenthub/shared";
@@ -48,6 +49,7 @@ import {
   deleteAgent,
   getAuthState,
   getDeploymentPreflight,
+  getSessionDiffContext,
   getSessionDetail,
   listAgents,
   listAgentTemplates,
@@ -149,6 +151,7 @@ export default function WorkbenchPage() {
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [deploymentPreflights, setDeploymentPreflights] = useState<Record<string, DeploymentPreflightResponse>>({});
+  const [diffContexts, setDiffContexts] = useState<Record<string, SessionDiffContextDto>>({});
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
@@ -291,6 +294,11 @@ export default function WorkbenchPage() {
       delete next[sessionId];
       return next;
     });
+    setDiffContexts((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
   }
 
   function setDetail(value: SetStateAction<SessionDetailDto | null>) {
@@ -399,6 +407,7 @@ export default function WorkbenchPage() {
   useEffect(() => {
     if (!authenticated || !activeSessionId) return;
     void refreshDeploymentPreflight(activeSessionId);
+    void refreshDiffContext(activeSessionId);
   }, [authenticated, activeSessionId, activeSession?.projectId, activeSession?.metadata.latestSuccessfulPushCommitSha]);
 
   async function checkAuth() {
@@ -503,12 +512,20 @@ export default function WorkbenchPage() {
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
     await refreshDeploymentPreflight(activeSessionId);
+    await refreshDiffContext(activeSessionId);
   }
 
   async function refreshDeploymentPreflight(sessionId: string) {
     const result = await getDeploymentPreflight(sessionId);
     if (result.ok) {
       setDeploymentPreflights((current) => ({ ...current, [sessionId]: result.data }));
+    }
+  }
+
+  async function refreshDiffContext(sessionId: string) {
+    const result = await getSessionDiffContext(sessionId);
+    if (result.ok) {
+      setDiffContexts((current) => ({ ...current, [sessionId]: result.data }));
     }
   }
 
@@ -523,6 +540,7 @@ export default function WorkbenchPage() {
     }
     updateWorkspace(sessionId, (current) => ({ ...current, detail: result.data }));
     void refreshDeploymentPreflight(sessionId);
+    void refreshDiffContext(sessionId);
     closeMentionMenu();
   }
 
@@ -1591,6 +1609,7 @@ export default function WorkbenchPage() {
             {inspectorTab === "diff" && (
               <DiffPanel
                 changes={detail?.fileChanges ?? []}
+                diffContext={activeSessionId ? diffContexts[activeSessionId] : undefined}
                 applyingId={applyingFileChangeId}
                 onApply={handleApplyFileChange}
               />

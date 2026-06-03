@@ -26,6 +26,7 @@ import type {
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
+  SessionDiffContextDto,
   StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
@@ -111,6 +112,10 @@ export function createSession(body: CreateHubSessionRequest) {
 
 export function getSessionDetail(sessionId: string) {
   return requestJson<SessionDetailDto>(`/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function getSessionDiffContext(sessionId: string) {
+  return requestJson<SessionDiffContextDto>(`/sessions/${encodeURIComponent(sessionId)}/diff-context`);
 }
 
 export function updateSession(sessionId: string, body: UpdateHubSessionRequest) {

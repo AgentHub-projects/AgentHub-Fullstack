@@ -71,6 +71,12 @@ export class HubSessionController {
     return this.sessions.getDetail(sessionId);
   }
 
+  /** 获取 Diff 审查范围说明 */
+  @Get(":sessionId/diff-context")
+  getDiffContext(@Param("sessionId") sessionId: string) {
+    return this.sessions.getDiffContext(sessionId);
+  }
+
   /** 更新会话 */
   @Patch(":sessionId")
   updateSession(@Param("sessionId") sessionId: string, @Body() body: UpdateHubSessionRequest) {

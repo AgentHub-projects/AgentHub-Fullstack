@@ -4599,10 +4599,11 @@ div.agentChoice {
 
 .diffReviewTop,
 .diffReviewStats,
-.diffReviewBranch,
 .diffReviewFile,
 .diffReviewFileStats,
 .diffReviewFileMain,
+.diffReviewFileSide,
+.diffReviewFileMeta,
 .diffFileToggle,
 .diffHunkToggle {
   display: flex;
@@ -4646,10 +4647,99 @@ div.agentChoice {
   color: #c21f1f;
 }
 
-.diffReviewBranch {
-  gap: 8px;
-  color: #8a8a8a;
+.diffBranchContext {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  color: #6b6b6b;
   font-size: 13px;
+}
+
+.diffBranchContext summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  list-style: none;
+  padding: 0 10px;
+}
+
+.diffBranchContext summary::-webkit-details-marker {
+  display: none;
+}
+
+.diffBranchContext summary:hover,
+.diffBranchContext[open] summary {
+  border-color: #e5e5e5;
+  background: #f7f7f7;
+  color: #111111;
+}
+
+.diffBranchContext summary .anticon {
+  color: #8a8a8a;
+  font-size: 12px;
+}
+
+.diffBranchPopover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 48px));
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+  padding: 12px;
+}
+
+.diffBranchPopover strong {
+  color: #242424;
+  font-size: 13px;
+}
+
+.diffBranchPopover p,
+.diffBranchPopover small {
+  margin: 0;
+  color: #666666;
+  line-height: 1.5;
+}
+
+.diffBranchPopover dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.diffBranchPopover dl > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.diffBranchPopover dt {
+  color: #8a8a8a;
+}
+
+.diffBranchPopover dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #242424;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffBranchPopover a {
+  color: #111111;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .diffReviewFiles {
@@ -4728,6 +4818,46 @@ div.agentChoice {
   white-space: nowrap;
 }
 
+.diffReviewFileSide {
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.diffReviewFileMeta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.diffApplyInlineButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  border: 1px solid #dedede;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #242424;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.diffApplyInlineButton:hover:not(:disabled) {
+  border-color: #bdbdbd;
+  background: #f7f7f7;
+}
+
+.diffApplyInlineButton:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.diffMetaNote {
+  color: #8a8a8a;
+  font-size: 12px;
+}
+
 .diffReviewActiveDot {
   width: 6px;
   height: 6px;
@@ -4778,6 +4908,12 @@ div.agentChoice {
 .applyStatus {
   border-color: #dedede;
   background: #ffffff;
+}
+
+.diffReviewFileMeta .changeType,
+.diffReviewFileMeta .applyStatus {
+  padding: 1px 7px;
+  font-size: 11px;
 }
 
 .diffStats {
