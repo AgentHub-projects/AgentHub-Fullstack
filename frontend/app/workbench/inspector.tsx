@@ -72,8 +72,6 @@ export function DiffPanel({
 
   if (changes.length === 0) return <PanelEmpty icon={<BranchesOutlined />} text="暂无文件变更" />;
   const activeChange = changes.find((change) => change.id === selectedId) ?? changes[0];
-  const totalAdditions = changes.reduce((sum, change) => sum + countChangeLines(change, "add"), 0);
-  const totalDeletions = changes.reduce((sum, change) => sum + countChangeLines(change, "remove"), 0);
 
   function toggleFile(change: HubFileChangeDto) {
     setSelectedId(change.id);
@@ -96,14 +94,6 @@ export function DiffPanel({
   return (
     <div className="panelScroll diffPanelLayout">
       <section className="diffReviewOverview" aria-label="文件变更总览">
-        <div className="diffReviewTop">
-          <span className="reviewPill"><BranchesOutlined /> 审查</span>
-          <div className="diffReviewStats">
-            <span>{changes.length} 文件</span>
-            <span className="add">+{totalAdditions}</span>
-            <span className="remove">-{totalDeletions}</span>
-          </div>
-        </div>
         <div className="diffReviewBranch">
           <span>main</span>
           <span>→</span>
@@ -154,46 +144,34 @@ function DiffFileDetails({
   applyingId?: string | null;
   onApply?: (change: HubFileChangeDto) => void;
 }) {
-  const additions = countChangeLines(change, "add");
-  const deletions = countChangeLines(change, "remove");
   const applyStatus = fileChangeApplyStatus(change);
   const applyMessage = fileChangeApplyMessage(change);
   const applyLocked = applyStatus === "queued" || applyStatus === "applied";
 
   return (
     <section className="diffViewerCard">
-      <div className="diffViewerTop">
-        <div>
-          <strong>{change.path}</strong>
-          {change.oldPath && <small>{change.oldPath}</small>}
-        </div>
-        <div className="diffViewerActions">
-          <span className={`changeType ${change.changeType}`}>{change.changeType}</span>
-          {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
-          {onApply && (
-            <button
-              className="ghostButton"
-              type="button"
-              disabled={applyingId === change.id || applyLocked}
-              onClick={() => onApply(change)}
-            >
-              <CheckCircleOutlined />
-              <span>
-                {applyingId === change.id
-                  ? "应用中"
-                  : applyStatus === "queued"
-                    ? "等待结果"
-                    : applyStatus === "applied"
-                      ? "已应用"
-                      : "应用 Diff"}
-              </span>
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="diffStats">
-        <span className="add">+{additions}</span>
-        <span className="remove">-{deletions}</span>
+      <div className="diffStats diffContentToolbar">
+        <span className={`changeType ${change.changeType}`}>{change.changeType}</span>
+        {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
+        {onApply && (
+          <button
+            className="ghostButton"
+            type="button"
+            disabled={applyingId === change.id || applyLocked}
+            onClick={() => onApply(change)}
+          >
+            <CheckCircleOutlined />
+            <span>
+              {applyingId === change.id
+                ? "应用中"
+                : applyStatus === "queued"
+                  ? "等待结果"
+                  : applyStatus === "applied"
+                    ? "已应用"
+                    : "应用 Diff"}
+            </span>
+          </button>
+        )}
         {change.afterTruncated || change.beforeTruncated ? <span>内容已截断</span> : null}
         {applyMessage ? <span className={`diffApplyMessage ${applyStatus ?? ""}`}>{applyMessage}</span> : null}
       </div>

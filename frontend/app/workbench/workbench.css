@@ -4578,11 +4578,11 @@ div.agentChoice {
 
 .diffReviewOverview {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   border-bottom: 1px solid #ececec;
   background: #ffffff;
-  padding: 14px 18px 12px;
+  padding: 10px 18px 12px;
 }
 
 .diffReviewTop,
@@ -4652,6 +4652,9 @@ div.agentChoice {
 }
 
 .diffReviewFile {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
@@ -4763,6 +4766,19 @@ div.agentChoice {
   border-bottom: 1px solid #ececec;
   background: #ffffff;
   padding: 7px 18px;
+}
+
+.diffContentToolbar {
+  justify-content: flex-start;
+  padding-left: 40px;
+}
+
+.diffContentToolbar .ghostButton {
+  min-height: 28px;
+  border-color: #dedede;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 0 9px;
 }
 
 .diffApplyMessage {
