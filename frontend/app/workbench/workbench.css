@@ -3183,6 +3183,16 @@ textarea:focus-visible {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
+.projectDialog {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.projectForm {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
 .agentDialog header,
 .agentDialog footer,
 .groupDialog header,

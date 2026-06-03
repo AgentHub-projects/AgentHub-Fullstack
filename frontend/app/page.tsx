@@ -158,6 +158,10 @@ export default function WorkbenchPage() {
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [projectGithubUrlDraft, setProjectGithubUrlDraft] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
   const [createMode, setCreateMode] = useState<"direct" | "group">("direct");
   const [directTemplateId, setDirectTemplateId] = useState<number>(0);
   const [directName, setDirectName] = useState("");
@@ -173,6 +177,13 @@ export default function WorkbenchPage() {
     setGroupDialogOpen(false);
     setOrchSearch("");
     setOrchDropdownOpen(false);
+  }
+
+  function closeProjectDialog() {
+    if (creatingProject) return;
+    setProjectDialogOpen(false);
+    setProjectNameDraft("");
+    setProjectGithubUrlDraft("");
   }
   const [orchProvider, setOrchProvider] = useState("claude-code");
   const [memberTemplates, setMemberTemplates] = useState<Array<{ templateId: number; provider: string; name: string }>>([]);
@@ -209,8 +220,10 @@ export default function WorkbenchPage() {
     : null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
+  const projectBound = Boolean(activeSession?.projectId);
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
   const runActionLocked = !sessionWritable || activeRunInProgress;
+  const chatActionLocked = runActionLocked || !projectBound;
   const memberMutationLocked = !sessionWritable || activeRunInProgress;
   const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
@@ -378,10 +391,10 @@ export default function WorkbenchPage() {
   }, [memberMutationLocked]);
 
   useEffect(() => {
-    if (!runActionLocked) return;
+    if (!chatActionLocked) return;
     setMentionMatch(null);
     setActiveMentionIndex(0);
-  }, [runActionLocked]);
+  }, [chatActionLocked]);
 
   useEffect(() => {
     if (!authenticated || !activeSessionId) return;
@@ -458,18 +471,26 @@ export default function WorkbenchPage() {
     setSessions(result.data.items);
   }
 
-  async function handleCreateProject() {
-    const name = window.prompt("项目名称");
-    if (!name?.trim()) return;
-    const githubUrl = window.prompt("GitHub 仓库地址");
-    if (!githubUrl?.trim()) return;
-    const result = await createProject({ name: name.trim(), githubUrl: githubUrl.trim(), defaultBranch: "main" });
-    if (!result.ok) {
-      setNotice(`项目创建失败：${result.error}`);
-      return;
+  async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = projectNameDraft.trim();
+    const githubUrl = projectGithubUrlDraft.trim();
+    if (!name || !githubUrl || creatingProject) return;
+    setCreatingProject(true);
+    try {
+      const result = await createProject({ name, githubUrl, defaultBranch: "main" });
+      if (!result.ok) {
+        setNotice(`项目创建失败：${result.error}`);
+        return;
+      }
+      setProjects((current) => [result.data, ...current.filter((project) => project.id !== result.data.id)]);
+      if (activeSessionId) await handleBindProject(result.data.id);
+      setProjectDialogOpen(false);
+      setProjectNameDraft("");
+      setProjectGithubUrlDraft("");
+    } finally {
+      setCreatingProject(false);
     }
-    setProjects((current) => [result.data, ...current]);
-    if (activeSessionId) await handleBindProject(result.data.id);
   }
 
   async function handleBindProject(projectId: string | null) {
@@ -645,6 +666,10 @@ export default function WorkbenchPage() {
   async function handleSend() {
     const text = composer.trim();
     if (!text || !activeSessionId || runActionLocked || sending) return;
+    if (!projectBound) {
+      setNotice("请先绑定项目后再聊天");
+      return;
+    }
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -815,6 +840,10 @@ export default function WorkbenchPage() {
 
   async function handleRegenerate(message: HubMessageDto) {
     if (!activeSessionId || runActionLocked || sending) return;
+    if (!projectBound) {
+      setNotice("请先绑定项目后再重新生成");
+      return;
+    }
     setSending(true);
     try {
       const result = await regenerateSessionMessage(activeSessionId, message.id);
@@ -882,6 +911,10 @@ export default function WorkbenchPage() {
       setNotice("归档会话为只读，不能发起局部修改");
       return;
     }
+    if (!projectBound) {
+      setNotice("请先绑定项目后再继续修改产物");
+      return;
+    }
     const prompt = [
       `请修改产物「${artifact.title}」中的选中内容：`,
       "",
@@ -898,6 +931,10 @@ export default function WorkbenchPage() {
   function handleArtifactDraft(artifact: HubArtifactDto, editedText: string) {
     if (!sessionWritable) {
       setNotice("归档会话为只读，不能继续修改产物");
+      return;
+    }
+    if (!projectBound) {
+      setNotice("请先绑定项目后再继续修改产物");
       return;
     }
     const original = artifact.textContent?.trim();
@@ -941,6 +978,10 @@ export default function WorkbenchPage() {
 
   function addReplyTarget(message: HubMessageDto) {
     if (!sessionWritable) return;
+    if (!projectBound) {
+      setNotice("请先绑定项目后再引用消息");
+      return;
+    }
     setReplyTargets((current) => {
       if (current.some((item) => item.message.id === message.id && !item.partId)) return current;
       return [...current, { message, preview: message.contentText.slice(0, 48) || message.role }].slice(0, 5);
@@ -949,6 +990,10 @@ export default function WorkbenchPage() {
 
   function addReplyPartTarget(message: HubMessageDto, part: HubMessagePartDto) {
     if (!sessionWritable) return;
+    if (!projectBound) {
+      setNotice("请先绑定项目后再引用消息");
+      return;
+    }
     setReplyTargets((current) => {
       if (current.some((item) => item.message.id === message.id && item.partId === part.id)) return current;
       const preview = part.title ?? part.text?.slice(0, 48) ?? part.type;
@@ -958,6 +1003,10 @@ export default function WorkbenchPage() {
 
   async function handleAttachmentFiles(files: FileList | null) {
     if (!activeSessionId || runActionLocked || !files?.length || uploadingAttachment) return;
+    if (!projectBound) {
+      setNotice("请先绑定项目后再上传附件");
+      return;
+    }
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
@@ -1064,7 +1113,7 @@ export default function WorkbenchPage() {
         <div className="railHeader">
           <div>
             <span>项目</span>
-            <strong>{activeProject?.name ?? "AgentHub-Fullstack"}</strong>
+            <strong>{activeProject?.name ?? "未绑定项目"}</strong>
           </div>
         </div>
 
@@ -1082,7 +1131,13 @@ export default function WorkbenchPage() {
                 </option>
               ))}
             </select>
-            <button className="iconButton" type="button" title="新建项目" onClick={() => void handleCreateProject()}>
+            <button
+              className="iconButton"
+              type="button"
+              title="新建项目"
+              disabled={!activeSessionId || !sessionWritable}
+              onClick={() => setProjectDialogOpen(true)}
+            >
               <PlusOutlined />
             </button>
           </section>
@@ -1297,7 +1352,7 @@ export default function WorkbenchPage() {
 
         <PinnedKeyMessages
           messages={pinnedMessages}
-          onReply={!runActionLocked ? addReplyTarget : undefined}
+          onReply={!chatActionLocked ? addReplyTarget : undefined}
           onOpenPart={setActivePartViewer}
         />
 
@@ -1309,9 +1364,9 @@ export default function WorkbenchPage() {
                 message={item.message}
                 onPin={handlePin}
                 onPinPart={handlePinPart}
-                onReply={!runActionLocked ? addReplyTarget : undefined}
-                onReferencePart={!runActionLocked ? addReplyPartTarget : undefined}
-                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
+                onReply={!chatActionLocked ? addReplyTarget : undefined}
+                onReferencePart={!chatActionLocked ? addReplyPartTarget : undefined}
+                onRegenerate={!chatActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 onOpenDiffPanel={focusDiffPanel}
@@ -1328,9 +1383,9 @@ export default function WorkbenchPage() {
                 messages={item.messages}
                 agents={agents}
                 onPinPart={handlePinPart}
-                onReply={!runActionLocked ? addReplyTarget : undefined}
-                onReferencePart={!runActionLocked ? addReplyPartTarget : undefined}
-                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
+                onReply={!chatActionLocked ? addReplyTarget : undefined}
+                onReferencePart={!chatActionLocked ? addReplyPartTarget : undefined}
+                onRegenerate={!chatActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 onOpenDiffPanel={focusDiffPanel}
@@ -1354,7 +1409,7 @@ export default function WorkbenchPage() {
             </div>
           )}
           <div className="composerInputWrap">
-            {mentionMatch && !sending && activeSessionId && !runActionLocked && (
+            {mentionMatch && !sending && activeSessionId && !chatActionLocked && (
               <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
                 {mentionCandidates.length > 0 ? (
                   mentionCandidates.map((agent, index) => (
@@ -1433,11 +1488,13 @@ export default function WorkbenchPage() {
                   ? sessionReadOnly ? "归档会话为只读" : "请选择会话"
                   : activeRunInProgress
                     ? "当前 run 运行中，完成后可继续发送"
+                  : !projectBound
+                    ? "请先绑定项目后再开始聊天"
                   : mode === "direct"
                     ? "输入要交给这个 Agent 的任务"
                     : "输入任务，使用 @frontend-agent 指定群聊成员"
               }
-              disabled={sending || !activeSessionId || runActionLocked || (mode === "direct" && !directAgent)}
+              disabled={sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
             />
           </div>
           <div className="composerBar">
@@ -1446,6 +1503,8 @@ export default function WorkbenchPage() {
                 ? "归档会话只读"
                 : !activeSession
                   ? "请选择会话"
+                : !projectBound
+                  ? "请先绑定项目"
                 : mode === "direct"
                 ? directAgent
                   ? `单聊：${directAgent.name}`
@@ -1467,7 +1526,7 @@ export default function WorkbenchPage() {
               className="iconButton"
               type="button"
               title="上传附件"
-              disabled={!activeSessionId || runActionLocked || uploadingAttachment || attachments.length >= 5}
+              disabled={!activeSessionId || chatActionLocked || uploadingAttachment || attachments.length >= 5}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
@@ -1475,7 +1534,7 @@ export default function WorkbenchPage() {
             <button
               className="primaryButton"
               type="button"
-              disabled={!composer.trim() || sending || !activeSessionId || runActionLocked || (mode === "direct" && !directAgent)}
+              disabled={!composer.trim() || sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
               onClick={() => void handleSend()}
             >
               {sending ? <LoadingOutlined /> : <SendOutlined />}
@@ -1561,6 +1620,63 @@ export default function WorkbenchPage() {
           part={activePartViewer}
           onClose={() => setActivePartViewer(null)}
         />
+      )}
+
+      {projectDialogOpen && (
+        <div className="dialogLayer" role="presentation" onMouseDown={closeProjectDialog}>
+          <section
+            className="groupDialog projectDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-project-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="create-project-title">新建项目</strong>
+                <span>绑定 GitHub 仓库后才能开始会话协作</span>
+              </div>
+            </header>
+            <form className="projectForm" onSubmit={(event) => void handleCreateProject(event)}>
+              <div className="buildForm">
+                <label>
+                  项目名称
+                  <input
+                    value={projectNameDraft}
+                    onChange={(event) => setProjectNameDraft(event.target.value)}
+                    placeholder="AgentHub Course Demo"
+                    autoFocus
+                    required
+                  />
+                </label>
+                <label>
+                  GitHub 绑定地址
+                  <input
+                    value={projectGithubUrlDraft}
+                    onChange={(event) => setProjectGithubUrlDraft(event.target.value)}
+                    placeholder="https://github.com/org/repo"
+                    inputMode="url"
+                    required
+                  />
+                </label>
+                <p className="dialogHint">会话必须绑定项目后才能发送消息、上传附件或引用关键内容。</p>
+              </div>
+              <footer>
+                <button className="ghostButton" type="button" disabled={creatingProject} onClick={closeProjectDialog}>
+                  取消
+                </button>
+                <button
+                  className="primaryButton"
+                  type="submit"
+                  disabled={!projectNameDraft.trim() || !projectGithubUrlDraft.trim() || creatingProject}
+                >
+                  {creatingProject ? <LoadingOutlined /> : <PlusOutlined />}
+                  <span>创建并绑定</span>
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
       )}
 
       {groupDialogOpen && (
