@@ -413,6 +413,88 @@ export interface ApplyFileChangeResponse {
   status: "queued";
 }
 
+export type SandboxWorkspaceStatus = "ready" | "unavailable" | "error";
+
+export interface SandboxAgentBranchDto {
+  agentId: AgentId;
+  agentName: string;
+  branch: string | null;
+  workspaceId: string | null;
+  status: SandboxWorkspaceStatus;
+  message?: string | null;
+}
+
+export interface SandboxAgentsResponse {
+  items: SandboxAgentBranchDto[];
+  sandboxConfigured: boolean;
+  workspaceId?: string | null;
+}
+
+export interface SandboxConnectRequest {
+  agentId: AgentId;
+}
+
+export interface SandboxConnectResponse {
+  agentId: AgentId;
+  token: string;
+  sandboxBaseUrl: string;
+  workspaceId: string;
+  branch: string;
+  expiresAt: ISODateString;
+}
+
+export interface SandboxFileTreeItemDto {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  sizeBytes?: number | null;
+  sha256?: string | null;
+  updatedAt?: ISODateString | null;
+}
+
+export interface SandboxFileDto {
+  path: string;
+  content: string;
+  sha256?: string | null;
+  language?: string | null;
+  branch?: string | null;
+  updatedAt?: ISODateString | null;
+}
+
+export interface SandboxSaveFileRequest {
+  agentId: AgentId;
+  path: string;
+  content: string;
+  baseSha?: string | null;
+}
+
+export interface SandboxSaveFileResponse {
+  ok: boolean;
+  path: string;
+  branch?: string | null;
+  sha256?: string | null;
+  fileChangeId?: string | null;
+}
+
+export interface SandboxFileChangeCallbackRequest {
+  sessionId: string;
+  runId?: string;
+  agentId: AgentId;
+  workspaceId: string;
+  branch: string;
+  path: string;
+  oldPath?: string | null;
+  changeType?: HubFileChangeType;
+  language?: string | null;
+  beforeContent?: string | null;
+  beforeSha256?: string | null;
+  afterContent?: string | null;
+  afterSha256?: string | null;
+  patch?: string | null;
+  stats?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 export interface PinHubMessageRequest {
   pinned: boolean;
   partId?: string;
