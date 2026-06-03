@@ -7,7 +7,7 @@ import type {
   HubRunDto,
 } from "@agenthub/shared";
 
-export type InspectorTab = "diff" | "artifacts";
+export type InspectorTab = "files" | "diff" | "artifacts";
 export type DiffLineKind = "context" | "add" | "remove" | "meta";
 
 export interface DiffLine {

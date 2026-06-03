@@ -24,6 +24,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
+  FileOutlined,
   InboxOutlined,
   LoadingOutlined,
   MenuFoldOutlined,
@@ -65,7 +66,7 @@ import {
   updateAgent,
   upsertById,
 } from "../lib/agenthub-api";
-import { ArtifactPanel, ArtifactViewerLayer, DiffPanel } from "./workbench/inspector";
+import { ArtifactPanel, ArtifactViewerLayer, DiffPanel, FilePanel } from "./workbench/inspector";
 import { MessagePartViewerLayer } from "./workbench/rich-text";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
@@ -227,6 +228,15 @@ export default function WorkbenchPage() {
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
   const runActionLocked = !sessionWritable || activeRunInProgress;
   const chatActionLocked = runActionLocked || !projectBound;
+  const sandboxEditorDisabledReason = !activeSessionId
+    ? "请选择会话后编辑文件"
+    : !projectBound
+      ? "请先绑定项目后编辑文件"
+      : !sessionWritable
+        ? "归档会话不能编辑文件"
+        : activeRunInProgress
+          ? "Agent 运行中，暂不能编辑文件"
+          : "";
   const memberMutationLocked = !sessionWritable || activeRunInProgress;
   const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
@@ -1590,6 +1600,14 @@ export default function WorkbenchPage() {
             {inspectorCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             <span>{inspectorCollapsed ? "展开" : "收起"}</span>
           </button>
+          <button
+            className={inspectorTab === "files" ? "active" : ""}
+            type="button"
+            onClick={() => setInspectorTab("files")}
+          >
+            <FileOutlined />
+            <span>文件</span>
+          </button>
           <button className={inspectorTab === "diff" ? "active" : ""} type="button" onClick={() => setInspectorTab("diff")}>
             <BranchesOutlined />
             <span>审查</span>
@@ -1606,6 +1624,14 @@ export default function WorkbenchPage() {
 
         {!inspectorCollapsed && (
           <>
+            {inspectorTab === "files" && (
+              <FilePanel
+                sessionId={activeSessionId}
+                disabledReason={sandboxEditorDisabledReason}
+                onSaved={() => setInspectorTab("diff")}
+                onNotice={setNotice}
+              />
+            )}
             {inspectorTab === "diff" && (
               <DiffPanel
                 changes={detail?.fileChanges ?? []}

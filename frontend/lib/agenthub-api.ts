@@ -21,6 +21,13 @@ import type {
   PinHubMessageRequest,
   DeploymentPreflightResponse,
   ProjectDto,
+  SandboxAgentsResponse,
+  SandboxConnectRequest,
+  SandboxConnectResponse,
+  SandboxFileDto,
+  SandboxFileTreeItemDto,
+  SandboxSaveFileRequest,
+  SandboxSaveFileResponse,
   SendBuildMessageRequest,
   SendBuildMessageResponse,
   SendHubMessageRequest,
@@ -225,6 +232,70 @@ export function applyFileChange(sessionId: string, fileChangeId: string) {
   return requestJson<ApplyFileChangeResponse>(
     `/sessions/${encodeURIComponent(sessionId)}/file-changes/${encodeURIComponent(fileChangeId)}/apply`,
     { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function listSandboxAgents(sessionId: string) {
+  return requestJson<SandboxAgentsResponse>(`/sessions/${encodeURIComponent(sessionId)}/sandbox/agents`);
+}
+
+export function connectSandbox(sessionId: string, body: SandboxConnectRequest) {
+  return requestJson<SandboxConnectResponse>(`/sessions/${encodeURIComponent(sessionId)}/sandbox/connect`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+async function requestSandboxJson<T>(
+  connection: SandboxConnectResponse,
+  path: string,
+  init?: RequestInit,
+): Promise<ApiResult<T>> {
+  try {
+    const response = await fetch(`${connection.sandboxBaseUrl}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${connection.token}`,
+        ...init?.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, error: payload?.message ?? `HTTP ${response.status}` };
+    }
+    return { ok: true, data: (await response.json()) as T };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Sandbox request failed" };
+  }
+}
+
+export function listSandboxTree(connection: SandboxConnectResponse, path = "") {
+  const params = new URLSearchParams({ agentId: String(connection.agentId) });
+  if (path) params.set("path", path);
+  return requestSandboxJson<{ items: SandboxFileTreeItemDto[] }>(
+    connection,
+    `/workspaces/${encodeURIComponent(connection.workspaceId)}/tree?${params.toString()}`,
+  );
+}
+
+export function readSandboxFile(connection: SandboxConnectResponse, path: string) {
+  const params = new URLSearchParams({ agentId: String(connection.agentId), path });
+  return requestSandboxJson<SandboxFileDto>(
+    connection,
+    `/workspaces/${encodeURIComponent(connection.workspaceId)}/files?${params.toString()}`,
+  );
+}
+
+export function saveSandboxFile(connection: SandboxConnectResponse, body: SandboxSaveFileRequest) {
+  return requestSandboxJson<SandboxSaveFileResponse>(
+    connection,
+    `/workspaces/${encodeURIComponent(connection.workspaceId)}/files`,
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
   );
 }
 

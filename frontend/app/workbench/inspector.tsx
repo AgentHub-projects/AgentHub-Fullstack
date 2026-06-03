@@ -9,6 +9,10 @@ import type {
   HubArtifactVersionDto,
   HubEventDto,
   HubFileChangeDto,
+  SandboxAgentBranchDto,
+  SandboxConnectResponse,
+  SandboxFileDto,
+  SandboxFileTreeItemDto,
   SessionDiffContextDto,
 } from "@agenthub/shared";
 import {
@@ -20,12 +24,24 @@ import {
   ExpandOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
+  FileOutlined,
+  FolderOpenOutlined,
   InfoCircleOutlined,
   LinkOutlined,
+  ReloadOutlined,
   RightOutlined,
+  SaveOutlined,
   SelectOutlined,
 } from "@ant-design/icons";
-import { artifactContentUrl, listArtifactVersions } from "../../lib/agenthub-api";
+import {
+  artifactContentUrl,
+  connectSandbox,
+  listArtifactVersions,
+  listSandboxAgents,
+  listSandboxTree,
+  readSandboxFile,
+  saveSandboxFile,
+} from "../../lib/agenthub-api";
 import { publicArtifactUrlFromArtifact, pptSlidesFromMetadata } from "../../lib/workbench/artifact-preview";
 import {
   buildDiffLines,
@@ -239,6 +255,250 @@ function DiffFileDetails({
     <section className={`diffViewerCard ${expanded ? "expanded" : "collapsed"}`} hidden={!expanded}>
       <UnifiedDiffView change={change} />
     </section>
+  );
+}
+
+export function FilePanel({
+  sessionId,
+  disabledReason,
+  onSaved,
+  onNotice,
+}: {
+  sessionId?: string | null;
+  disabledReason?: string;
+  onSaved?: () => void;
+  onNotice?: (message: string) => void;
+}) {
+  const [agents, setAgents] = useState<SandboxAgentBranchDto[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [connection, setConnection] = useState<SandboxConnectResponse | null>(null);
+  const [currentPath, setCurrentPath] = useState("");
+  const [treeItems, setTreeItems] = useState<SandboxFileTreeItemDto[]>([]);
+  const [file, setFile] = useState<SandboxFileDto | null>(null);
+  const [draft, setDraft] = useState("");
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [loadingTree, setLoadingTree] = useState(false);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const selectedAgent = agents.find((agent) => agent.agentId === selectedAgentId) ?? null;
+  const canUseSandbox = Boolean(sessionId && !disabledReason);
+  const dirty = Boolean(file && draft !== file.content);
+
+  useEffect(() => {
+    setAgents([]);
+    setSelectedAgentId(null);
+    setConnection(null);
+    setCurrentPath("");
+    setTreeItems([]);
+    setFile(null);
+    setDraft("");
+    setError("");
+    if (!sessionId || disabledReason) return;
+
+    let cancelled = false;
+    setLoadingAgents(true);
+    void listSandboxAgents(sessionId).then((result) => {
+      if (cancelled) return;
+      setLoadingAgents(false);
+      if (!result.ok) {
+        setError(`沙箱 Agent 加载失败：${result.error}`);
+        return;
+      }
+      setAgents(result.data.items);
+      const firstReady = result.data.items.find((agent) => agent.status === "ready") ?? result.data.items[0] ?? null;
+      setSelectedAgentId(firstReady?.agentId ?? null);
+      if (!result.data.sandboxConfigured) setError("沙箱服务未配置，暂不能编辑文件");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, disabledReason]);
+
+  useEffect(() => {
+    if (!sessionId || !selectedAgentId || disabledReason) return;
+    void connectAndLoadRoot(selectedAgentId);
+  }, [sessionId, selectedAgentId, disabledReason]);
+
+  async function ensureConnection(agentId: number) {
+    if (!sessionId) return null;
+    if (connection && connection.agentId === agentId && Date.parse(connection.expiresAt) > Date.now() + 30_000) {
+      return connection;
+    }
+
+    const result = await connectSandbox(sessionId, { agentId });
+    if (!result.ok) {
+      setError(`沙箱连接失败：${result.error}`);
+      return null;
+    }
+    setConnection(result.data);
+    setError("");
+    return result.data;
+  }
+
+  async function connectAndLoadRoot(agentId: number) {
+    const nextConnection = await ensureConnection(agentId);
+    if (!nextConnection) return;
+    await loadTree(nextConnection, "");
+  }
+
+  async function loadTree(nextConnection: SandboxConnectResponse, path: string) {
+    setLoadingTree(true);
+    const result = await listSandboxTree(nextConnection, path);
+    setLoadingTree(false);
+    if (!result.ok) {
+      setError(`文件列表加载失败：${result.error}`);
+      return;
+    }
+    setCurrentPath(path);
+    setTreeItems(result.data.items);
+    setError("");
+  }
+
+  async function openDirectory(path: string) {
+    if (!selectedAgentId) return;
+    const nextConnection = await ensureConnection(selectedAgentId);
+    if (nextConnection) await loadTree(nextConnection, path);
+  }
+
+  async function openFile(path: string) {
+    if (!selectedAgentId) return;
+    const nextConnection = await ensureConnection(selectedAgentId);
+    if (!nextConnection) return;
+    setLoadingFile(true);
+    const result = await readSandboxFile(nextConnection, path);
+    setLoadingFile(false);
+    if (!result.ok) {
+      setError(`文件读取失败：${result.error}`);
+      return;
+    }
+    setFile(result.data);
+    setDraft(result.data.content);
+    setError("");
+  }
+
+  async function saveFile() {
+    if (!selectedAgentId || !file || saving) return;
+    const nextConnection = await ensureConnection(selectedAgentId);
+    if (!nextConnection) return;
+    setSaving(true);
+    const result = await saveSandboxFile(nextConnection, {
+      agentId: selectedAgentId,
+      path: file.path,
+      content: draft,
+      baseSha: file.sha256 ?? null,
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setError(`保存失败：${result.error}`);
+      return;
+    }
+    const nextFile = {
+      ...file,
+      content: draft,
+      sha256: result.data.sha256 ?? file.sha256 ?? null,
+      branch: result.data.branch ?? nextConnection.branch,
+    };
+    setFile(nextFile);
+    setDraft(nextFile.content);
+    setError("");
+    onNotice?.("已保存到沙箱分支，等待沙箱回流 Diff");
+    onSaved?.();
+  }
+
+  const branch = connection?.branch ?? selectedAgent?.branch ?? null;
+  const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
+
+  return (
+    <div className="panelScroll filePanel">
+      <header className="filePanelHeader">
+        <div>
+          <strong>文件</strong>
+          <span>{branch ? `分支 ${branch}` : "沙箱文件编辑"}</span>
+        </div>
+        <button
+          type="button"
+          title="刷新文件列表"
+          disabled={!selectedAgentId || !canUseSandbox || loadingTree}
+          onClick={() => selectedAgentId && void connectAndLoadRoot(selectedAgentId)}
+        >
+          <ReloadOutlined />
+        </button>
+      </header>
+
+      {disabledReason ? (
+        <PanelEmpty icon={<FileOutlined />} text={disabledReason} />
+      ) : (
+        <>
+          <label className="fileAgentPicker">
+            <span>Agent</span>
+            <select
+              value={selectedAgentId ?? ""}
+              disabled={loadingAgents || agents.length === 0}
+              onChange={(event) => setSelectedAgentId(Number(event.target.value))}
+            >
+              {agents.map((agent) => (
+                <option disabled={agent.status !== "ready"} key={agent.agentId} value={agent.agentId}>
+                  {agent.agentName} {agent.branch ? `· ${agent.branch}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {error && <div className="filePanelNotice">{error}</div>}
+
+          <section className="fileBrowser" aria-label="沙箱文件列表">
+            <div className="fileBrowserTop">
+              <span title={currentPath || "/"}>{currentPath || "/"}</span>
+              {currentPath && (
+                <button type="button" onClick={() => void openDirectory(parentPath)}>
+                  返回上级
+                </button>
+              )}
+            </div>
+            <div className="fileTreeList">
+              {loadingTree ? (
+                <span className="fileMuted">正在加载文件...</span>
+              ) : treeItems.length === 0 ? (
+                <span className="fileMuted">暂无文件</span>
+              ) : (
+                treeItems.map((item) => (
+                  <button
+                    className={`fileTreeItem ${file?.path === item.path ? "active" : ""}`}
+                    type="button"
+                    key={`${item.type}:${item.path}`}
+                    onClick={() => (item.type === "directory" ? void openDirectory(item.path) : void openFile(item.path))}
+                  >
+                    {item.type === "directory" ? <FolderOpenOutlined /> : <FileOutlined />}
+                    <span>{item.name}</span>
+                    {item.type === "file" && item.sizeBytes != null ? <small>{formatBytes(item.sizeBytes)}</small> : null}
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="fileEditor" aria-label="沙箱文件编辑器">
+            <div className="fileEditorTop">
+              <span title={file?.path ?? ""}>{file?.path ?? "选择一个文件"}</span>
+              <button type="button" disabled={!dirty || saving || loadingFile} onClick={() => void saveFile()}>
+                <SaveOutlined />
+                <span>{saving ? "保存中" : "保存"}</span>
+              </button>
+            </div>
+            <textarea
+              spellCheck={false}
+              value={draft}
+              placeholder={loadingFile ? "正在读取文件..." : "从上方文件列表选择文件"}
+              disabled={!file || loadingFile}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </section>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -700,6 +960,12 @@ function sameStringSet(a: Set<string>, b: Set<string>) {
     if (!b.has(value)) return false;
   }
   return true;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function PanelEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {

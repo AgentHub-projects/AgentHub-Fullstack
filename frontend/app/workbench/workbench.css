@@ -1957,7 +1957,7 @@ textarea:focus-visible {
 
 .inspectorTabs {
   display: grid;
-  grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
   gap: 6px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -4551,7 +4551,7 @@ div.agentChoice {
 }
 
 .inspectorTabs {
-  grid-template-columns: auto repeat(2, auto) minmax(0, 1fr);
+  grid-template-columns: auto repeat(3, auto) minmax(0, 1fr);
   justify-content: start;
   gap: 6px;
   border-bottom: 1px solid #ececec;
@@ -4578,6 +4578,201 @@ div.agentChoice {
 .inspectorTabs .inspectorToggle {
   width: 34px;
   padding: 0;
+}
+
+.filePanel {
+  grid-template-rows: auto auto minmax(150px, 0.75fr) minmax(260px, 1.25fr);
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.filePanelHeader,
+.fileBrowserTop,
+.fileEditorTop,
+.fileTreeItem,
+.fileAgentPicker {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.filePanelHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filePanelHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.filePanelHeader strong {
+  color: #111111;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.filePanelHeader span,
+.fileMuted {
+  color: #777777;
+  font-size: 12px;
+}
+
+.filePanelHeader button,
+.fileBrowserTop button,
+.fileEditorTop button {
+  min-height: 30px;
+  border-color: #e5e5e5;
+  background: #ffffff;
+  color: #111111;
+  padding: 0 10px;
+}
+
+.fileAgentPicker {
+  gap: 10px;
+  min-height: 36px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 10px;
+}
+
+.fileAgentPicker span {
+  flex: 0 0 auto;
+  color: #777777;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.fileAgentPicker select {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #111111;
+  font: inherit;
+}
+
+.filePanelNotice {
+  border: 1px solid #f0d7a7;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #8a5a00;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.fileBrowser,
+.fileEditor {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.fileBrowser {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.fileBrowserTop,
+.fileEditorTop {
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  border-bottom: 1px solid #eeeeee;
+  padding: 0 10px;
+}
+
+.fileBrowserTop span,
+.fileEditorTop span {
+  min-width: 0;
+  overflow: hidden;
+  color: #555555;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileTreeList {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.fileTreeItem {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #222222;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.fileTreeItem:hover,
+.fileTreeItem.active {
+  background: #f2f2f2;
+}
+
+.fileTreeItem span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileTreeItem small {
+  flex: 0 0 auto;
+  color: #8a8a8a;
+  font-size: 11px;
+}
+
+.fileEditor {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.fileEditorTop button {
+  gap: 6px;
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.fileEditorTop button:disabled {
+  border-color: #d4d4d4;
+  background: #f5f5f5;
+  color: #9a9a9a;
+}
+
+.fileEditor textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: #ffffff;
+  color: #111111;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  tab-size: 2;
 }
 
 .panelScroll.diffPanelLayout {
