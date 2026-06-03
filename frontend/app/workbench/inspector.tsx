@@ -319,8 +319,9 @@ export function FilePanel({
 
   useEffect(() => {
     if (!sessionId || !selectedAgentId || disabledReason) return;
+    if (selectedAgent && selectedAgent.status !== "ready") return;
     void connectAndLoadRoot(selectedAgentId);
-  }, [sessionId, selectedAgentId, disabledReason]);
+  }, [sessionId, selectedAgentId, selectedAgent?.status, disabledReason]);
 
   async function ensureConnection(agentId: number) {
     if (!sessionId) return null;
@@ -421,7 +422,7 @@ export function FilePanel({
         <button
           type="button"
           title="刷新文件列表"
-          disabled={!selectedAgentId || !canUseSandbox || loadingTree}
+          disabled={!selectedAgentId || selectedAgent?.status !== "ready" || !canUseSandbox || loadingTree}
           onClick={() => selectedAgentId && void connectAndLoadRoot(selectedAgentId)}
         >
           <ReloadOutlined />
