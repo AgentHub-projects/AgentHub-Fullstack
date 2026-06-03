@@ -613,20 +613,21 @@ function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
         }
 
         const collapsed = collapsedHunks.has(item.id);
+        const hunkContextTitle = diffHunkContextTitle(item);
         return (
           <div className={`diffHunk ${collapsed ? "collapsed" : ""}`} key={item.id}>
-            <div className="diffLine meta hunkMeta" role="row">
+            <div className="diffLine meta hunkMeta diffHunkHeader" role="row">
               <button
                 className="diffHunkToggle"
                 type="button"
-                title={collapsed ? "展开代码段" : "收起代码段"}
-                aria-label={collapsed ? "展开代码段" : "收起代码段"}
+                title={`${collapsed ? "展开代码段" : "收起代码段"}，${hunkContextTitle}`}
+                aria-label={`${collapsed ? "展开代码段" : "收起代码段"}，${hunkContextTitle}`}
                 aria-expanded={!collapsed}
                 onClick={() => toggleHunk(item.id)}
               >
                 {collapsed ? <RightOutlined /> : <DownOutlined />}
               </button>
-              <code title={item.meta.text}>{diffHunkLabel(item)}</code>
+              <code title={`${diffMetaLabel(item.meta.text)} · ${hunkContextTitle}`}>{diffMetaLabel(item.meta.text)}</code>
             </div>
             {!collapsed && item.lines.map(({ line, index }) => renderDiffLine(line, index))}
           </div>
@@ -682,10 +683,9 @@ function groupDiffLines(lines: DiffLine[]): DiffRenderItem[] {
   return items;
 }
 
-function diffHunkLabel(item: Extract<DiffRenderItem, { kind: "hunk" }>) {
+function diffHunkContextTitle(item: Extract<DiffRenderItem, { kind: "hunk" }>) {
   const unchanged = item.lines.filter(({ line }) => line.kind === "context").length;
-  if (unchanged > 0) return `${unchanged} unmodified lines`;
-  return diffMetaLabel(item.meta.text);
+  return unchanged > 0 ? `${unchanged} 行未改动上下文` : "仅包含变更行";
 }
 
 function diffMetaLabel(text: string) {
