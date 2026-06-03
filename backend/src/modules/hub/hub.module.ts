@@ -10,9 +10,11 @@ import {
   HubAgentController,
   HubArtifactController,
   HubHealthController,
+  HubSandboxController,
   HubSessionController,
   HubUploadController,
   ProjectController,
+  SandboxCallbackController,
 } from "./controllers/hub.controller";
 import { HubRealtimeGateway } from "./gateways/hub-realtime.gateway";
 import { AgentRegistryService } from "./services/agent-registry.service";
@@ -25,6 +27,7 @@ import { DeploymentService } from "./services/deployment.service";
 import { HubEventService } from "./services/event.service";
 import { HubSessionService } from "./services/hub-session.service";
 import { PrismaService } from "./services/prisma.service";
+import { SandboxService } from "./services/sandbox.service";
 
 /** Hub 核心模块，注册所有控制器、服务、网关和全局鉴权守卫 */
 @Module({
@@ -36,6 +39,8 @@ import { PrismaService } from "./services/prisma.service";
     HubArtifactController,
     HubUploadController,
     HubSessionController,
+    HubSandboxController,
+    SandboxCallbackController,
     ProjectController,
     BuilderController,
     AgentTemplateController,
@@ -54,6 +59,7 @@ import { PrismaService } from "./services/prisma.service";
     DownstreamOrchestratorService,
     DeploymentService,
     HubSessionService,
+    SandboxService,
   ],
 })
 export class HubModule {}
