@@ -1,20 +1,20 @@
 :root {
-  --bg: #f3f5f7;
-  --bg-panel: #f8fafc;
+  --bg: #ffffff;
+  --bg-panel: #ffffff;
   --surface: #ffffff;
-  --surface-muted: #f6f8fb;
-  --surface-hover: #eef2f6;
-  --surface-pressed: #e8edf3;
-  --ink: #17202a;
-  --ink-soft: #334155;
-  --muted: #64748b;
-  --muted-soft: #94a3b8;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --brand: #2457d6;
-  --blue: #2457d6;
-  --brand-hover: #1f4bb8;
-  --brand-soft: #eef4ff;
+  --surface-muted: #ffffff;
+  --surface-hover: #fafafa;
+  --surface-pressed: #f5f5f5;
+  --ink: #111111;
+  --ink-soft: #333333;
+  --muted: #737373;
+  --muted-soft: #a3a3a3;
+  --line: #e5e5e5;
+  --line-strong: #d4d4d4;
+  --brand: #111111;
+  --blue: #111111;
+  --brand-hover: #000000;
+  --brand-soft: #f5f5f5;
   --green: #18794e;
   --green-soft: #edf8f2;
   --amber: #946200;
@@ -22,11 +22,11 @@
   --red: #b42318;
   --red-soft: #fff1f0;
   --violet: #5b5fc7;
-  --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.08);
-  --shadow-menu: 0 16px 36px rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 1px 2px rgba(17, 17, 17, 0.06);
+  --shadow-menu: 0 8px 20px rgba(17, 17, 17, 0.1);
   --radius: 8px;
   --radius-sm: 6px;
-  --focus: 0 0 0 3px rgba(36, 87, 214, 0.12);
+  --focus: 0 0 0 3px rgba(17, 17, 17, 0.1);
 }
 
 * {
@@ -72,6 +72,13 @@ a {
   color: inherit;
 }
 
+button[aria-label="Open Next.js Dev Tools"],
+[data-nextjs-dev-overlay],
+nextjs-portal {
+  display: none !important;
+  visibility: hidden !important;
+}
+
 pre,
 code {
   font-family: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
@@ -83,8 +90,8 @@ pre {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: #fbfcfe;
-  color: #263242;
+  background: #ffffff;
+  color: #262626;
   padding: 10px;
   font-size: 12px;
   line-height: 1.55;

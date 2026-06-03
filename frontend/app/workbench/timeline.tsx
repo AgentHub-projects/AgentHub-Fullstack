@@ -401,7 +401,7 @@ function UserMessage({
       <div className="bubble userBubble">
         <div className="bubbleMeta">
           <span>你 · {formatTime(message.createdAt)}</span>
-          <button type="button" title={message.isPinned ? "取消 Pin" : "Pin 到上下文"} onClick={() => onPin(message)}>
+          <button type="button" title={message.isPinned ? "取消 Pin" : "Pin 为关键消息"} onClick={() => onPin(message)}>
             {message.isPinned ? <PushpinFilled /> : <PushpinOutlined />}
           </button>
           {onReply && (
@@ -418,7 +418,7 @@ function UserMessage({
             <CopyOutlined />
           </button>
         </div>
-        {referenceCount(message) > 0 && <div className="messageReferenceHint">引用 {referenceCount(message)} 条上下文</div>}
+        {referenceCount(message) > 0 && <div className="messageReferenceHint">引用 {referenceCount(message)} 条消息</div>}
         <MessageParts
           parts={message.parts}
           fallbackText={message.contentText}

@@ -136,7 +136,7 @@ export function resolveSpeaker(event: HubEventDto, agents: AgentInstanceDto[]) {
 
 export function runStageLabel(run: HubRunDto, events: HubEventDto[]) {
   if (run.status === "queued") return "等待调度";
-  if (run.status === "context_building") return "构建上下文";
+  if (run.status === "context_building") return "准备资料";
   if (run.status === "connecting") return "连接 Orchestrator";
   if (run.status !== "running") return run.status;
 

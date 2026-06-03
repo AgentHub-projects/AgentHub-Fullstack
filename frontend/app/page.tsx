@@ -231,6 +231,13 @@ export default function WorkbenchPage() {
   );
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
+  const pinnedMessages = useMemo(
+    () =>
+      [...(detail?.messages ?? [])]
+        .filter(hasPinnedMessageContent)
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)),
+    [detail?.messages],
+  );
 
   function ensureWorkspace(sessionId: string, patch: Partial<SessionWorkspace> = {}) {
     setWorkspaces((current) => ({
@@ -1309,6 +1316,12 @@ export default function WorkbenchPage() {
           </div>
         </header>
 
+        <PinnedKeyMessages
+          messages={pinnedMessages}
+          onReply={!runActionLocked ? addReplyTarget : undefined}
+          onOpenPart={setActivePartViewer}
+        />
+
         <div className="timeline">
           {conversationItems.map((item) =>
             item.kind === "message" ? (
@@ -2057,6 +2070,118 @@ function sessionListPreview(session: HubSessionDto) {
   const timeSuffix = ` · ${formatTime(session.updatedAt)}`;
   const subtitle = sessionSubtitle(session);
   return subtitle.endsWith(timeSuffix) ? subtitle.slice(0, -timeSuffix.length) : subtitle;
+}
+
+function PinnedKeyMessages({
+  messages,
+  onReply,
+  onOpenPart,
+}: {
+  messages: HubMessageDto[];
+  onReply?: (message: HubMessageDto) => void;
+  onOpenPart?: (part: HubMessagePartDto) => void;
+}) {
+  const visibleMessages = messages.slice(0, 5);
+  if (visibleMessages.length === 0) return null;
+
+  return (
+    <section className="pinnedKeyMessages" aria-label="关键消息">
+      <div className="pinnedKeyHeader">
+        <span>
+          <PushpinFilled />
+          <strong>关键消息</strong>
+        </span>
+        <small>{messages.length}</small>
+      </div>
+      <div className="pinnedKeyList">
+        {visibleMessages.map((message) => {
+          const pinnedParts = message.parts.filter((part) => part.pinned);
+          return (
+            <article className="pinnedKeyItem" key={message.id}>
+              <div className="pinnedKeyMeta">
+                <span>{messageSpeaker(message)} · {formatTime(message.updatedAt)}</span>
+                {onReply && (
+                  <button type="button" onClick={() => onReply(message)}>
+                    引用
+                  </button>
+                )}
+              </div>
+              {message.isPinned && <p>{messagePreview(message)}</p>}
+              {pinnedParts.length > 0 && (
+                <div className="pinnedPartList">
+                  {pinnedParts.map((part) =>
+                    onOpenPart ? (
+                      <button
+                        className="pinnedPartChip"
+                        key={part.id}
+                        type="button"
+                        title="展开 Pin 片段"
+                        onClick={() => onOpenPart(part)}
+                      >
+                        <span>{partTypeLabel(part)}</span>
+                        <strong>{partPreview(part)}</strong>
+                      </button>
+                    ) : (
+                      <span className="pinnedPartChip" key={part.id}>
+                        <span>{partTypeLabel(part)}</span>
+                        <strong>{partPreview(part)}</strong>
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function hasPinnedMessageContent(message: HubMessageDto) {
+  return message.isPinned || message.parts.some((part) => part.pinned);
+}
+
+function messageSpeaker(message: HubMessageDto) {
+  if (message.role === "user") return "你";
+  return message.agentName ?? "Agent";
+}
+
+function messagePreview(message: HubMessageDto) {
+  const text = message.contentText.trim();
+  if (text) return clipInline(text, 112);
+  const part = message.parts.find((item) => item.text || item.title || item.url) ?? message.parts[0];
+  return part ? partPreview(part) : "空消息";
+}
+
+function partPreview(part: HubMessagePartDto) {
+  if (part.title) return clipInline(part.title, 80);
+  if (part.text?.trim()) return clipInline(part.text, 80);
+  if (part.url) return clipInline(part.url, 80);
+  if (part.type === "diff") return clipInline(stringMetadata(part.metadata, "path") ?? "Diff 片段", 80);
+  if (part.type === "deploy_status") return "部署状态";
+  return part.type;
+}
+
+function partTypeLabel(part: HubMessagePartDto) {
+  if (part.type === "code") return part.language ?? "code";
+  if (part.type === "diff") return "diff";
+  if (part.type === "artifact") return "artifact";
+  if (part.type === "image") return "image";
+  if (part.type === "file") return "file";
+  if (part.type === "link_preview") return "link";
+  if (part.type === "deploy_status") return "deploy";
+  return "text";
+}
+
+function clipInline(text: string, limit: number) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}...`;
+}
+
+function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function CapabilityTags({ capabilities }: { capabilities?: unknown[] }) {
