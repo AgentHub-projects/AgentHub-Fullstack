@@ -1,4 +1,4 @@
-import { Inject, Optional } from "@nestjs/common";
+import { Inject, Logger, Optional } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -34,13 +34,18 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
 
   constructor(@Optional() @Inject(AuthSessionService) private readonly authSessions?: AuthSessionService) {}
 
+  private readonly logger = new Logger(HubRealtimeGateway.name);
+
   /** 客户端连接时认证 Cookie，失败则发送 auth.required 并断开 */
   async handleConnection(client: Socket) {
+    this.logger.log(`[Socket.IO] 新连接 clientId=${client.id} hasCookie=${!!client.handshake.headers.cookie}`);
     if (!this.authSessions || !(await this.authSessions.authenticateCookie(client.handshake.headers.cookie))) {
+      this.logger.warn(`[Socket.IO] 认证失败 clientId=${client.id} hasAuthService=${!!this.authSessions}`);
       client.emit("auth.required", { message: "AUTH_REQUIRED" });
       client.disconnect(true);
       return;
     }
+    this.logger.log(`[Socket.IO] 连接成功 clientId=${client.id}`);
     client.emit("realtime.ready", { ok: true });
   }
 
@@ -57,6 +62,7 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   /** 客户端订阅会话房间 */
   @SubscribeMessage("session.subscribe")
   subscribe(@ConnectedSocket() client: Socket, @MessageBody() body: FrontendRealtimeSubscribe) {
+    this.logger.log(`[订阅] clientId=${client.id} sessionId=${body?.sessionId}`);
     if (body?.sessionId) {
       this.trackSubscription(client, body.sessionId);
       client.join(sessionRoom(body.sessionId));
@@ -95,23 +101,29 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
 
   /** 推送事件到会话房间 */
   emitEvent(event: HubEventDto) {
+    const room = sessionRoom(event.sessionId);
+    const clients = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    this.logger.log(`[发送] emitEvent type=${event.eventType} room=${room} clients=${clients}`);
     const envelope: FrontendRealtimeEnvelope = {
       type: "event",
       sessionId: event.sessionId,
       payload: event,
     };
-    this.server.to(sessionRoom(event.sessionId)).emit("hub:event", envelope);
-    this.server.to(sessionRoom(event.sessionId)).emit("run.event", event);
+    this.server.to(room).emit("hub:event", envelope);
+    this.server.to(room).emit("run.event", event);
   }
 
   /** 推送会话更新 */
   emitSession(session: HubSessionDto) {
+    const room = sessionRoom(session.id);
+    const clients = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    this.logger.log(`[发送] emitSession sessionId=${session.id} room=${room} clients=${clients}`);
     const envelope: FrontendRealtimeEnvelope = {
       type: "session",
       sessionId: session.id,
       payload: session,
     };
-    this.server.to(sessionRoom(session.id)).emit("hub:session", envelope);
+    this.server.to(room).emit("hub:session", envelope);
   }
 
   /** 推送消息到会话房间 */

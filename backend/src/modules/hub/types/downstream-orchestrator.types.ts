@@ -16,6 +16,7 @@ export type ConnectionRecord = {
   activeOrchestratorAgentId?: AgentId;
   loadedActiveRun?: { runId?: string; status?: string };
   idleTimer: NodeJS.Timeout | null;
+  autoCompleteTimer?: ReturnType<typeof setTimeout>;
   lastActivityAt: number;
   needsBootstrap: boolean;
   closing?: boolean;

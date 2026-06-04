@@ -385,7 +385,17 @@ export default function WorkbenchPage() {
           return;
         }
         setSessions((current) => upsertById(current, session).sort(sortSession));
-        setWorkspaceDetail(session.id, (current) => (current ? { ...current, session } : current));
+        setWorkspaceDetail(session.id, (current) =>
+          current
+            ? {
+                ...current,
+                session,
+                runs: session.lastRun
+                  ? upsertById(current.runs, { ...session.lastRun, sessionId: session.id }).sort(sortRun)
+                  : current.runs,
+              }
+            : current,
+        );
         setSessionTabs((current) => markSessionTabUpdated(current, session.id));
         void refreshDeploymentPreflight(session.id);
       },

@@ -102,7 +102,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       connection.activeOrchestratorAgentId = input.orchestrator.id;
       const promptBrief = { ...promptInput, prompt: promptInput.prompt?.map((p: any) => ({ ...p, text: p.text?.slice(0, 500) + (p.text?.length > 500 ? `...[${p.text.length}字符]` : "") })) };
       this.logger.log(`[发送] session/prompt: ${JSON.stringify(promptBrief)}`);
-      connection.acp.notify("session/prompt", promptInput);
+      connection.socket.emit("acp:message", { jsonrpc: "2.0", id: `prompt-${input.runId}`, method: "session/prompt", params: promptInput });
       connection.needsBootstrap = false;
       this.markDownstreamActivity(connection);
 
@@ -504,16 +504,16 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         const sessionUpdate = stringValue((content as any).sessionUpdate);
         let runId = stringValue(meta.runId) ?? record.activeRunId;
         if (!runId) {
-          // 从数据库查找该session最后一个running状态的run
+          // 从数据库查找该session最近的活跃run（running或已完成）
           const latestRun = await this.prisma.agentRun.findFirst({
-            where: { sessionId: record.sessionId, status: "running" },
+            where: { sessionId: record.sessionId, status: { in: ["running", "context_building", "connecting", "completed"] } },
             orderBy: { createdAt: "desc" },
-            select: { id: true },
+            select: { id: true, status: true },
           });
           if (latestRun) {
             runId = latestRun.id;
             record.activeRunId = runId;
-            this.logger.log(`[session/update] 从数据库恢复runId=${runId}`);
+            this.logger.log(`[session/update] 从数据库恢复runId=${runId} status=${latestRun.status}`);
           }
         }
         this.logger.log(`[session/update] runId=${runId} hasText=${!!text} sessionUpdate=${sessionUpdate ?? "无"}`);
@@ -525,6 +525,12 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         if (text && runId) {
           const speaker = stringValue(meta.agentId) ?? "agent";
           const speakerAgentId = agentIdValue(meta.agentId);
+          const isChunk = sessionUpdate === "agent_message_chunk";
+          const isStop = sessionUpdate === "agent_message_stop" || sessionUpdate === "stop";
+          // 每个chunk都发delta，前端增量渲染
+          if (isChunk) {
+            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length}`);
+          }
           await this.events.append({
             sessionId: record.sessionId,
             runId,
@@ -533,8 +539,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             source: "downstream_agent",
             payload: { text, speaker },
           });
-          if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop" || sessionUpdate === "agent_message_chunk") {
-            this.logger.log(`[session/update] 消息完成 runId=${runId} sessionUpdate=${sessionUpdate}`);
+          if (isChunk || isStop) {
+            this.logger.log(`[session/update] 消息完成 runId=${runId}`);
             await this.events.append({
               sessionId: record.sessionId,
               runId,
@@ -543,11 +549,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
               source: "downstream_agent",
               payload: { text, speaker },
             });
-            // agent_message_chunk 代表下游已完整输出，触发 run 完成
-            if (sessionUpdate === "agent_message_chunk") {
-              this.logger.log(`[session/update] agent_message_chunk 自动完成run runId=${runId}`);
-              await this.markRunCompleted(record.sessionId, runId);
-            }
+            // 结束事件由downstream的stopReason result触发，不用自动完成
           }
         }
         if (envelopeId !== undefined) record.acp.respond(envelopeId);
@@ -555,6 +557,21 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         if (envelopeId !== undefined) {
           const msg = error instanceof Error ? error.message : String(error);
           record.acp.respondError(envelopeId, errorCode(msg), msg);
+        }
+      }
+      return;
+    }
+
+    // Handle JSON-RPC result with stopReason (downstream task completion signal)
+    if (envelope.result) {
+      this.logger.log(`[result] 收到下游result ${JSON.stringify(envelope.result)}`);
+      const result = asRecord(envelope.result);
+      const stopReason = stringValue(result.stopReason);
+      if (stopReason) {
+        const runId = record.activeRunId;
+        if (runId) {
+          this.logger.log(`[result] stopReason=${stopReason} 完成run runId=${runId}`);
+          await this.markRunCompleted(record.sessionId, runId);
         }
       }
       return;
@@ -903,8 +920,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: runId },
       data: { status: "completed", completedAt: new Date() },
     });
-    const record = this.connections.get(sessionId);
-    if (record?.activeRunId === runId) record.activeRunId = undefined;
     const session = await this.prisma.session.update({
       where: { id: sessionId },
       data: { updatedAt: new Date() },
@@ -919,8 +934,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: runId },
       data: { status: "failed", errorCode: code, errorMessage: message, completedAt: new Date() },
     });
-    const record = this.connections.get(sessionId);
-    if (record?.activeRunId === runId) record.activeRunId = undefined;
     if (typeof this.prisma.session.findUnique === "function") {
       const session = await this.prisma.session.findUnique({
         where: { id: sessionId },
@@ -968,7 +981,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         orchestratorAgentId: String(input.orchestrator.id),
         mentionedAgentIds: input.mentionedAgents.map((agent) => String(agent.id)),
         contextSnapshotId: input.context?.id ?? null,
-        promptMode,
         ...(bootstrap && input.orchestrator.template?.systemPrompt
           ? { orchestratorSystemPrompt: input.orchestrator.template.systemPrompt }
           : {}),
