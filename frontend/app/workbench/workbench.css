@@ -414,24 +414,6 @@ textarea:focus-visible {
   padding: 0;
 }
 
-.archiveToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  padding: 0 14px;
-  user-select: none;
-}
-
-.archiveToggle input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--brand);
-}
-
 .emptySessionList {
   margin: 8px 4px;
   color: var(--muted);
@@ -473,14 +455,6 @@ textarea:focus-visible {
   background: var(--surface);
   box-shadow: inset 3px 0 0 var(--brand);
   color: var(--ink);
-}
-
-.sessionItem.archived {
-  color: var(--muted);
-}
-
-.sessionItem.archived .sessionItemMain {
-  opacity: 0.78;
 }
 
 .sessionItemMain {
@@ -2098,6 +2072,7 @@ textarea:focus-visible {
 }
 
 
+
 .pinnedKeyMeta span {
   min-width: 0;
   overflow: hidden;
@@ -2117,6 +2092,7 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 800;
 }
+
 
 
 .pinnedPartList {
@@ -3638,10 +3614,6 @@ div.agentChoice {
     padding: 7px 9px;
   }
 
-  .archiveToggle {
-    display: none;
-  }
-
   .conversationPane {
     grid-column: 1;
     grid-row: 2;
@@ -4282,16 +4254,6 @@ div.agentChoice {
   border: 0;
   border-radius: 10px;
   padding: 6px 8px;
-}
-
-.archiveToggle {
-  padding: 0 12px;
-  color: rgba(36, 51, 49, 0.68);
-  font-weight: 560;
-}
-
-.archiveToggle input {
-  display: none;
 }
 
 .sessionList {

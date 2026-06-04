@@ -46,7 +46,6 @@ import {
   createSession,
   createProject,
   createSessionAgent,
-  deleteSession,
   deleteAgent,
   getAuthState,
   getDeploymentPreflight,
@@ -142,7 +141,6 @@ export default function WorkbenchPage() {
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
-  const [includeArchivedSessions, setIncludeArchivedSessions] = useState(false);
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [sessionTabs, setSessionTabs] = useState(EMPTY_SESSION_TABS);
   const [workspaces, setWorkspaces] = useState<Record<string, SessionWorkspace>>({});
@@ -361,10 +359,10 @@ export default function WorkbenchPage() {
   useEffect(() => {
     if (!authenticated || !authChecked) return;
     const timer = window.setTimeout(() => {
-      void refreshSessions(sessionSearch, includeArchivedSessions);
+      void refreshSessions(sessionSearch);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [authenticated, authChecked, sessionSearch, includeArchivedSessions]);
+  }, [authenticated, authChecked, sessionSearch]);
 
   useEffect(() => {
     if (!authenticated || openSessionIds.length === 0) return;
@@ -380,6 +378,11 @@ export default function WorkbenchPage() {
         if (event.eventType === "file.change") setInspectorTab("diff");
       },
       onSession: (session) => {
+        if (session.status !== "active") {
+          setSessions((current) => current.filter((item) => item.id !== session.id));
+          closeOpenSession(session.id);
+          return;
+        }
         setSessions((current) => upsertById(current, session).sort(sortSession));
         setWorkspaceDetail(session.id, (current) => (current ? { ...current, session } : current));
         setSessionTabs((current) => markSessionTabUpdated(current, session.id));
@@ -477,7 +480,7 @@ export default function WorkbenchPage() {
     const [agentRes, templateRes, sessionRes, projectRes] = await Promise.all([
       listAgents(),
       listAgentTemplates(),
-      listSessions({ query: sessionSearch, includeArchived: includeArchivedSessions }),
+      listSessions({ query: sessionSearch }),
       listProjects(),
     ]);
     if (agentRes.ok) setAgents(agentRes.data.items);
@@ -500,8 +503,8 @@ export default function WorkbenchPage() {
     }
   }
 
-  async function refreshSessions(query = sessionSearch, includeArchived = includeArchivedSessions) {
-    const result = await listSessions({ query, includeArchived });
+  async function refreshSessions(query = sessionSearch) {
+    const result = await listSessions({ query });
     if (!result.ok) {
       setNotice(`会话列表加载失败：${result.error}`);
       return;
@@ -625,33 +628,6 @@ export default function WorkbenchPage() {
       const result = await archiveSession(session.id);
       if (!result.ok) {
         setNotice(`归档失败：${result.error}`);
-        return;
-      }
-      const nextSessions = includeArchivedSessions
-        ? upsertById(sessions, result.data).sort(sortSession)
-        : sessions.filter((item) => item.id !== session.id).sort(sortSession);
-      setSessions(nextSessions);
-      if (activeSessionId === session.id && includeArchivedSessions) {
-        setDetail((current) => (current ? { ...current, session: result.data } : current));
-      }
-      if (activeSessionId === session.id && !includeArchivedSessions) {
-        const next = nextSessions[0] ?? null;
-        closeOpenSession(session.id);
-        if (next) await loadSession(next.id);
-      }
-    } finally {
-      setSessionActionId(null);
-    }
-  }
-
-  async function handleDeleteSession(session: HubSessionDto) {
-    if (sessionActionId || isRunning(session.lastRun?.status ?? "")) return;
-    if (!window.confirm(`删除会话「${session.title}」？历史记录会保留在数据库中。`)) return;
-    setSessionActionId(session.id);
-    try {
-      const result = await deleteSession(session.id);
-      if (!result.ok) {
-        setNotice(`删除失败：${result.error}`);
         return;
       }
       const nextSessions = sessions.filter((item) => item.id !== session.id).sort(sortSession);
@@ -1279,31 +1255,15 @@ export default function WorkbenchPage() {
           </section>
         </div>
 
-        <label className="archiveToggle">
-          <input
-            type="checkbox"
-            checked={includeArchivedSessions}
-            onChange={(event) => {
-              const checked = event.target.checked;
-              setIncludeArchivedSessions(checked);
-              if (!checked && activeSession?.status === "archived") {
-                closeOpenSession(activeSession.id);
-              }
-            }}
-          />
-          <span>显示归档</span>
-        </label>
-
         <nav className="sessionList" aria-label="会话">
           {sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
           {sessions.map((session) => {
             const sessionBusy = isRunning(session.lastRun?.status ?? "");
             const actionBusy = sessionActionId === session.id;
-            const archived = session.status === "archived";
             return (
               <div
                 key={session.id}
-                className={`sessionItem ${session.id === activeSessionId ? "active" : ""} ${archived ? "archived" : ""}`}
+                className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
               >
                 <span className="sessionAvatar" style={{ background: agentColor(session.id) }}>
                   {initials(session.title)}
@@ -1319,7 +1279,6 @@ export default function WorkbenchPage() {
                   <span className="sessionItemBottom">
                     <small>{sessionListPreview(session)}</small>
                     {sessionBusy && <span className="sessionStateBadge">运行</span>}
-                    {archived && <span className="sessionStateBadge muted">归档</span>}
                   </span>
                 </button>
                 <div className="sessionItemActions">
@@ -1335,20 +1294,11 @@ export default function WorkbenchPage() {
                   <button
                     className="iconButton"
                     type="button"
-                    title={archived ? "已归档" : sessionBusy ? "运行中不能归档" : "归档"}
-                    disabled={actionBusy || sessionBusy || archived}
+                    title={sessionBusy ? "运行中不能归档" : "归档"}
+                    disabled={actionBusy || sessionBusy}
                     onClick={() => void handleArchiveSession(session)}
                   >
                     <InboxOutlined />
-                  </button>
-                  <button
-                    className="iconButton dangerIcon"
-                    type="button"
-                    title={sessionBusy ? "运行中不能删除" : "删除"}
-                    disabled={actionBusy || sessionBusy}
-                    onClick={() => void handleDeleteSession(session)}
-                  >
-                    <DeleteOutlined />
                   </button>
                 </div>
               </div>
