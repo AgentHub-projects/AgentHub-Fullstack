@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  HubSessionController,
   assertSessionActive,
   assertSessionWritable,
-} from "../src/modules/hub/controllers/hub.controller";
+} from "../src/modules/hub/controllers/controller-guards";
+import { HubSessionController } from "../src/modules/hub/controllers/hub-session.controller";
 
 describe("Hub controller session write guards", () => {
   it("allows active sessions for read-write endpoints", async () => {

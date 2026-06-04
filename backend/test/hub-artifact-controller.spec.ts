@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { RequestMethod } from "@nestjs/common";
 import { METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { describe, expect, it } from "vitest";
-import { HubArtifactController } from "../src/modules/hub/controllers/hub.controller";
+import { HubArtifactController } from "../src/modules/hub/controllers/hub-artifact.controller";
 
 describe("HubArtifactController routes", () => {
   it("serves artifact versions under the artifacts API prefix", () => {

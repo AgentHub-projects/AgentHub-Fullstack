@@ -5,17 +5,15 @@ import { AuthSessionService } from "./auth/auth-session.service";
 import { AuthController } from "./controllers/auth.controller";
 import { AgentTemplateController } from "./controllers/agent-template.controller";
 import { BuilderController } from "./controllers/builder.controller";
-import {
-  DownstreamController,
-  HubAgentController,
-  HubArtifactController,
-  HubHealthController,
-  HubSandboxController,
-  HubSessionController,
-  HubUploadController,
-  ProjectController,
-  SandboxCallbackController,
-} from "./controllers/hub.controller";
+import { DownstreamController } from "./controllers/downstream.controller";
+import { HubAgentController } from "./controllers/hub-agent.controller";
+import { HubArtifactController } from "./controllers/hub-artifact.controller";
+import { HubHealthController } from "./controllers/hub-health.controller";
+import { HubSandboxController } from "./controllers/hub-sandbox.controller";
+import { HubSessionController } from "./controllers/hub-session.controller";
+import { HubUploadController } from "./controllers/hub-upload.controller";
+import { ProjectController } from "./controllers/project.controller";
+import { SandboxCallbackController } from "./controllers/sandbox-callback.controller";
 import { HubRealtimeGateway } from "./gateways/hub-realtime.gateway";
 import { AgentRegistryService } from "./services/agent-registry.service";
 import { AgentTemplateService } from "./services/agent-template.service";
