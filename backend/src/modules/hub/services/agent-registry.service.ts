@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
@@ -18,6 +18,7 @@ const IDS = {
 /** Agent 注册中心：管理 Agent 和模板的 CRUD，启动时自动种子默认数据 */
 @Injectable()
 export class AgentRegistryService implements OnModuleInit {
+  private readonly logger = new Logger(AgentRegistryService.name);
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /** 模块初始化时播种默认数据 */
@@ -182,13 +183,17 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(updated, providerNames);
   }
 
-  /** 获取 Agent 的 system prompt */
+  /**
+   * 获取 Agent 的 system prompt（下游 Agent 初始化时调用）
+   * 从 Agent 关联的 template 中读取 systemPrompt
+   */
   async getAgentPrompt(id: number): Promise<{ agentId: number; systemPrompt: string }> {
     const agent = await this.prisma.agent.findUnique({
       where: { id },
       include: { template: true },
     });
     if (!agent) throw new Error("Agent not found");
+    this.logger.log(`[AgentPrompt] agentId=${id} name=${agent.name} promptLen=${agent.template.systemPrompt.length}`);
     return {
       agentId: agent.id,
       systemPrompt: agent.template.systemPrompt,

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post } from "@nestjs/common";
 import type { CreateSessionAgentRequest, UpdateAgentRequest } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
@@ -10,6 +10,7 @@ import { assertAgentSessionsWritable, assertSessionWritable } from "./controller
 /** Agent 控制器：管理 Agent 实例的 CRUD、prompt 和下游配置 */
 @Controller("agents")
 export class HubAgentController {
+  private readonly logger = new Logger(HubAgentController.name);
   constructor(
     @Inject(AgentRegistryService) private readonly agents: AgentRegistryService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -62,10 +63,15 @@ export class HubAgentController {
     return agent;
   }
 
-  /** 获取 Agent 的 system prompt */
+  /**
+   * 获取 Agent 的初始化提示词（下游 Agent 启动时调用此接口获取 system prompt）
+   * GET /api/agents/:id/prompt → { agentId, systemPrompt }
+   */
   @Get(":id/prompt")
   async getAgentPrompt(@Param("id") id: string) {
-    return this.agents.getAgentPrompt(Number(id));
+    const result = await this.agents.getAgentPrompt(Number(id));
+    this.logger.log(`[AgentPrompt] agentId=${id} promptLen=${result.systemPrompt.length}`);
+    return result;
   }
 
   /** 更新 Agent 字段 */
