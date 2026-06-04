@@ -1712,8 +1712,10 @@ textarea:focus-visible {
 }
 
 .inspector > .panelEmpty {
-  align-self: start;
-  margin: 14px;
+  align-self: stretch;
+  justify-self: stretch;
+  min-height: 0;
+  margin: 0;
 }
 
 .emptyState svg,
@@ -4081,7 +4083,7 @@ div.agentChoice {
 }
 
 .agenthubShell.filesActive.fileEditorOpen.railCollapsed {
-  grid-template-columns: 0 minmax(420px, 1fr) clamp(700px, 58vw, 960px);
+  grid-template-columns: 0 minmax(0, 1fr) clamp(620px, 46vw, 820px);
 }
 
 .agenthubShell.inspectorCollapsed,
@@ -4596,32 +4598,19 @@ div.agentChoice {
 
 .filePanel {
   align-content: stretch;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
   padding: 0;
   background: #ffffff;
 }
 
-.filePanelHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  min-height: 48px;
-  gap: 12px;
-  border-bottom: 1px solid #ececec;
-  padding: 0 14px;
-}
-
-.filePanelHeader > div,
 .fileExplorerHeader > div {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.filePanelHeader strong,
 .fileExplorerHeader strong {
   display: inline-flex;
   align-items: center;
@@ -4635,7 +4624,6 @@ div.agentChoice {
   white-space: nowrap;
 }
 
-.filePanelHeader span,
 .fileExplorerHeader span,
 .fileMuted {
   color: #777777;

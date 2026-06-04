@@ -370,6 +370,7 @@ export function FilePanel({
     if (!selectedAgentId) return;
     const nextConnection = await ensureConnection(selectedAgentId);
     if (!nextConnection) return;
+    onFileOpened?.(path);
     setLoadingFile(true);
     const result = await readSandboxFile(nextConnection, path);
     setLoadingFile(false);
@@ -380,7 +381,6 @@ export function FilePanel({
     setFile(result.data);
     setDraft(result.data.content);
     setError("");
-    onFileOpened?.(result.data.path);
   }
 
   async function saveFile() {
@@ -412,20 +412,12 @@ export function FilePanel({
     onSaved?.();
   }
 
-  const branch = connection?.branch ?? selectedAgent?.branch ?? null;
   const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
   const fileName = file ? fileNameFromPath(file.path) : "";
   const fileLanguage = file?.language ?? "text";
 
   return (
     <div className={`panelScroll filePanel ${file ? "hasFile" : ""}`}>
-      <header className="filePanelHeader">
-        <div>
-          <strong>文件</strong>
-          <span>{branch ? `分支 ${branch}` : "沙箱文件编辑"}</span>
-        </div>
-      </header>
-
       {disabledReason ? (
         <PanelEmpty icon={<FileOutlined />} text={disabledReason} />
       ) : (

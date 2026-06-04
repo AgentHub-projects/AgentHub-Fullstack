@@ -33,6 +33,7 @@ import {
   PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
+  RobotOutlined,
   RocketOutlined,
   SendOutlined,
   SearchOutlined,
@@ -1180,7 +1181,7 @@ export default function WorkbenchPage() {
             />
           </label>
           <button className="railNavButton" type="button" onClick={openAgentTemplateDialog}>
-            <BranchesOutlined />
+            <RobotOutlined />
             <span>Agent 模板</span>
           </button>
         </div>
