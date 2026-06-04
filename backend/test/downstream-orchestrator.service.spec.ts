@@ -147,6 +147,27 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(firstRequestParams("session/new")._meta).toEqual({ agentId: "9", agenthubSessionId: "session-1" });
   });
 
+  it("saves downstream sandbox mapping from session/new result", async () => {
+    const { service, sandboxRegistry } = createServiceHarness();
+
+    await startRunWithDownstreamSession(service, createRunInput("run-1", "建立沙箱映射"), "downstream-session-1", {
+      sandbox: {
+        baseUrl: "http://sandbox.local",
+        workspaceId: "workspace-1",
+        agentBranches: { 2: "agent-2" },
+      },
+    });
+
+    expect(sandboxRegistry.saveFromSessionResult).toHaveBeenCalledWith("session-1", "downstream-session-1", {
+      sessionId: "downstream-session-1",
+      sandbox: {
+        baseUrl: "http://sandbox.local",
+        workspaceId: "workspace-1",
+        agentBranches: { 2: "agent-2" },
+      },
+    });
+  });
+
   it("passes mentioned agent ids to the downstream prompt", async () => {
     const service = createService();
     const frontendAgent = {
@@ -460,6 +481,49 @@ describe("DownstreamOrchestratorService prompt transfer", () => {
     expect(requestFor(socket!, "session/new")).toBeUndefined();
   });
 
+  it("saves downstream sandbox mapping from session/load result", async () => {
+    process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF = "true";
+    process.env.DOWNSTREAM_ENABLE_SESSION_LOAD = "true";
+    const { service, prisma, sandboxRegistry } = createServiceHarness();
+    prisma.agentRun.findUnique.mockResolvedValue({
+      orchestratorAgentId: 1,
+      downstreamSessionId: "downstream-session-1",
+    });
+
+    const pending = service.applyFileChanges({
+      sessionId: "session-1",
+      runId: "run-1",
+      fileChangeIds: ["change-1"],
+      changes: [{ id: "change-1", path: "src/app.ts", patch: "@@ -1 +1 @@" }],
+    });
+    await flushMicrotasks();
+
+    const socket = socketMock.sockets.at(-1)!;
+    const load = requestFor(socket, "session/load");
+    socket.trigger("acp:message", {
+      jsonrpc: "2.0",
+      id: load!.id,
+      result: {
+        sessionId: "downstream-session-1",
+        sandbox: {
+          baseUrl: "http://sandbox.local",
+          workspaceId: "workspace-1",
+          agentBranches: { 1: "agent-1" },
+        },
+      },
+    });
+    await pending;
+
+    expect(sandboxRegistry.saveFromSessionResult).toHaveBeenCalledWith("session-1", "downstream-session-1", {
+      sessionId: "downstream-session-1",
+      sandbox: {
+        baseUrl: "http://sandbox.local",
+        workspaceId: "workspace-1",
+        agentBranches: { 1: "agent-1" },
+      },
+    });
+  });
+
   it("does not create a new downstream session when diff apply session load fails", async () => {
     process.env.DOWNSTREAM_ENABLE_FILE_APPLY_DIFF = "true";
     process.env.DOWNSTREAM_ENABLE_SESSION_LOAD = "true";
@@ -588,15 +652,18 @@ function createServiceHarness(options?: { gateway?: ReturnType<typeof createGate
   const gateway = options?.gateway ?? createGateway();
   const events = options?.events ?? { append: vi.fn().mockResolvedValue({}) };
   const contextService = { buildSnapshot: vi.fn().mockResolvedValue(context) };
+  const sandboxRegistry = { saveFromSessionResult: vi.fn().mockResolvedValue(undefined) };
   return {
     prisma,
     gateway,
     events,
+    sandboxRegistry,
     service: new DownstreamOrchestratorService(
       prisma as any,
       events as any,
       gateway as any,
       contextService as any,
+      sandboxRegistry as any,
     ),
   };
 }
@@ -651,6 +718,7 @@ async function startRunWithDownstreamSession(
   service: DownstreamOrchestratorService,
   input: StartRunInput,
   downstreamSessionId: string,
+  extraResult: Record<string, unknown> = {},
 ) {
   const pending = service.startRun(input);
   await flushMicrotasks();
@@ -658,7 +726,7 @@ async function startRunWithDownstreamSession(
   expect(socket).toBeDefined();
   const request = requestFor(socket!, "session/new") ?? requestFor(socket!, "session/load");
   expect(request).toBeDefined();
-  socket!.trigger("acp:message", { jsonrpc: "2.0", id: request!.id, result: { sessionId: downstreamSessionId } });
+  socket!.trigger("acp:message", { jsonrpc: "2.0", id: request!.id, result: { sessionId: downstreamSessionId, ...extraResult } });
   await pending;
   return socket!;
 }

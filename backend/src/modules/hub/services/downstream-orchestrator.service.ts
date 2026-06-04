@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Inject, Injectable, OnModuleDestroy, Optional } from "@nestjs/common";
 import type { AgentId, AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
 import { io } from "socket.io-client";
 import { HubEventService } from "./event.service";
@@ -6,6 +6,7 @@ import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubContextService } from "./context.service";
+import { DownstreamSandboxRegistryService } from "./downstream-sandbox-registry.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { AcpConnection } from "./acp-connection";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
@@ -31,6 +32,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     private readonly gateway: HubRealtimeGateway,
     @Inject(HubContextService)
     private readonly context: HubContextService,
+    @Optional()
+    @Inject(DownstreamSandboxRegistryService)
+    private readonly sandboxRegistry?: DownstreamSandboxRegistryService,
   ) {}
 
   /** 模块销毁时断开所有下游 WebSocket 连接 */
@@ -367,6 +371,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       record.downstreamSessionId = resultSessionId;
       record.needsBootstrap = !loadSessionId;
       record.loadedActiveRun = readActiveRun(result);
+      await this.refreshSandboxMapping(sessionId, resultSessionId, result);
       record.resolveDownstreamReady?.(resultSessionId);
     } catch (error) {
       if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
@@ -381,6 +386,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
           record.downstreamSessionId = resultSessionId;
           record.loadedActiveRun = undefined;
+          await this.refreshSandboxMapping(sessionId, resultSessionId, result);
           record.resolveDownstreamReady?.(resultSessionId);
         } catch (fallbackError) {
           record.rejectDownstreamReady?.(
@@ -403,6 +409,15 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private markDownstreamActivity(record: ConnectionRecord) {
     record.lastActivityAt = Date.now();
     this.scheduleIdleDisconnectCheck(record);
+  }
+
+  /** 下游执行不依赖文件面板映射，Redis 刷新失败时不阻断 run */
+  private async refreshSandboxMapping(sessionId: string, downstreamSessionId: string, result: Record<string, unknown>) {
+    try {
+      await this.sandboxRegistry?.saveFromSessionResult(sessionId, downstreamSessionId, result);
+    } catch {
+      // 文件直连映射是可选能力，失败时保持下游执行链路可用。
+    }
   }
 
   /** 调度空闲断开检查定时器 */

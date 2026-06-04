@@ -311,7 +311,7 @@ export function FilePanel({
       setAgents(result.data.items);
       const firstReady = result.data.items.find((agent) => agent.status === "ready") ?? result.data.items[0] ?? null;
       setSelectedAgentId(firstReady?.agentId ?? null);
-      if (!result.data.sandboxConfigured) setError("沙箱服务未配置，暂不能编辑文件");
+      if (!result.data.sandboxConfigured) setError("下游沙箱尚未就绪，请先发起一次运行");
     });
 
     return () => {
@@ -327,9 +327,7 @@ export function FilePanel({
 
   async function ensureConnection(agentId: number) {
     if (!sessionId) return null;
-    if (connection && connection.agentId === agentId && Date.parse(connection.expiresAt) > Date.now() + 30_000) {
-      return connection;
-    }
+    if (connection && connection.agentId === agentId) return connection;
 
     const result = await connectSandbox(sessionId, { agentId });
     if (!result.ok) {
@@ -384,15 +382,22 @@ export function FilePanel({
   }
 
   async function saveFile() {
-    if (!selectedAgentId || !file || saving) return;
+    if (!sessionId || !selectedAgentId || !file || saving) return;
     const nextConnection = await ensureConnection(selectedAgentId);
     if (!nextConnection) return;
+    if (!nextConnection.latestRunId) {
+      setError("下游运行信息尚未就绪，暂不能保存文件");
+      return;
+    }
     setSaving(true);
     const result = await saveSandboxFile(nextConnection, {
       agentId: selectedAgentId,
       path: file.path,
       content: draft,
       baseSha: file.sha256 ?? null,
+      branch: nextConnection.branch,
+      agenthubSessionId: sessionId,
+      runId: nextConnection.latestRunId,
     });
     setSaving(false);
     if (!result.ok) {
@@ -408,7 +413,7 @@ export function FilePanel({
     setFile(nextFile);
     setDraft(nextFile.content);
     setError("");
-    onNotice?.("已保存到沙箱分支，等待沙箱回流 Diff");
+    onNotice?.("已保存到下游沙箱，等待下游回传 Diff");
     onSaved?.();
   }
 

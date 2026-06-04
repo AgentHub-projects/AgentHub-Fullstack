@@ -31,17 +31,16 @@ AgentHub-Fullstack/
 │               │   ├── hub-agent.controller.ts      # Agent 实例
 │               │   ├── hub-artifact.controller.ts   # 产物内容
 │               │   ├── hub-upload.controller.ts     # 附件上传
-│               │   ├── hub-sandbox.controller.ts    # 沙箱连接
+│               │   ├── hub-sandbox.controller.ts    # 下游沙箱映射
 │               │   ├── hub-health.controller.ts     # 健康检查
 │               │   ├── auth.controller.ts           # 登录/登出
 │               │   ├── project.controller.ts        # 项目管理
 │               │   ├── agent-template.controller.ts # Agent 模板
 │               │   ├── builder.controller.ts        # 模板构建器
-│               │   ├── downstream.controller.ts     # 下游配置
-│               │   └── sandbox-callback.controller.ts # 沙箱回调
+│               │   └── downstream.controller.ts     # 下游配置
 │               ├── gateways/     # Socket.IO 实时推送
 │               ├── mappers/      # Prisma 模型到 DTO 映射
-│               ├── services/     # 业务服务（Session、Agent、Sandbox、Deployment 等）
+│               ├── services/     # 业务服务（Session、Agent、下游沙箱映射、Deployment 等）
 │               ├── types/        # 下游编排类型
 │               └── utils/        # 工具函数
 ├── frontend/               # Next.js 前端 (port 3000)
@@ -183,9 +182,9 @@ Session 绑定 GitHub 项目后才能发送消息。工作台左侧为会话列�
 - **附件**：支持上传文件作为消息附件（最大 50MB，每条消息最多 5 个附件）
 - **重新生成**：可基于某条用户消息触发重新生成
 
-### Sandbox 沙箱编辑
+### 下游沙箱编辑
 
-每个 Agent 在独立 Git 分支中运行。Inspector 的「文件」面板可直接浏览和编辑 Agent 工作区的文件树，编辑保存后通过沙箱回调生成 `file.change` 事件，推送到 Diff 审查面板。
+下游在 `session/new` / `session/load` 返回沙箱地址、workspace 和 Agent 分支映射。AgentHub 后端只把该映射保存到 Redis，Inspector 的「文件」面板读取映射后直连下游沙箱文件 API。编辑保存后由下游通过通用 ACP `session/event:file.change` 回传 Diff。
 
 ### Diff 审查
 
@@ -262,13 +261,12 @@ Agent 输出的长文本、代码片段、图片等结构化产物。产物以�
 | POST | `/api/sessions/:id/uploads` | 上传消息附件，最大 50MB |
 | GET | `/api/uploads/:id/content` | 获取上传内容（公开访问） |
 
-### 沙箱（Sandbox）
+### 下游沙箱映射
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/sessions/:id/sandbox/agents` | 列出可编辑的 Agent 及其分支 |
-| POST | `/api/sessions/:id/sandbox/connect` | 签发短期沙箱连接信息 |
-| POST | `/api/sandbox/file-changes` | 沙箱文件变更回调（公开） |
+| GET | `/api/sessions/:id/sandbox/agents` | 列出 Redis 映射中的可编辑 Agent 及其分支 |
+| POST | `/api/sessions/:id/sandbox/connect` | 返回前端直连下游沙箱所需的地址、workspace、branch 和 latestRunId |
 
 ### 文件变更与部署
 

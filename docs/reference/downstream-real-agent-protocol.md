@@ -269,12 +269,20 @@ AgentHub -> 下游：
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "sessionId": "downstream-session-xxx"
+    "sessionId": "downstream-session-xxx",
+    "sandbox": {
+      "baseUrl": "http://localhost:4100",
+      "workspaceId": "workspace-xxx",
+      "agentBranches": {
+        "2": "agent-2"
+      }
+    }
   }
 }
 ```
 
 `result.sessionId` 必填。AgentHub 保存该 id 用于后续 `session/prompt` 和 `session/cancel`。
+`result.sandbox` 可选；提供时 AgentHub 会把 `agenthubSessionId -> 下游沙箱地址/workspace/Agent 分支` 映射写入 Redis，前端文件面板据此直连下游文件 API。缺少可用 sandbox 时会清理旧映射。
 
 ### 6.2 加载下游 Session（session/load）
 
@@ -306,6 +314,13 @@ AgentHub -> 下游：
     "activeRun": {
       "runId": "agenthub-run-id",
       "status": "running"
+    },
+    "sandbox": {
+      "baseUrl": "http://localhost:4100",
+      "workspaceId": "workspace-xxx",
+      "agentBranches": {
+        "2": "agent-2"
+      }
     }
   }
 }
@@ -317,6 +332,7 @@ AgentHub -> 下游：
 | `result.activeRun` | object | 可选，当前活跃 run 信息，用于断线恢复 |
 | `result.activeRun.runId` | string | 可以从 `activeRun.runId`、`activeRun.id`、`result.activeRunId` 或 `result.runId` 读取 |
 | `result.activeRun.status` | string | 可以从 `activeRun.status`、`result.activeRunStatus` 或 `result.status` 读取 |
+| `result.sandbox` | object | 可选，下游沙箱直连信息；结构同 `session/new` |
 
 如果 `session/load` 失败且没有 active run，AgentHub 会回退到 `session/new`（除非 `allowSessionNewFallback` 为 `false`，如在 apply diff 场景中）。
 

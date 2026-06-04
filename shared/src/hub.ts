@@ -436,11 +436,10 @@ export interface SandboxConnectRequest {
 
 export interface SandboxConnectResponse {
   agentId: AgentId;
-  token: string;
   sandboxBaseUrl: string;
   workspaceId: string;
   branch: string;
-  expiresAt: ISODateString;
+  latestRunId?: string | null;
 }
 
 export interface SandboxFileTreeItemDto {
@@ -466,6 +465,9 @@ export interface SandboxSaveFileRequest {
   path: string;
   content: string;
   baseSha?: string | null;
+  branch?: string | null;
+  agenthubSessionId?: string;
+  runId?: string | null;
 }
 
 export interface SandboxSaveFileResponse {
@@ -474,25 +476,6 @@ export interface SandboxSaveFileResponse {
   branch?: string | null;
   sha256?: string | null;
   fileChangeId?: string | null;
-}
-
-export interface SandboxFileChangeCallbackRequest {
-  sessionId: string;
-  runId?: string;
-  agentId: AgentId;
-  workspaceId: string;
-  branch: string;
-  path: string;
-  oldPath?: string | null;
-  changeType?: HubFileChangeType;
-  language?: string | null;
-  beforeContent?: string | null;
-  beforeSha256?: string | null;
-  afterContent?: string | null;
-  afterSha256?: string | null;
-  patch?: string | null;
-  stats?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
 }
 
 export interface PinHubMessageRequest {

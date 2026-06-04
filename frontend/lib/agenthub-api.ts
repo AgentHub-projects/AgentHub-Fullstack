@@ -256,7 +256,6 @@ async function requestSandboxJson<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${connection.token}`,
         ...init?.headers,
       },
     });
