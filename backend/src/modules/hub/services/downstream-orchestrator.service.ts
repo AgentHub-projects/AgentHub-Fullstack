@@ -487,7 +487,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         const meta = asRecord(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
-        const runId = stringValue(meta.runId);
+        const runId = stringValue(meta.runId) ?? record.activeRunId;
         if (!runId) {
           if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
           return;
@@ -527,7 +527,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     // Handle structured session/event reports from downstream agents.
     if (envelope.method && envelope.method !== "session/event") return;
     const meta = asRecord(params._meta);
-    const runId = stringValue(meta.runId);
+    const runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? stringValue(envelope.runId) ?? record.activeRunId;
     if (!runId) {
       if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
       return;
@@ -546,7 +546,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
     const payload = asRecord(params.payload ?? params);
 
-    const speakerAgentId = agentIdValue(meta.agentId);
+    const speakerAgentId =
+      agentIdValue(meta.agentId) ??
+      agentIdValue(params.speaker) ??
+      agentIdValue(payload.speaker) ??
+      agentIdValue(envelope.speaker);
 
     try {
       await this.events.append({

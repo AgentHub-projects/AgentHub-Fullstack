@@ -5,7 +5,17 @@ export type MarkdownBlock =
   | { kind: "ul"; items: string[] }
   | { kind: "ol"; items: string[] }
   | { kind: "quote"; text: string }
-  | { kind: "table"; headers: string[]; rows: string[][] };
+  | { kind: "table"; headers: string[]; rows: string[][] }
+  | { kind: "hr" };
+
+export type InlineSegment =
+  | { kind: "text"; text: string }
+  | { kind: "bold"; text: string }
+  | { kind: "italic"; text: string }
+  | { kind: "code"; text: string }
+  | { kind: "link"; text: string; url: string }
+  | { kind: "image"; alt: string; url: string }
+  | { kind: "strikethrough"; text: string };
 
 export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -61,6 +71,12 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       continue;
     }
 
+    if (/^[-*_]{3,}\s*$/.test(line)) {
+      blocks.push({ kind: "hr" });
+      index++;
+      continue;
+    }
+
     if (/^\s*[-*]\s+/.test(line)) {
       const items: string[] = [];
       while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
@@ -90,7 +106,8 @@ export function parseMarkdownBlocks(text: string): MarkdownBlock[] {
       !/^\s*[-*]\s+/.test(lines[index]) &&
       !/^\s*\d+\.\s+/.test(lines[index]) &&
       !lines[index].startsWith(">") &&
-      !isTableStart(lines, index)
+      !isTableStart(lines, index) &&
+      !/^[-*_]{3,}\s*$/.test(lines[index])
     ) {
       paragraph.push(lines[index]);
       index++;
@@ -116,4 +133,89 @@ function splitTableRow(line: string) {
     .replace(/\|$/, "")
     .split("|")
     .map((cell) => cell.trim());
+}
+
+const INLINE_TOKEN = /(`[^`]*`|!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)|\*\*|~~|\*)/;
+const LINK_IMAGE_RE = /^!?\[(.*?)\]\((.*?)\)$/;
+const CODE_RE = /^`([^`]*)`$/;
+
+export function parseInlineMarkdown(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    const match = remaining.match(INLINE_TOKEN);
+    if (!match || match.index === undefined) {
+      pushText(remaining);
+      break;
+    }
+
+    if (match.index > 0) {
+      pushText(remaining.slice(0, match.index));
+    }
+
+    const token = match[0];
+    const after = remaining.slice(match.index + token.length);
+
+    if (token.startsWith("`")) {
+      const m = token.match(CODE_RE);
+      segments.push({ kind: "code", text: m ? m[1] : "" });
+    } else if (token === "**") {
+      const closing = after.indexOf("**");
+      if (closing >= 0) {
+        segments.push({ kind: "bold", text: after.slice(0, closing) });
+        remaining = after.slice(closing + 2);
+        continue;
+      }
+      pushText(token);
+    } else if (token === "*") {
+      if (after.startsWith("*")) {
+        pushText("*");
+        remaining = after;
+        continue;
+      }
+      const closing = after.indexOf("*");
+      if (closing >= 0) {
+        segments.push({ kind: "italic", text: after.slice(0, closing) });
+        remaining = after.slice(closing + 1);
+        continue;
+      }
+      pushText(token);
+    } else if (token === "~~") {
+      const closing = after.indexOf("~~");
+      if (closing >= 0) {
+        segments.push({ kind: "strikethrough", text: after.slice(0, closing) });
+        remaining = after.slice(closing + 2);
+        continue;
+      }
+      pushText(token);
+    } else if (token.startsWith("!") || token.startsWith("[")) {
+      const m = token.match(LINK_IMAGE_RE);
+      if (m) {
+        if (token.startsWith("!")) {
+          segments.push({ kind: "image", alt: m[1], url: m[2] });
+        } else {
+          segments.push({ kind: "link", text: m[1] || m[2], url: m[2] });
+        }
+      } else {
+        pushText(token);
+      }
+    } else {
+      pushText(token);
+    }
+
+    remaining = after;
+  }
+
+  return segments;
+
+  function pushText(t: string) {
+    if (!t) return;
+    const last = segments[segments.length - 1];
+    if (last?.kind === "text") {
+      last.text += t;
+    } else {
+      segments.push({ kind: "text", text: t });
+    }
+  }
 }

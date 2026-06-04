@@ -16,7 +16,7 @@ import {
 } from "@ant-design/icons";
 import { artifactContentUrl } from "../../lib/agenthub-api";
 import { diffMarker, parseUnifiedPatch } from "../../lib/workbench/diff";
-import { parseMarkdownBlocks, type MarkdownBlock } from "../../lib/workbench/markdown";
+import { parseInlineMarkdown, parseMarkdownBlocks, type InlineSegment, type MarkdownBlock } from "../../lib/workbench/markdown";
 import type { DiffLine } from "../../lib/workbench/types";
 
 export function RichText({ text }: { text: string }) {
@@ -538,31 +538,31 @@ function DeployStatusPart({
 function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactNode {
   if (block.kind === "heading") {
     const Tag = block.level <= 1 ? "h2" : "h3";
-    return <Tag key={key}>{block.text}</Tag>;
+    return <Tag key={key}><InlineText text={block.text} /></Tag>;
   }
   if (block.kind === "code") {
     return <CodeBlock key={key} text={block.text} language={block.language} />;
   }
   if (block.kind === "ul") {
-    return <ul key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>;
+    return <ul key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineText text={item} /></li>)}</ul>;
   }
   if (block.kind === "ol") {
-    return <ol key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ol>;
+    return <ol key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineText text={item} /></li>)}</ol>;
   }
   if (block.kind === "quote") {
-    return <blockquote key={key}>{block.text}</blockquote>;
+    return <blockquote key={key}><InlineText text={block.text} /></blockquote>;
   }
   if (block.kind === "table") {
     return (
       <div className="markdownTableWrap" key={key}>
         <table>
           <thead>
-            <tr>{block.headers.map((header, cellIndex) => <th key={cellIndex}>{header}</th>)}</tr>
+            <tr>{block.headers.map((header, cellIndex) => <th key={cellIndex}><InlineText text={header} /></th>)}</tr>
           </thead>
           <tbody>
             {block.rows.map((row, rowIndex) => (
               <tr key={rowIndex}>
-                {block.headers.map((_, cellIndex) => <td key={cellIndex}>{row[cellIndex] ?? ""}</td>)}
+                {block.headers.map((_, cellIndex) => <td key={cellIndex}><InlineText text={row[cellIndex] ?? ""} /></td>)}
               </tr>
             ))}
           </tbody>
@@ -570,7 +570,36 @@ function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactN
       </div>
     );
   }
-  return <p key={key}>{block.text}</p>;
+  if (block.kind === "hr") {
+    return <hr key={key} />;
+  }
+  return (
+    <p key={key}>
+      {block.text.split("\n").map((line, i, arr) => (
+        <React.Fragment key={i}>
+          <InlineText text={line} />
+          {i < arr.length - 1 && <br />}
+        </React.Fragment>
+      ))}
+    </p>
+  );
+}
+
+function InlineText({ text }: { text: string }) {
+  const segments = parseInlineMarkdown(text);
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === "bold") return <strong key={i}>{seg.text}</strong>;
+        if (seg.kind === "italic") return <em key={i}>{seg.text}</em>;
+        if (seg.kind === "code") return <code key={i} className="inlineCode">{seg.text}</code>;
+        if (seg.kind === "link") return <a key={i} href={seg.url} target="_blank" rel="noreferrer">{seg.text}</a>;
+        if (seg.kind === "image") return <img key={i} src={seg.url} alt={seg.alt} className="inlineImage" />;
+        if (seg.kind === "strikethrough") return <del key={i}>{seg.text}</del>;
+        return <React.Fragment key={i}>{seg.text}</React.Fragment>;
+      })}
+    </>
+  );
 }
 
 function CodeBlock({

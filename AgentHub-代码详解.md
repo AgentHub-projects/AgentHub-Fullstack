@@ -362,7 +362,7 @@ listen(127.0.0.1, PORT ?? 3001)
 
 #### HubModule — 功能注册中心
 
-注册了 **11 个控制器** 和 **13 个提供者**：
+注册了 **12 个控制器** 和 **13 个提供者**：
 
 控制器：
 
@@ -373,7 +373,8 @@ listen(127.0.0.1, PORT ?? 3001)
 - `HubArtifactController` — 产物查询
 - `HubUploadController` — 文件上传
 - `HubSessionController` — 会话核心 CRUD + 消息 + 部署
-- `HubSandboxController` — 下游沙箱映射查询
+- `HubSandboxController` — 沙箱连接
+- `SandboxCallbackController` — 沙箱文件变更回调（公开路由）
 - `ProjectController` — 项目管理
 - `BuilderController` — Agent 模板构建器
 - `AgentTemplateController` — 模板 CRUD
@@ -587,7 +588,7 @@ mockReply(_buildId, messages):
 
 这是后端最大的服务之一（8 个注入依赖），负责会话的完整生命周期。
 
-**依赖注入**: PrismaService, HubRealtimeGateway, HubContextService, HubEventService, DownstreamOrchestratorService, AgentRegistryService, DeploymentService
+**依赖注入**: PrismaService, HubRealtimeGateway, HubContextService, HubEventService, DownstreamOrchestratorService, AgentRegistryService, DeploymentService, SandboxService
 
 **创建会话**：
 
@@ -664,6 +665,8 @@ applyFileChange(sessionId, fileChangeId):
 #### 4.3.6 HubContextService — 上下文管理
 
 负责 Agent 运行时上下文的所有操作，包括 token 预算管理、短期缓冲压缩、向量嵌入和检索、以及快照构建。
+
+
 
 **配置（环境变量）**：
 
@@ -1061,31 +1064,43 @@ syncDeploymentMessage(deploymentId):
   → 广播 message update
 ```
 
-#### 4.3.12 DownstreamSandboxRegistryService — 下游沙箱映射
+#### 4.3.12 SandboxService — 沙箱编辑器集成
 
-**Redis 映射写入**：
-
-```
-saveFromSessionResult(agenthubSessionId, downstreamSessionId, result):
-  1. 读取 result.sandbox.baseUrl / workspaceId / agentBranches
-  2. sandbox 无效 → 删除 Redis 旧映射
-  3. sandbox 有效 → 写入 agenthub:downstream-sandbox:{sessionId}
-  4. TTL 7 天，后续 session/new 或 session/load 成功时刷新
-```
-
-**前端连接信息**：
+**令牌签发** (HMAC-SHA256)：
 
 ```
 connect(sessionId, agentId):
-  1. 读取 Redis 映射
+  1. 验证 project 绑定 + 沙箱配置
   2. 验证 agent 在会话中
-  3. 查找最新 runId
-  4. 返回 { agentId, sandboxBaseUrl, workspaceId, branch, latestRunId }
+  3. 构建令牌 payload:
+     { iss: "agenthub", typ: "sandbox", sub: agentId,
+       sessionId, projectId, agentId, workspaceId, branch,
+       iat, exp: now + 15min }
+  4. signToken(payload) → "{base64url(json)}.{base64url(hmac)}"
+  5. 缓存 workspaceId + branch 到 session.metadata
+  6. 返回 { token, sandboxBaseUrl, workspaceId, branch }
+
+signToken(payload):
+  body = base64url(JSON.stringify(payload))
+  signature = base64url(HMAC-SHA256(secret, body))
+  return "{body}.{signature}"
+```
+
+**沙箱回调**：
+
+```
+recordFileChangeFromSandbox(input, authorization, callbackSecret):
+  1. authenticateSandboxCallback — Bearer token 或共享密钥验证
+  2. 验证 token scope 匹配 (sessionId, agentId, workspaceId)
+  3. 创建新的 AgentRun
+  4. events.append(file.change) — 将沙箱编辑作为文件变更事件
+  5. events.append(run.completed) — 标记运行完成
+  6. 缓存 workspace info 到 session.metadata
 ```
 
 ---
 
-### 4.4 控制器层 (11 个控制器)
+### 4.4 控制器层 (12 个控制器)
 
 #### HubSessionController — 路由前缀 `sessions`
 
@@ -1118,6 +1133,7 @@ connect(sessionId, agentId):
 - **ProjectController**: `GET/POST /projects`, `PATCH/DELETE /projects/:id`
 - **HubArtifactController**: `GET /artifacts/:id/content`, `GET /artifacts/:id/versions`
 - **HubUploadController**: `POST /sessions/:id/uploads`, `GET /uploads/:id/content` (公开)
+- **SandboxCallbackController**: `POST /sandbox/file-changes` (公开)
 - **DownstreamController**: `GET /downstream/agents/:agentId/config` (公开)
 - **AuthController**: `GET /auth/me`, `POST /auth/login`, `POST /auth/logout` (公开)
 - **HubHealthController**: `GET /health` (公开)
@@ -1471,7 +1487,7 @@ requestJson<T>(path, init?):
 
 requestSandboxJson<T>(connection, path, init?):
   URL: connection.sandboxBaseUrl + path
-  不附加 AgentHub 沙箱 token，下游自行负责文件 API 鉴权/CORS
+  Authorization: Bearer {connection.token}
 ```
 
 **认证**：3 个函数（getAuthState, loginWithCredentials, logoutAuthSession）
@@ -1877,32 +1893,38 @@ DeploymentService.start(sessionId, _input):
 ### 6.7 沙箱文件编辑流
 
 ```
-下游 session/new 或 session/load:
-  result.sandbox = {
-    baseUrl,
-    workspaceId,
-    agentBranches: { [agentId]: branch }
-  }
-  ↓
-后端 DownstreamSandboxRegistryService:
-  1. 将 AgentHub sessionId → 下游沙箱地址/workspace/分支映射写入 Redis
-  2. 不签发 token，不保存到数据库 metadata
-  ↓
 前端 FilePanel:
   1. listSandboxAgents(sessionId) → 获取 Agent 分支列表
   2. 选择 Agent → connectSandbox(sessionId, { agentId })
-     → 返回 { sandboxBaseUrl, workspaceId, branch, latestRunId }
+     ↓
+  后端 SandboxService.connect():
+    1. 验证 project 绑定 + 沙箱配置
+    2. 验证 agent 在会话中
+    3. signToken({
+         iss: "agenthub",
+         typ: "sandbox",
+         exp: now + 15min,
+         sessionId, projectId, agentId, workspaceId, branch
+       })
+    4. 返回 { token, sandboxBaseUrl, workspaceId, branch }
   ↓
   前端:
   3. listSandboxTree(connection, "/") → 文件树
   4. readSandboxFile(connection, path) → 文件内容 → draft
   5. 用户编辑 draft
-  6. saveSandboxFile(connection, { path, content, baseSha, agenthubSessionId, runId, branch })
+  6. saveSandboxFile(connection, { path, content, baseSha })
   ↓
-  下游沙箱保存文件
+  沙箱服务保存文件 → 触发回调
   ↓
-下游通过 ACP session/event:file.change 回传 Diff
-  → HubEventService 复用通用事件管线落库并 WebSocket 广播
+POST /api/sandbox/file-changes (Bearer token 认证)
+  ↓
+SandboxService.recordFileChangeFromSandbox():
+  1. verifyToken → 验证 scope
+  2. 创建 AgentRun
+  3. events.append(file.change)
+  4. events.append(run.completed)
+  5. 缓存 workspace info → session.metadata
+  6. WebSocket 广播
 ```
 
 ---
@@ -1928,6 +1950,9 @@ DeploymentService.start(sessionId, _input):
 | `DOWNSTREAM_ENABLE_SESSION_LOAD`    | (可空)                     | 启用会话恢复                       |
 | `DOWNSTREAM_ENABLE_CONTEXT_DELTA`   | (可空)                     | 启用上下文增量通知                    |
 | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` | (可空)                     | 启用文件 diff 应用                 |
+| `AGENTHUB_SANDBOX_BASE_URL`         | (可空)                     | 沙箱服务地址                       |
+| `AGENTHUB_SANDBOX_TOKEN_SECRET`     | (可空)                     | 沙箱令牌 HMAC 密钥                 |
+| `AGENTHUB_SANDBOX_CALLBACK_SECRET`  | (可空)                     | 沙箱回调共享密钥                     |
 | `VERCEL_TOKEN`                      | (可空)                     | Vercel API 令牌                |
 | `VERCEL_TEAM_ID`                    | (可空)                     | Vercel 团队 ID                 |
 | `VERCEL_DEPLOY_ENV_KEYS`            | (可空)                     | 同步到 Vercel 的环境变量（逗号分隔）       |
@@ -1966,7 +1991,7 @@ DeploymentService.start(sessionId, _input):
 | `SUMMARY_API_KEY` 未设置                   | BuilderService 使用 mockReply，ContextService 摘要回退到截断文本 |
 | `ALIYUN_OSS_*` 未配置                      | 产物仅支持 inline_text 存储                                 |
 | `VERCEL_TOKEN` 未配置                      | 部署功能不可用（preflight 返回 missing）                        |
-| 下游未返回 `result.sandbox`                | 文件面板显示“下游沙箱尚未就绪”                                  |
+| `AGENTHUB_SANDBOX_*` 未配置                | 沙箱编辑功能不可用                                            |
 
 ---
 
@@ -1984,7 +2009,7 @@ DeploymentService.start(sessionId, _input):
 | `backend/src/modules/hub/services/context.service.ts`                 | ~350  | 上下文管理     |
 | `backend/src/modules/hub/services/deployment.service.ts`              | ~300  | Vercel 部署 |
 | `backend/src/modules/hub/services/builder.service.ts`                 | ~300  | 模板构建器     |
-| `backend/src/modules/hub/services/downstream-sandbox-registry.service.ts` | ~150 | 下游沙箱映射    |
+| `backend/src/modules/hub/services/sandbox.service.ts`                 | ~200  | 沙箱集成      |
 | `backend/src/modules/hub/controllers/hub.controller.ts`               | ~600  | 所有控制器     |
 | `backend/src/modules/hub/gateways/hub-realtime.gateway.ts`            | ~100  | WebSocket |
 | `backend/src/modules/hub/mappers/hub.mappers.ts`                      | ~200  | 数据映射      |
