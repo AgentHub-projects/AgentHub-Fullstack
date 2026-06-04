@@ -1,44 +1,44 @@
 # AgentHub 与真实下游 Agent 传输协议
 
-版本：v1.0  
-日期：2026-06-02  
-状态：按当前代码实现整理
+版本：v2.0
+日期：2026-06-04
+状态：基于当前代码实现，与 `agenthub-vs-agentgateway.md` 互为补充
 
 ## 1. 实现依据
 
-本文档描述 AgentHub 后端与真实下游 Agent/Orchestrator 的实际传输协议，依据当前代码实现整理，优先级高于早期设计草案。
+本文档描述 AgentHub 后端与真实下游 Agent/Orchestrator 的 ACP（Agent Communication Protocol）传输协议，依据当前代码实现整理。
 
-主要实现文件：
+关键实现文件：
 
-- `backend/src/modules/hub/services/downstream-orchestrator.service.ts`
-- `backend/src/modules/hub/services/event.service.ts`
-- `backend/src/modules/hub/types/downstream-orchestrator.types.ts`
-- `shared/src/downstream.ts`
+- `backend/src/modules/hub/services/downstream-orchestrator.service.ts` — 连接生命周期、prompt 分发、事件处理、断线恢复
+- `backend/src/modules/hub/services/acp-connection.ts` — JSON-RPC 2.0 传输层封装（request/respond/notify 原语）
+- `backend/src/modules/hub/services/event.service.ts` — 事件持久化与副作用
+- `shared/src/downstream.ts` — 下游协议共享类型定义
 
 ## 2. 角色边界
 
 AgentHub 后端负责：
 
 - 接收前端用户消息，创建 `agent_runs`。
-- 构造上下文快照并发送给下游 Orchestrator。
-- 主动连接真实下游 Orchestrator。
-- 接收下游事件，归一化后落库。
-- 派生写入 `messages`、`file_changes`、`artifacts`。
-- 向前端 WebSocket 广播更新。
+- 构造上下文快照并渲染为 prompt 文本。
+- 作为 Socket.IO client 主动连接下游 Orchestrator。
+- 发送 `initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel` 等 ACP 消息。
+- 接收下游 `session/event`、`session/update` 事件，归一化后落库。
+- 将事件派生为 `messages`、`file_changes`、`artifacts`，并推送前端 WebSocket。
 
-真实下游 Agent/Orchestrator 负责：
+下游 Agent/Orchestrator 负责：
 
 - 暴露 Socket.IO WebSocket 服务。
-- 接收 `session/new`、`session/load`、`session/prompt`、`session/cancel` 等命令。
+- 响应 `session/new`、`session/load`（JSON-RPC request）。
+- 接收 `session/prompt`、`session/cancel`（JSON-RPC notification）。
 - 维护真实执行环境和下游 session。
-- 协调多个 worker Agent。
-- 将文本、文件变更、artifact、git push、run 完成/失败等事件回传给 AgentHub。
+- 将事件通过 `session/event` 或 `session/update` 回传给 AgentHub。
 
 ## 3. 传输层
 
-AgentHub 是 Socket.IO client，下游 Orchestrator 是 Socket.IO server。
+AgentHub 是 Socket.IO **client**，下游 Orchestrator 是 Socket.IO **server**。
 
-连接地址由环境变量提供：
+连接地址：
 
 ```env
 DOWNSTREAM_ORCHESTRATOR_WS_URL=http://localhost:4000
@@ -49,157 +49,245 @@ AgentHub 连接方式：
 ```ts
 io(DOWNSTREAM_ORCHESTRATOR_WS_URL, {
   transports: ["websocket"],
-  reconnection: false
+  reconnection: false   // 不启用 Socket.IO 自动重连
 })
 ```
 
-AgentHub 向下游发送消息使用 Socket.IO event：
+**唯一的消息通道**：所有 ACP 消息通过 Socket.IO event `acp:message` 双向传输。
 
 ```text
-acp:message
+acp:message   ← 双向，AgentHub 与下游之间唯一使用的 Socket.IO event
 ```
 
-AgentHub 接收下游消息时监听以下 event：
-
-```text
-acp:message
-session/event
-acp:event
-message
-```
-
-建议下游统一使用 `acp:message`，并使用 JSON-RPC 2.0 envelope。
+AgentHub 不监听 `session/event`、`acp:event`、`message` 等 event 名称。下游所有回复、请求、事件均通过 `acp:message` 发送。
 
 ## 4. 通用消息 Envelope
 
-推荐格式：
+所有消息使用 **JSON-RPC 2.0** 格式，通过 `acp:message` 传输。
+
+### 4.1 消息角色
+
+AgentHub 根据消息是否有 `id` 区分 request 和 notification：
+
+| 角色 | 有 `id`？ | 语义 |
+| --- | --- | --- |
+| **Request** | 是 | 期望对方返回 JSON-RPC response（`result` 或 `error`），有超时计时 |
+| **Notification** | 否 | 单向发送，不等待响应 |
+
+AgentHub 发送的消息分类：
+
+| 方法 | 角色 | 说明 |
+| --- | --- | --- |
+| `initialize` | **Notification** | 连接初始化，不等待响应 |
+| `session/new` | **Request** | 创建下游 session，等待返回 `sessionId` |
+| `session/load` | **Request** | 加载已有 session，等待返回 `sessionId` |
+| `session/prompt` | **Notification** | 发送用户任务，不等待响应，发送后立即标记 run 为 `running` |
+| `session/cancel` | **Notification** | 取消运行，不等待响应 |
+| `session/context_delta` | **Notification** | 上下文增量变更（pin、成员），不等待响应 |
+| `file/apply_diff` | **Notification** | 应用文件差异，不等待响应 |
+| `run/status` | **Request** | 查询 run 状态（断线恢复用） |
+
+### 4.2 Request（带 id，期望响应）
+
+AgentHub -> 下游：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "session/new",
+  "params": {}
+}
+```
+
+下游必须返回 `result` 或 `error`：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": { "sessionId": "downstream-session-xxx" }
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": { "code": "SESSION_NEW_FAILED", "message": "session creation failed" }
+}
+```
+
+**超时**：默认 3000ms（通过 `RECOVERY_TIMEOUT_MS` 配置），超时后 Agenthub 以 `{METHOD}_TIMEOUT` 错误拒绝。`id` 为自动递增整数（从 1 开始）。
+
+### 4.3 Notification（无 id，不等待响应）
+
+AgentHub -> 下游：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/prompt",
+  "params": {
+    "sessionId": "downstream-session-xxx",
+    "prompt": [{"type": "text", "text": "..."}],
+    "_meta": { ... }
+  }
+}
+```
+
+下游不应返回任何响应，也无需处理 `id` 字段。
+
+### 4.4 下游向 AgentHub 发送事件
+
+下游向 AgentHub 发送事件使用 **JSON-RPC request**（带 `id`），AgentHub 处理后会返回 ack。
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1001,
   "method": "session/event",
-  "params": {}
+  "params": { ... }
 }
 ```
 
-AgentHub 也兼容简化事件格式：
+AgentHub ack（成功）：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1001,
+  "result": { "ok": true }
+}
+```
+
+AgentHub error（失败）：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1001,
+  "error": { "code": "RUN_ID_REQUIRED", "message": "RUN_ID_REQUIRED" }
+}
+```
+
+### 4.5 已废弃的格式
+
+以下简化事件格式（无 `method` 字段）**已不再支持**：
 
 ```json
 {
   "type": "message.completed",
   "runId": "agenthub-run-id",
   "seq": 1,
-  "payload": {}
+  "speaker": 2,
+  "payload": { "text": "..." }
 }
 ```
 
-但生产联调建议使用 JSON-RPC request，因为 AgentHub 会在落库后返回 ack。
+原因是当前代码中 `session/event` 处理路径的 `_meta.runId` 必填，简化格式无法提供 `_meta`。下游必须使用带 `method: "session/event"` 或 `method: "session/update"` 的标准 JSON-RPC 格式。
 
-通用字段：
+### 4.6 Envelope 字段
 
 | 字段 | 方向 | 说明 |
 | --- | --- | --- |
-| `jsonrpc` | 双向 | 建议固定为 `"2.0"` |
-| `id` | 双向 | request/response 关联 id |
-| `method` | 双向 | 方法名 |
+| `jsonrpc` | 双向 | 固定 `"2.0"` |
+| `id` | 双向 | 整数，request 必须带，notification 不带。AgentHub 响应匹配依赖此字段 |
+| `method` | 双向 | ACP 方法名，如 `session/event`、`session/update` 等 |
 | `params` | 双向 | 方法参数 |
-| `result` | 双向 | 成功响应 |
-| `error` | 双向 | 失败响应 |
-| `type` | 下游到 AgentHub | 简化事件格式中的事件类型 |
-| `runId` | 下游到 AgentHub | AgentHub run id |
-| `seq` | 下游到 AgentHub | run 内事件序号 |
-| `payload` | 下游到 AgentHub | 事件载荷 |
-| `speaker` | 下游到 AgentHub | AgentHub Agent 实例 id |
+| `result` | 双向 | 成功响应载荷 |
+| `error` | 双向 | 失败响应，格式为 `{ code, message }` 或 string |
 
 ## 5. 连接初始化
 
-Socket.IO 连接成功后，AgentHub 会发送 `initialize`。
+Socket.IO 连接成功后，AgentHub 立即发送 `initialize`（notification）。
 
-AgentHub -> 下游：
+### 5.1 initialize
+
+AgentHub -> 下游（notification，无 `id`）：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
   "method": "initialize",
   "params": {
     "protocolVersion": 1,
     "clientCapabilities": {
-      "fs": {
-        "readTextFile": false,
-        "writeTextFile": false
-      },
+      "fs": { "readTextFile": false, "writeTextFile": false },
       "terminal": false
     }
   }
 }
 ```
 
-下游可以返回：
+`initialize` 是 notification，**下游无需回复**。AgentHub 在发送后不会等待响应，也不会持久化任何 capabilities 信息。联通性判断完全依赖后续 `session/new` 或 `session/load` 是否成功。
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "protocolVersion": 1,
-    "agentInfo": {
-      "name": "real-orchestrator",
-      "version": "1.0.0"
-    }
-  }
-}
-```
+### 5.2 事件处理注册
 
-当前实现不会持久化 `initialize` 的 capabilities。联通判断主要依赖后续 `session/new` 或 `session/load` 成功。
+连接建立后，AgentHub 通过 `AcpConnection.onNotification()` 注册处理器，监听下游通过 `acp:message` 发来的 `session/update` 和 `session/event` 通知。
+
+处理规则：
+
+- 如果收到带 `id` 的消息，且该 `id` 匹配 AgentHub 的某个 pending request → 作为该 request 的 response 处理（见 4.2）。
+- 否则 → 转发给通知处理器，由 `handleDownstreamEvent()` 统一处理（见第 8 节）。
 
 ## 6. 下游 Session 管理
 
-AgentHub 会按 AgentHub session 复用下游 session。
+AgentHub 按 AgentHub session 粒度管理下游 session。同一下游 session 可被多次 `session/prompt` 复用。
 
-### 6.1 创建下游 Session
+### 6.1 创建下游 Session（session/new）
 
-如果当前 AgentHub session 没有可复用的 `downstreamSessionId`，AgentHub 会发送 `session/new`。
+当没有可复用的 `downstreamSessionId` 时，AgentHub 发送 `session/new`（request）。
 
 AgentHub -> 下游：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": 1,
   "method": "session/new",
   "params": {
     "_meta": {
-      "agentId": 1
+      "agentId": "1",
+      "agenthubSessionId": "agenthub-session-id"
     },
     "mcpServers": []
   }
 }
 ```
 
-下游必须返回 `result.sessionId`：
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `_meta.agentId` | string | Orchestrator Agent 实例 id（转为字符串） |
+| `_meta.agenthubSessionId` | string | AgentHub session id |
+| `mcpServers` | array | 当前固定为空数组 |
+
+下游必须返回：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": 1,
   "result": {
     "sessionId": "downstream-session-xxx"
   }
 }
 ```
 
-### 6.2 加载下游 Session
+`result.sessionId` 必填。AgentHub 保存该 id 用于后续 `session/prompt` 和 `session/cancel`。
 
-如果已有可复用的 `downstreamSessionId`，AgentHub 会发送 `session/load`。
+### 6.2 加载下游 Session（session/load）
+
+`session/load` 由环境变量 `DOWNSTREAM_ENABLE_SESSION_LOAD` 控制，**默认关闭**。
+
+启用后，如果有可复用的 `downstreamSessionId`，AgentHub 会发送 `session/load` 而不是 `session/new`。
 
 AgentHub -> 下游：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": 1,
   "method": "session/load",
   "params": {
     "sessionId": "downstream-session-xxx"
@@ -212,7 +300,7 @@ AgentHub -> 下游：
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": 1,
   "result": {
     "sessionId": "downstream-session-xxx",
     "activeRun": {
@@ -223,97 +311,130 @@ AgentHub -> 下游：
 }
 ```
 
-`activeRun` 可选。AgentHub 会读取其中的 `runId` 和 `status`，用于断线恢复。
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `result.sessionId` | string | 必填，下游 session id |
+| `result.activeRun` | object | 可选，当前活跃 run 信息，用于断线恢复 |
+| `result.activeRun.runId` | string | 可以从 `activeRun.runId`、`activeRun.id`、`result.activeRunId` 或 `result.runId` 读取 |
+| `result.activeRun.status` | string | 可以从 `activeRun.status`、`result.activeRunStatus` 或 `result.status` 读取 |
+
+如果 `session/load` 失败且没有 active run，AgentHub 会回退到 `session/new`（除非 `allowSessionNewFallback` 为 `false`，如在 apply diff 场景中）。
 
 ### 6.3 超时
 
-当前实现中，`session/new`、`session/load`、`run/status` 这类 request 默认超时时间为 3000ms。
+`session/new` 和 `session/load` 的默认超时为 3000ms。超时后 AgentHub 会以 `SESSION/NEW_TIMEOUT` 或 `SESSION/LOAD_TIMEOUT` 拒绝。
 
 ## 7. 发送任务：session/prompt
 
-用户发送消息后，AgentHub 创建 run，并向下游发送 `session/prompt`。
+用户发送消息后，AgentHub 创建 run，构造上下文快照，然后向下游发送 `session/prompt`（**notification**）。
+
+### 7.1 Payload 结构
 
 AgentHub -> 下游：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 3,
   "method": "session/prompt",
   "params": {
     "sessionId": "downstream-session-xxx",
-    "runId": "agenthub-run-id",
-    "agenthubSessionId": "agenthub-session-id",
-    "messageId": "agenthub-user-message-id",
-    "agentId": 1,
-    "promptMode": "bootstrap",
     "prompt": [
       {
         "type": "text",
-        "text": "@Frontend 请实现登录页"
+        "text": "# AgentHub Request (bootstrap)\n\n## Session Context\n...\n\n## Current User Request\n@Frontend 请实现登录页"
       }
     ],
-    "mentionedAgentIds": [2, 3],
-    "messageContext": {},
-    "contextSnapshotId": "context-snapshot-id",
-    "orchestratorSystemPrompt": "system prompt...",
-    "agents": [
-      {
-        "agentId": 2,
-        "description": "frontend worker"
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id",
+      "runId": "agenthub-run-id",
+      "messageId": "agenthub-user-message-id",
+      "orchestratorAgentId": "1",
+      "mentionedAgentIds": ["2", "3"],
+      "contextSnapshotId": "context-snapshot-id",
+      "promptMode": "bootstrap",
+      "orchestratorSystemPrompt": "system prompt for orchestrator...",
+      "agents": [
+        { "agentId": 2, "description": "前端成员描述" }
+      ],
+      "pins": [],
+      "memory": {
+        "summary": "长期摘要文本",
+        "recent": [],
+        "retrieved": []
       }
-    ],
-    "pins": [],
-    "memory": {
-      "summary": "",
-      "recent": [],
-      "retrieved": []
     }
   }
 }
 ```
 
-字段说明：
+**顶层字段（遵循 ACP 标准）**：
 
-| 字段 | 必填 | 说明 |
+| 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `sessionId` | 是 | 下游 session id |
-| `agenthubSessionId` | 是 | AgentHub session id |
-| `runId` | 是 | AgentHub run id，下游回传事件必须使用这个 id |
-| `messageId` | 是 | AgentHub 用户消息 id |
-| `agentId` | 是 | 主 Orchestrator Agent 实例 id |
-| `promptMode` | 是 | `"bootstrap"` 或 `"incremental"` |
-| `prompt` | 是 | 当前用户任务，当前只发送 text part |
-| `mentionedAgentIds` | 是 | 用户 @ 或会话成员 Agent 实例 id |
-| `messageContext` | 是 | 附件、网页预览、引用上下文等 |
-| `contextSnapshotId` | bootstrap 时可有 | AgentHub 上下文快照 id |
-| `orchestratorSystemPrompt` | 可选 | Orchestrator 模板系统提示词 |
-| `agents` | 可选 | 当前群聊 worker Agent 简介 |
-| `pins` | bootstrap 时可有 | pinned 上下文 |
-| `memory` | bootstrap 时可有 | 摘要、最近上下文、向量召回上下文 |
+| `sessionId` | string | 下游 session id |
+| `prompt` | array | ACP 标准 prompt parts，当前固定为单个 `{ type: "text", text: "..." }` |
 
-`promptMode` 规则：
+**`_meta` 字段（AgentHub 业务扩展）**：
 
-- `bootstrap`：新下游 session 或需要重新注入上下文时发送，包含上下文。
-- `incremental`：复用已有下游 session 时发送，只包含当前消息和 `messageContext`。
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `source` | string | 固定 `"agenthub"` |
+| `agenthubSessionId` | string | AgentHub session id |
+| `runId` | string | AgentHub run id，下游回传事件时必须使用此 id |
+| `messageId` | string | AgentHub 用户消息 id |
+| `orchestratorAgentId` | string | 主 Orchestrator Agent 实例 id（转字符串） |
+| `mentionedAgentIds` | string[] | 用户 @ 的 Agent 实例 id（均为字符串） |
+| `contextSnapshotId` | string\|null | AgentHub 上下文快照 id（bootstrap 时有） |
+| `promptMode` | string | `"bootstrap"` 或 `"incremental"` |
+| `orchestratorSystemPrompt` | string | Orchestrator 模板系统提示词（仅 bootstrap） |
+| `agents` | array | 当前群聊 worker Agent 简介（仅 bootstrap） |
+| `pins` | array | Pinned 上下文（仅 bootstrap） |
+| `memory` | object | `{ summary, recent, retrieved }` 记忆数据（仅 bootstrap） |
 
-当前实现发送 `session/prompt` 后不会等待下游响应，AgentHub 会直接将 run 标记为 `running`。下游后续应通过事件流上报过程和结果。
+**禁止**将这些字段放在 `params` 顶层。所有 AgentHub 自定义字段必须放入 `_meta`。
 
-如果下游随后返回带 `stopReason` 的 JSON-RPC response，AgentHub 会把 run 视为完成：
+### 7.2 promptMode
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 3,
-  "result": {
-    "stopReason": "end_turn"
-  }
-}
-```
+- `bootstrap`：首次连接或重连后的第一条消息。`prompt[0].text` 包含完整上下文（会话上下文、可用 worker、pins、记忆、当前用户请求等）。渲染格式：
 
-## 8. 下游事件回传：session/event
+  ```
+  # AgentHub Request (bootstrap)
+  ## Session Context
+  ...（上下文快照渲染文本）
+  ## Mentioned Agents
+  - agent-name (agentId)
+  ## Available Worker Agents
+  - agentId: description
+  ## Current Message Context
+  { ... JSON ... }
+  ## Current User Request
+  ...
+  ```
 
-推荐所有关键事件都使用 JSON-RPC request：
+- `incremental`：复用已有下游 session 的后续消息。`prompt[0].text` 只包含当前用户请求和本轮消息上下文。
+
+### 7.3 发送流程
+
+1. AgentHub 更新 run 状态为 `connecting`。
+2. 建立 / 复用下游连接，完成握手。
+3. 如果是 bootstrap，构建上下文快照并渲染 prompt。
+4. 调用 `acp.notify("session/prompt", promptInput)` 发送 notification。
+5. **不等待下游响应**，直接将 run 标记为 `running`。
+6. 下游通过 `session/event` 事件流回传过程和结果。
+
+## 8. 下游事件回传
+
+下游向 AgentHub 报告事件有两种方式：
+
+| 方式 | 方法 | 用途 |
+| --- | --- | --- |
+| `session/update` | 流式文本 + agent_message_stop | 实时文本流式输出 |
+| `session/event` | 结构化事件 | 文件变更、artifact、git push、run 终态等 |
+
+### 8.1 session/event（推荐）
+
+下游 -> AgentHub：
 
 ```json
 {
@@ -321,63 +442,108 @@ AgentHub -> 下游：
   "id": 1001,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 1,
     "type": "message.completed",
-    "speaker": 2,
+    "seq": 1,
     "payload": {
       "text": "我已完成前端实现。"
+    },
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
     }
   }
 }
 ```
 
-AgentHub 成功处理后返回 ack：
+**必填规则**：
+
+| 字段 | 位置 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `method` | envelope 顶层 | **是** | 必须为 `"session/event"`（或完全不设置 `method` 以兼容旧格式） |
+| `runId` | `params._meta.runId` | **是** | 必须精确匹配 AgentHub 下发的 run id，否则被拒绝（`RUN_ID_REQUIRED`） |
+| `type` | `params.type` | **是** | 事件类型，也可用 `params.eventType` 作为 fallback |
+| `seq` | `params.seq` | 建议 | run 内单调递增的事件序号，传了就必须递增 |
+| `agentId` | `params._meta.agentId` | 多 Agent 时必填 | AgentHub Agent 实例 id，用于 speaker 归属 |
+| `payload` | `params.payload` | 是 | 事件载荷，也可用整个 `params` 作为 fallback |
+
+**关键约束**：
+
+- 如果 envelope 顶层 `method` 存在且**不是** `"session/event"` 或 `"session/update"`，事件会被**直接丢弃**。
+- AgentHub 读取 runId 的路径：`params._meta.runId`（不是 `params.runId`，不是顶层 `runId`）。
+- AgentHub 读取 speaker 的路径：`params._meta.agentId`（不是 `params.speaker`，不是 `params.payload.speaker`，不是顶层 `speaker`）。
+- 去掉 `_meta` 中的 `runId` 或 `agentId` 的事件不会被持久化。
+
+**AgentHub 处理流程**：
+
+1. 提取 `_meta.runId`（缺失 → `RUN_ID_REQUIRED`）。
+2. 检查该 run 是否已被 cancel（已取消 → `RUN_ALREADY_CANCELLED`）。
+3. 提取 `params.type`（缺失 → `EVENT_TYPE_REQUIRED`）。
+4. 提取 `params.seq`（若有则校验递增，重复 → 静默跳过，乱序 → `EVENT_SEQ_OUT_OF_ORDER`）。
+5. 调用 `events.append()` 持久化事件。
+6. 如果是 `run.completed` → 标记 run completed。
+7. 如果是 `run.failed` → 标记 run failed，错误码 `DOWNSTREAM_RUN_FAILED`。
+8. 返回 ack `{ ok: true }` 或 error。
+
+### 8.2 session/update（流式文本）
+
+下游 -> AgentHub：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1001,
-  "result": {
-    "ok": true
+  "id": 10,
+  "method": "session/update",
+  "params": {
+    "update": {
+      "text": "阶段性回复文本",
+      "sessionUpdate": "agent_message_stop",
+      "_meta": {
+        "runId": "agenthub-run-id",
+        "agentId": "2"
+      }
+    }
   }
 }
 ```
 
-处理失败时返回：
+AgentHub 读取 `_meta` 时的优先级：
+
+1. `params._meta`（**推荐位置**）
+2. `params.update._meta`（兼容位置）
+
+处理规则：
+
+- `update.text` 或 `update.content.text` → 产生 `message.delta`，缓存在内存 buffer 中。
+- `sessionUpdate` 为 `"agent_message_stop"` 或 `"stop"` → 产生 `message.completed`，将 buffer 内容持久化到 `messages` 表。
+- `_meta.runId` 必填（缺失 → `RUN_ID_REQUIRED`）。
+- `_meta.agentId` 用于 speaker 归属（缺失 → speaker 默认用 `"agent"` 字符串，speakerAgentId 为 `undefined`）。
+
+示例：普通 delta（非 stop）：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1001,
-  "error": {
-    "code": "EVENT_SEQ_OUT_OF_ORDER",
-    "message": "EVENT_SEQ_OUT_OF_ORDER"
+  "id": 10,
+  "method": "session/update",
+  "params": {
+    "update": {
+      "text": "正在分析项目结构...",
+      "_meta": {
+        "runId": "agenthub-run-id",
+        "agentId": "2"
+      }
+    }
   }
 }
 ```
-
-### 8.1 事件字段
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `runId` | 是 | AgentHub run id。当前实现不读取 `agenthubRunId` |
-| `seq` | 建议 | run 内事件序号。传了就必须递增 |
-| `type` / `eventType` | 是 | 事件类型 |
-| `speaker` | 多 Agent 输出时必填 | AgentHub Agent 实例 id |
-| `payload` | 是 | 事件载荷 |
-
-`speaker` 可出现在以下位置，AgentHub 会按顺序读取：
-
-1. `params.speaker`
-2. `params.payload.speaker`
-3. envelope 顶层 `speaker`
 
 ## 9. 支持的事件类型
 
+所有事件类型通过 `session/event` 发送，AgentHub 在 `event.service.ts` 中处理。
+
 ### 9.1 message.delta
 
-流式文本片段。
+流式文本片段，仅缓存在内存，不持久化到数据库。
 
 ```json
 {
@@ -386,9 +552,12 @@ AgentHub 成功处理后返回 ack：
   "method": "session/event",
   "params": {
     "runId": "agenthub-run-id",
-    "seq": 1,
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
+    },
     "type": "message.delta",
-    "speaker": 2,
+    "seq": 1,
     "payload": {
       "text": "正在分析项目结构..."
     }
@@ -396,11 +565,9 @@ AgentHub 成功处理后返回 ack：
 }
 ```
 
-AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `message.completed` 后持久化为 assistant message。
-
 ### 9.2 message.completed
 
-完整 Agent 回复。
+完整 Agent 回复，持久化到 `messages` 表。
 
 ```json
 {
@@ -408,10 +575,12 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
   "id": 1002,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 2,
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
+    },
     "type": "message.completed",
-    "speaker": 2,
+    "seq": 2,
     "payload": {
       "text": "已完成登录页实现。",
       "parts": []
@@ -420,13 +589,18 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
 }
 ```
 
-`payload.text`、`payload.content`、`payload.message`、`payload.delta` 都可被识别为文本来源，推荐使用 `text`。
+文本识别优先级（按此顺序读取，取第一个非空值）：
 
-可选 `parts` 可携带富文本片段，例如 diff、artifact、link preview 等。
+1. `payload.text`
+2. `payload.content`
+3. `payload.message`
+4. `payload.delta`
+
+可选 `payload.parts` 可携带富文本片段（diff、artifact 引用、链接预览等）。
 
 ### 9.3 file.change
 
-文件变更快照。
+文件变更快照，持久化到 `file_changes` 表。
 
 ```json
 {
@@ -434,10 +608,12 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
   "id": 1003,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 3,
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
+    },
     "type": "file.change",
-    "speaker": 2,
+    "seq": 3,
     "payload": {
       "path": "src/app/page.tsx",
       "changeType": "modified",
@@ -453,10 +629,7 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
         "truncated": false
       },
       "patch": "@@ -1 +1 @@\n-old\n+new\n",
-      "stats": {
-        "additions": 1,
-        "deletions": 1
-      },
+      "stats": { "additions": 1, "deletions": 1 },
       "metadata": {}
     }
   }
@@ -466,13 +639,13 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
 约束：
 
 - `path` 必填。
-- 必须至少提供 `patch` 或 before/after content。
-- `changeType` 支持：`added`、`modified`、`deleted`、`renamed`。其他值会按 `modified` 处理。
-- `oldPath` 可用于 rename。
+- 必须提供 `patch` 或 before/after content 至少其中之一。
+- `changeType` 支持：`added`、`modified`、`deleted`、`renamed`。其他值按 `modified` 处理。
+- `oldPath` 用于 rename 场景。
 
 ### 9.4 artifact.upsert
 
-创建或更新 artifact。
+创建或更新 artifact。调用 `ArtifactStorageService.upsertArtifact()`。
 
 ```json
 {
@@ -480,10 +653,12 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
   "id": 1004,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 4,
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
+    },
     "type": "artifact.upsert",
-    "speaker": 2,
+    "seq": 4,
     "payload": {
       "artifactKey": "preview",
       "kind": "html",
@@ -497,24 +672,16 @@ AgentHub 会将同一 run、同一 speaker 的 delta 缓存在内存里，等 `m
 }
 ```
 
-支持的 `kind`：
+支持的 `kind` 枚举值：
 
-```text
-markdown
-text
-html
-pdf
-docx
-pptx
-image
-archive
-log
-other
+```
+markdown    text       html       pdf        docx
+pptx        image      archive    log        other
 ```
 
 ### 9.5 artifact.chunk
 
-当前实现中 chunk 做了简化处理，主要用于累加文本内容。
+流式 artifact 内容片段。当前实现为简化文本累加。
 
 ```json
 {
@@ -522,9 +689,11 @@ other
   "id": 1005,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 5,
+    "_meta": {
+      "runId": "agenthub-run-id"
+    },
     "type": "artifact.chunk",
+    "seq": 5,
     "payload": {
       "artifactKey": "large-log",
       "content": "chunk text"
@@ -535,7 +704,7 @@ other
 
 ### 9.6 artifact.complete
 
-标记 artifact 完成。
+标记 artifact 完成，调用 `completeArtifact()`。
 
 ```json
 {
@@ -543,10 +712,12 @@ other
   "id": 1006,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 6,
+    "_meta": {
+      "runId": "agenthub-run-id",
+      "agentId": "2"
+    },
     "type": "artifact.complete",
-    "speaker": 2,
+    "seq": 6,
     "payload": {
       "artifactKey": "preview",
       "final": true
@@ -557,7 +728,7 @@ other
 
 ### 9.7 git.push.completed
 
-用于通知 AgentHub 最新成功 push 的 commit。部署前置检查依赖此事件。
+Git push 成功通知。AgentHub 将此信息写入 session metadata，部署流程依赖此数据。
 
 ```json
 {
@@ -565,9 +736,11 @@ other
   "id": 1007,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 7,
+    "_meta": {
+      "runId": "agenthub-run-id"
+    },
     "type": "git.push.completed",
+    "seq": 7,
     "payload": {
       "commitSha": "abcdef1234567890",
       "branch": "main",
@@ -577,24 +750,16 @@ other
 }
 ```
 
-字段：
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `commitSha` | 是 | 最新成功 push 的 commit sha |
-| `branch` | 否 | 分支名 |
-| `remoteUrl` | 否 | 远端仓库 URL |
-
-AgentHub 会写入 session metadata：
+AgentHub 写入 session 的 metadata 字段：
 
 - `latestSuccessfulPushCommitSha`
 - `latestSuccessfulPushBranch`
 - `latestSuccessfulPushRemoteUrl`
 - `latestSuccessfulPushRunId`
 
-### 9.8 diff.apply.completed
+### 9.8 diff.apply.requested
 
-下游成功应用 Diff 后回传。
+Diff 应用已排队（状态变更事件）。
 
 ```json
 {
@@ -602,9 +767,29 @@ AgentHub 会写入 session metadata：
   "id": 1008,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
+    "_meta": { "runId": "agenthub-run-id" },
+    "type": "diff.apply.requested",
     "seq": 8,
+    "payload": {
+      "fileChangeIds": ["file-change-id"]
+    }
+  }
+}
+```
+
+### 9.9 diff.apply.completed
+
+Diff 应用成功。
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1009,
+  "method": "session/event",
+  "params": {
+    "_meta": { "runId": "agenthub-run-id" },
     "type": "diff.apply.completed",
+    "seq": 9,
     "payload": {
       "fileChangeIds": ["file-change-id"],
       "message": "applied"
@@ -613,38 +798,9 @@ AgentHub 会写入 session metadata：
 }
 ```
 
-### 9.9 diff.apply.failed
+### 9.10 diff.apply.failed
 
-下游应用 Diff 失败或冲突后回传。
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1009,
-  "method": "session/event",
-  "params": {
-    "runId": "agenthub-run-id",
-    "seq": 9,
-    "type": "diff.apply.failed",
-    "payload": {
-      "fileChangeIds": ["file-change-id"],
-      "status": "conflict",
-      "message": "patch conflict",
-      "conflicts": [
-        {
-          "path": "src/app/page.tsx"
-        }
-      ]
-    }
-  }
-}
-```
-
-`status` 为 `conflict` 或 `conflicts` 非空时，AgentHub 会将文件变更标记为冲突。
-
-### 9.10 run.completed
-
-run 成功完成。
+Diff 应用失败或冲突。
 
 ```json
 {
@@ -652,25 +808,24 @@ run 成功完成。
   "id": 1010,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
+    "_meta": { "runId": "agenthub-run-id" },
+    "type": "diff.apply.failed",
     "seq": 10,
-    "type": "run.completed",
     "payload": {
-      "finalMessage": "任务完成。",
-      "usage": {
-        "inputTokens": 1000,
-        "outputTokens": 500
-      }
+      "fileChangeIds": ["file-change-id"],
+      "status": "conflict",
+      "message": "patch conflict",
+      "conflicts": [{ "path": "src/app/page.tsx" }]
     }
   }
 }
 ```
 
-AgentHub 收到后会将 run 标记为 completed。
+当 `status` 为 `"conflict"` 或 `conflicts` 非空时，对应的文件变更记录被标记为冲突状态。
 
-### 9.11 run.failed
+### 9.11 run.completed
 
-run 失败。
+Run 成功完成。
 
 ```json
 {
@@ -678,166 +833,217 @@ run 失败。
   "id": 1011,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
+    "_meta": { "runId": "agenthub-run-id" },
+    "type": "run.completed",
     "seq": 11,
-    "type": "run.failed",
     "payload": {
-      "message": "sandbox command failed"
+      "finalMessage": "任务完成。",
+      "usage": { "inputTokens": 1000, "outputTokens": 500 }
     }
   }
 }
 ```
 
-AgentHub 收到后会将 run 标记为 failed，错误码固定为 `DOWNSTREAM_RUN_FAILED`。
+AgentHub 收到后将 run 标记为 `completed`。
 
-## 10. 兼容 session/update
+### 9.12 run.failed
 
-AgentHub 兼容下游发送 `session/update`，会转换为 `message.delta` 或 `message.completed`。
-
-下游 -> AgentHub：
+Run 失败。
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2001,
-  "method": "session/update",
+  "id": 1012,
+  "method": "session/event",
   "params": {
-    "_meta": {
-      "agentId": 2
-    },
-    "update": {
-      "text": "流式文本",
-      "sessionUpdate": "agent_message_stop"
+    "_meta": { "runId": "agenthub-run-id" },
+    "type": "run.failed",
+    "seq": 12,
+    "payload": {
+      "message": "sandbox command failed",
+      "code": "SANDBOX_ERROR"
     }
   }
 }
 ```
 
-处理规则：
+AgentHub 收到后将 run 标记为 `failed`，错误码默认 `DOWNSTREAM_RUN_FAILED`。
 
-- `update.text` 或 `update.content.text` 会作为文本。
-- `_meta.agentId` 会作为 `speakerAgentId`。
-- `sessionUpdate` 为 `agent_message_stop` 或 `stop` 时，AgentHub 会生成 `message.completed`。
+## 10. AgentHub 发给下游的控制命令
 
-## 11. AgentHub 发给下游的控制命令
+### 10.1 取消 run（session/cancel）
 
-### 11.1 取消 run
-
-AgentHub -> 下游：
+AgentHub -> 下游（notification）：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 20,
   "method": "session/cancel",
   "params": {
-    "runId": "agenthub-run-id"
+    "sessionId": "downstream-session-xxx",
+    "runId": "agenthub-run-id",
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id",
+      "runId": "agenthub-run-id"
+    }
   }
 }
 ```
 
-AgentHub 会先把本地 run 标记为 cancelled，再向下游发送 cancel。
+AgentHub 会先将本地 run 状态更新为 `cancelled`，再发送此 notification。
 
-### 11.2 应用 Diff
+### 10.2 应用 Diff（file/apply_diff）
 
-用户点击一键应用 Diff 时，AgentHub 向下游发送：
+由环境变量 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 控制，**默认关闭**。启用后还依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD=true`。
+
+AgentHub -> 下游（notification）：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 21,
   "method": "file/apply_diff",
   "params": {
     "sessionId": "downstream-session-xxx",
-    "agenthubSessionId": "agenthub-session-id",
-    "runId": "agenthub-run-id",
     "fileChangeIds": ["file-change-id"],
     "changes": [
       {
         "id": "file-change-id",
         "path": "src/app/page.tsx",
-        "patch": "@@ ...",
-        "beforeContent": "old",
-        "afterContent": "new"
+        "patch": "@@ ..."
       }
-    ]
+    ],
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id",
+      "runId": "agenthub-run-id"
+    }
   }
 }
 ```
+
+| 字段 | 说明 |
+| --- | --- |
+| `sessionId` | 下游 session id |
+| `fileChangeIds` | file_change 记录的 id 列表 |
+| `changes` | 变更详情数组，每项包含 `id`、`path`，以及 `patch`、`beforeContent`、`afterContent` |
 
 下游执行后应回传 `diff.apply.completed` 或 `diff.apply.failed`。
 
-### 11.3 上下文增量
+关闭时，AgentHub 会返回 `DOWNSTREAM_APPLY_NOT_SUPPORTED` 错误。
 
-当用户 pin 消息、添加成员、删除成员时，AgentHub 会向已有连接发送 `session/context_delta`。
+### 10.3 上下文增量（session/context_delta）
 
-Pin 更新：
+由环境变量 `DOWNSTREAM_ENABLE_CONTEXT_DELTA` 控制，**默认关闭**。用于通知下游发生 pin、成员变更等轻量上下文变化。
+
+AgentHub -> 下游（notification）：
+
+**Pin 更新**：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 22,
   "method": "session/context_delta",
   "params": {
     "sessionId": "downstream-session-xxx",
-    "agenthubSessionId": "agenthub-session-id",
     "type": "pin.updated",
     "messageId": "message-id",
     "partId": "optional-part-id",
-    "pinned": true
+    "pinned": true,
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id"
+    }
   }
 }
 ```
 
-成员添加：
+**成员添加**：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 23,
   "method": "session/context_delta",
   "params": {
     "sessionId": "downstream-session-xxx",
-    "agenthubSessionId": "agenthub-session-id",
     "type": "member.added",
     "agentId": 2,
-    "description": "frontend worker"
+    "description": "前端成员描述",
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id"
+    }
   }
 }
 ```
 
-成员删除：
+**成员删除**：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 24,
   "method": "session/context_delta",
   "params": {
     "sessionId": "downstream-session-xxx",
-    "agenthubSessionId": "agenthub-session-id",
     "type": "member.deleted",
-    "agentId": 2
+    "agentId": 2,
+    "_meta": {
+      "source": "agenthub",
+      "agenthubSessionId": "agenthub-session-id"
+    }
   }
 }
 ```
 
-## 12. 断线恢复
+## 11. 能力开关
+
+以下环境变量控制可选下游能力，均为默认关闭：
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `DOWNSTREAM_ENABLE_SESSION_LOAD` | `false` | 开启后复用 `downstreamSessionId` 并发送 `session/load`；支持断线恢复查询 `run/status` |
+| `DOWNSTREAM_ENABLE_CONTEXT_DELTA` | `false` | 开启后发送 `session/context_delta`（pin、成员变更） |
+| `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` | `false` | 开启后允许发送 `file/apply_diff`，依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD` |
+
+取值：`"1"`、`"true"`、`"yes"`（不区分大小写）均视为开启。
+
+关闭时的行为：
+
+- `session/load` 不发送，每条新连接都走 `session/new` + `bootstrap` prompt。
+- `session/context_delta` 不发送，成员和 pin 信息通过下一次 prompt 上下文传递。
+- `file/apply_diff` 返回 `DOWNSTREAM_APPLY_NOT_SUPPORTED`。
+
+## 12. 连接空闲管理
+
+- 下游连接空闲 1 小时后自动断开（`IDLE_TIMEOUT_MS = 3600000`）。
+- 有 active run 时不会断开（每 1 分钟重检一次）。
+- 有前端 WebSocket 订阅者时不会断开。
+- 每次 `session/prompt`、`session/cancel`、`session/event`、`session/update` 等消息收发都会重置空闲计时器。
+
+## 13. 断线恢复
 
 AgentHub 不启用 Socket.IO 自动重连。
 
-如果连接断开且当前有 active run，AgentHub 会：
+如果下游连接断开且当前有 active run（状态为 `queued`、`context_building`、`connecting` 或 `running`）：
 
-1. 重新连接下游。
-2. 使用已有 `downstreamSessionId` 发送 `session/load`。
-3. 调用 `run/status`。
+1. 若 `DOWNSTREAM_ENABLE_SESSION_LOAD` 关闭 → 直接标记 run failed，错误码 `DOWNSTREAM_DISCONNECTED`。
+2. 若开启但无 `downstreamSessionId` → 同样标记 failed。
+3. 若开启且有 `downstreamSessionId` → 触发恢复流程。
 
-AgentHub -> 下游：
+**恢复流程**：
+
+1. 重新建立 Socket.IO 连接。
+2. 重新发送 `initialize`（notification）。
+3. 发送 `session/load`（request），传入已有 `downstreamSessionId`。
+4. 等待 `downstreamReady`。
+5. 读取恢复后的 run 状态（优先用 `session/load` 返回的 `activeRun`，否则发送 `run/status` 查询）。
+
+AgentHub -> 下游（`run/status` request）：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 30,
+  "id": 10,
   "method": "run/status",
   "params": {
     "runId": "agenthub-run-id"
@@ -850,7 +1056,7 @@ AgentHub -> 下游：
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 30,
+  "id": 10,
   "result": {
     "run": {
       "runId": "agenthub-run-id",
@@ -865,43 +1071,54 @@ AgentHub -> 下游：
 | 下游状态 | AgentHub 行为 |
 | --- | --- |
 | `completed` / `ready` / `success` | 标记 run completed |
-| `failed` / `error` | 标记 run failed |
-| 其他值 | 保持 running |
+| `failed` / `error` | 标记 run failed（`DOWNSTREAM_RUN_FAILED`） |
+| 其他值 | 恢复 run 状态为 `running`，继续等待下游事件 |
 
-如果无法恢复，AgentHub 会标记 run failed，错误码为 `DOWNSTREAM_DISCONNECTED`。
+## 14. 事件序号与幂等
 
-## 13. 事件序号与幂等
+- `seq` 为 `params.seq` 中的 run 内单调递增事件序号。
+- `runId + seq` 组合用于去重：重复的 seq 会被静默跳过。
+- 乱序 seq（低于 expected）会返回 `EVENT_SEQ_OUT_OF_ORDER`。
+- `message.delta` 对低于 expected seq 的旧片段仅生成 transient event，不重复持久化。
 
-如果下游提供 `seq`：
+## 15. 取消后的事件处理
 
-- AgentHub 要求同一个 run 内按序递增。
-- 重复的 `runId + seq` 会被认为是重复事件。
-- `message.delta` 对低于当前 expected seq 的旧片段会生成 transient event，不重复持久化。
-- 乱序会返回 `EVENT_SEQ_OUT_OF_ORDER`。
+如果 AgentHub 本地 run 已经处于 `cancelled` 状态：
 
-建议下游为关键事件提供连续递增的 `seq`。
+- 下游继续发来的事件会被拒绝，返回 `RUN_ALREADY_CANCELLED`。
+- 但 `agenthub_backend` 来源的事件（AgentHub 自己生成的）不受影响。
 
-## 14. 取消后的事件处理
+## 16. 错误码
 
-如果 AgentHub 本地 run 已是 `cancelled`：
+| 错误码 | 场景 |
+| --- | --- |
+| `RUN_ID_REQUIRED` | 事件缺少 `_meta.runId` |
+| `EVENT_TYPE_REQUIRED` | 事件缺少 `params.type` |
+| `EVENT_SEQ_OUT_OF_ORDER` | seq 乱序 |
+| `RUN_ALREADY_CANCELLED` | run 已取消 |
+| `DOWNSTREAM_DISCONNECTED` | 下游断线且无法恢复 |
+| `DOWNSTREAM_RUN_FAILED` | 下游上报 run.failed |
+| `DOWNSTREAM_PROMPT_FAILED` | 发送 prompt 失败 |
+| `DOWNSTREAM_SESSION_ID_MISSING` | session/new 未返回 sessionId |
+| `DOWNSTREAM_APPLY_NOT_SUPPORTED` | file/apply_diff 功能未开启 |
+| `DOWNSTREAM_SESSION_NOT_FOUND` | apply diff 时找不到下游 session |
+| `{METHOD}_TIMEOUT` | request 超时（如 `SESSION/NEW_TIMEOUT`） |
+| `CONNECTION_CLOSED` | 连接关闭 |
 
-- 下游继续发送非 `agenthub_backend` 来源事件时，AgentHub 会拒绝。
-- 错误为 `RUN_ALREADY_CANCELLED`。
-
-## 15. 最小可联调流程
+## 17. 最小可联调流程
 
 1. AgentHub 连接下游 Socket.IO server。
-2. AgentHub 发送 `initialize`。
-3. AgentHub 发送 `session/new`。
-4. 下游返回 `result.sessionId`。
-5. AgentHub 发送 `session/prompt`。
-6. 下游回传 `message.completed`。
-7. 下游回传 `file.change`。
-8. 下游回传 `artifact.upsert`。
-9. 下游回传 `git.push.completed`。
-10. 下游回传 `run.completed`。
+2. AgentHub 发送 `initialize`（notification）。
+3. AgentHub 发送 `session/new`（request）。
+4. 下游返回 `{ result: { sessionId: "..." } }`。
+5. AgentHub 发送 `session/prompt`（notification）。
+6. 下游回传 `session/event`（message.completed）。
+7. 下游回传 `session/event`（file.change）。
+8. 下游回传 `session/event`（artifact.upsert）。
+9. 下游回传 `session/event`（git.push.completed）。
+10. 下游回传 `session/event`（run.completed）。
 
-示例：
+完整 JSON 示例：
 
 ```json
 {
@@ -909,10 +1126,9 @@ AgentHub -> 下游：
   "id": 1001,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 1,
+    "_meta": { "runId": "agenthub-run-id", "agentId": "2" },
     "type": "message.completed",
-    "speaker": 2,
+    "seq": 1,
     "payload": {
       "text": "我会负责前端实现。"
     }
@@ -926,10 +1142,9 @@ AgentHub -> 下游：
   "id": 1002,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 2,
+    "_meta": { "runId": "agenthub-run-id", "agentId": "2" },
     "type": "file.change",
-    "speaker": 2,
+    "seq": 2,
     "payload": {
       "path": "src/app/page.tsx",
       "changeType": "modified",
@@ -953,10 +1168,9 @@ AgentHub -> 下游：
   "id": 1003,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 3,
+    "_meta": { "runId": "agenthub-run-id", "agentId": "2" },
     "type": "artifact.upsert",
-    "speaker": 2,
+    "seq": 3,
     "payload": {
       "artifactKey": "preview",
       "kind": "html",
@@ -975,9 +1189,9 @@ AgentHub -> 下游：
   "id": 1004,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 4,
+    "_meta": { "runId": "agenthub-run-id" },
     "type": "git.push.completed",
+    "seq": 4,
     "payload": {
       "commitSha": "abcdef1234567890",
       "branch": "main",
@@ -993,9 +1207,9 @@ AgentHub -> 下游：
   "id": 1005,
   "method": "session/event",
   "params": {
-    "runId": "agenthub-run-id",
-    "seq": 5,
+    "_meta": { "runId": "agenthub-run-id" },
     "type": "run.completed",
+    "seq": 5,
     "payload": {
       "finalMessage": "任务完成。"
     }
@@ -1003,31 +1217,33 @@ AgentHub -> 下游：
 }
 ```
 
-## 16. 下游必须满足的要求
+## 18. 下游必须满足的要求
 
-真实下游 Orchestrator 至少需要：
+真实下游至少需要：
 
-- 支持 Socket.IO WebSocket。
-- 能响应 `session/new`，返回 `result.sessionId`。
-- 能接收 `session/prompt`。
-- 回传事件时必须使用 AgentHub 的 `runId`。
-- 多 Agent 输出必须提供 `speaker`，值为 AgentHub Agent 实例 id。
-- 文件变更必须提供 `path`，且提供 `patch` 或 before/after content。
-- 关键事件建议使用 JSON-RPC request，并等待 AgentHub ack。
-- 如果要支持部署，完成 push 后必须发送 `git.push.completed`，至少包含 `commitSha`。
+- 支持 Socket.IO WebSocket，在 `acp:message` event 上收发 JSON-RPC 2.0 消息。
+- 响应 `session/new` request，返回 `result.sessionId`。
+- 接收 `session/prompt` notification。
+- 回传事件时使用 `session/event` 或 `session/update`，且 `_meta.runId` 必须精确匹配 AgentHub 下发的 run id。
+- 多 Agent 输出必须在 `_meta.agentId` 中提供 AgentHub Agent 实例 id（转为字符串）。
+- 文件变更必须提供 `path` 和 `patch` 或 before/after content。
+- 如果要支持部署，完成 git push 后必须发送 `git.push.completed`，至少包含 `commitSha`。
 
 建议额外支持：
 
-- `session/load`
-- `run/status`
+- `session/load`（与 `DOWNSTREAM_ENABLE_SESSION_LOAD` 配合）
+- `run/status`（断线恢复用）
 - `session/cancel`
-- `file/apply_diff`
-- `session/context_delta`
+- `file/apply_diff`（与 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 配合）
+- `session/context_delta`（与 `DOWNSTREAM_ENABLE_CONTEXT_DELTA` 配合）
 
-## 17. 当前实现限制
+## 19. 当前实现限制
 
-- `initialize` 响应目前不落库。
-- `session/prompt` 发送后 AgentHub 不等待下游 accepted 响应，会直接标记 running。
-- `artifact.chunk` 当前是简化累加文本，不是完整二进制 chunk 合并协议。
-- 真实 worker Agent 调度不在 AgentHub 内完成，由下游 Orchestrator 负责。
-- 断线恢复依赖下游支持 `session/load` 和 `run/status`。
+- `initialize` 为 notification，不读取下游响应。
+- `session/prompt` 发送后 AgentHub 不等待下游 accepted 响应，直接标记 run 为 `running`。
+- 只有 `_meta.runId` 被读取作为 run id，不再兼容顶层 `runId` 或 `params.runId`。
+- 只有 `_meta.agentId` 被读取作为 speaker，不再兼容 `params.speaker`、`payload.speaker` 或顶层 `speaker`。
+- `artifact.chunk` 当前为简化文本累加，不是完整二进制 chunk 合并协议。
+- 真实 worker Agent 调度由下游 Orchestrator 负责，不在 AgentHub 内完成。
+- 断线恢复依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD=true`，且要求下游支持 `session/load` 和 `run/status`。
+- Mock 模式下 `DOWNSTREAM_ORCHESTRATOR_WS_URL` 未配置时，AgentHub 自动生成模拟事件覆盖 message.completed、file.change、artifact.upsert、run.completed。

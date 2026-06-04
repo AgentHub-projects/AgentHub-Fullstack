@@ -7,8 +7,10 @@
 - `session/prompt` 顶层只发送 `sessionId`、`prompt`、`_meta`。
 - AgentHub 自定义字段不再散落在顶层，统一放入 `_meta`。
 - 给 Agent 阅读的上下文会渲染进 `prompt[0].text`。
-- 下游回传事件必须带 `_meta.runId`，否则 AgentHub 拒绝落库。
-- speaker 归属使用 `_meta.agentId`，不从 `payload.speaker` 或顶层 `speaker` 推断。
+- 下游回传事件必须带 `_meta.runId`，否则 AgentHub 拒绝落库（返回 `RUN_ID_REQUIRED`）。
+- speaker 归属使用 `_meta.agentId`，不从 `params.speaker`、`payload.speaker` 或顶层 `speaker` 推断。
+- AgentHub 发送 `initialize`、`session/prompt`、`session/cancel`、`file/apply_diff`、`session/context_delta` 均使用 JSON-RPC **notification**（无 `id`），不等待下游响应。
+- `session/new`、`session/load`、`run/status` 使用 JSON-RPC **request**（带 `id`），等待下游响应，默认超时 3000ms。
 - `session/load`、`session/context_delta`、`file/apply_diff` 是预留能力，默认关闭；后续下游兼容后再打开。
 
 ## 2. 能力开关
@@ -231,19 +233,21 @@
 
 用于文本流式输出。`_meta.runId` 必填，`_meta.agentId` 用于 speaker 归属。
 
+`_meta` 读取优先级：`params._meta` > `params.update._meta`。推荐将 `_meta` 放在 `params` 顶层。
+
 ```json
 {
   "jsonrpc": "2.0",
   "id": 10,
   "method": "session/update",
   "params": {
+    "_meta": {
+      "runId": "<agenthub-run-id>",
+      "agentId": "2"
+    },
     "update": {
       "text": "阶段性回复文本",
-      "sessionUpdate": "agent_message_stop",
-      "_meta": {
-        "runId": "<agenthub-run-id>",
-        "agentId": "2"
-      }
+      "sessionUpdate": "agent_message_stop"
     }
   }
 }
@@ -305,7 +309,13 @@ AgentHub ack：
 
 ### 4.3 不支持的旧格式
 
-项目未上线，不保留旧格式兼容。以下格式不要再发送：
+项目未上线，不保留旧格式兼容。当前代码中 `session/event` 处理路径强制要求：
+
+1. `method` 必须是 `"session/event"`，否则事件被丢弃（`"session/update"` 除外）。
+2. `_meta.runId` 必填，缺失即返回 `RUN_ID_REQUIRED`。
+3. `_meta.agentId` 为 speaker 唯一来源。
+
+以下格式**已不再有效**：
 
 ```json
 {
@@ -316,7 +326,7 @@ AgentHub ack：
 }
 ```
 
-以下 JSON-RPC 顶层/params 结构也不再作为正式契约：
+以下 JSON-RPC 格式也**不再有效**（`runId` 和 `speaker` 在 `params` 顶层而不是 `_meta` 中）：
 
 ```json
 {
@@ -330,21 +340,21 @@ AgentHub ack：
 }
 ```
 
-必须改为 `_meta.runId` 和 `_meta.agentId`。
+必须改为 `_meta.runId` 和 `_meta.agentId`。详见 §4.2。
 
 ## 5. 当前兼容矩阵
 
-| ACP 方法 | 默认状态 | 说明 |
-|---|---|---|
-| `initialize` | 启用 | 连接后固定发送。 |
-| `session/new` | 启用 | 默认建新下游 session。 |
-| `session/load` | 可选 | `DOWNSTREAM_ENABLE_SESSION_LOAD=true` 后启用。 |
-| `session/prompt` | 启用 | 顶层只含 `sessionId`、`prompt`、`_meta`。 |
-| `session/cancel` | 启用 | 带 `sessionId`、`runId` 和 `_meta`。 |
-| `session/context_delta` | 可选 | `DOWNSTREAM_ENABLE_CONTEXT_DELTA=true` 后启用。 |
-| `session/update` | 入站启用 | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
-| `session/event` | 入站启用 | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
-| `file/apply_diff` | 可选 | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 后启用，且依赖 `session/load`。 |
+| ACP 方法 | 默认状态 | 方向 | 角色 | 说明 |
+|---|---|---|---|---|
+| `initialize` | 启用 | AgentHub → 下游 | **Notification** | 连接后固定发送，不等待响应。 |
+| `session/new` | 启用 | AgentHub → 下游 | **Request** | 默认建新下游 session，等待返回 `sessionId`。 |
+| `session/load` | 可选 | AgentHub → 下游 | **Request** | `DOWNSTREAM_ENABLE_SESSION_LOAD=true` 后启用。 |
+| `session/prompt` | 启用 | AgentHub → 下游 | **Notification** | 顶层只含 `sessionId`、`prompt`、`_meta`。 |
+| `session/cancel` | 启用 | AgentHub → 下游 | **Notification** | 带 `sessionId`、`runId` 和 `_meta`。 |
+| `session/context_delta` | 可选 | AgentHub → 下游 | **Notification** | `DOWNSTREAM_ENABLE_CONTEXT_DELTA=true` 后启用。 |
+| `session/update` | 入站启用 | 下游 → AgentHub | Request | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
+| `session/event` | 入站启用 | 下游 → AgentHub | Request | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
+| `file/apply_diff` | 可选 | AgentHub → 下游 | **Notification** | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 后启用，且依赖 `session/load`。 |
 
 ## 6. 下游后续需要补齐
 
