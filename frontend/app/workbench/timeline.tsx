@@ -134,10 +134,6 @@ export function RunThread({
 
   return (
     <section className="runThread">
-      <div className="runThreadTop">
-        <span>Run · {formatTime(run.createdAt)}</span>
-        <RunBadge run={run} />
-      </div>
       {replyBlocks.map((block) => {
         const message = block.messageId ? messages.find((item) => item.id === block.messageId) : undefined;
         return (
@@ -271,6 +267,7 @@ function UserMessage({
           onOpenArtifactsPanel={onOpenArtifactsPanel}
         />
       </div>
+      <span className="avatar userAvatar">我</span>
     </article>
   );
 }

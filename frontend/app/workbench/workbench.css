@@ -87,8 +87,7 @@
 .bubbleMeta,
 .artifactTop,
 .contextSummary,
-.contextSectionTitle,
-.runThreadTop {
+.contextSectionTitle {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -125,7 +124,6 @@
 .bubbleMeta,
 .artifactTop small,
 .contextSummary span,
-.runThreadTop,
 .runStatusPill small {
   color: var(--muted);
 }
@@ -839,18 +837,10 @@ textarea:focus-visible {
   display: grid;
   width: min(920px, 100%);
   gap: 10px;
-  border-left: 2px solid var(--line);
-  padding-left: 14px;
 }
 
-.runThreadTop {
-  min-height: 28px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.runThreadTop .runBadge {
-  padding: 5px 8px;
+.userAvatar {
+  background: #111111;
 }
 
 .agentReply {
@@ -3655,7 +3645,6 @@ div.agentChoice {
 
   .runThread {
     width: 100%;
-    padding-left: 10px;
   }
 
   .composer {
@@ -4443,8 +4432,14 @@ div.agentChoice {
 
 .runThread {
   gap: 12px;
-  border-left: 1px solid #d9d9d9;
-  padding-left: 16px;
+}
+
+.userAvatar {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 8px;
+  background: #111111;
 }
 
 .runOutputLinks {
