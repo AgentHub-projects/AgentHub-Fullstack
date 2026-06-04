@@ -159,6 +159,8 @@ export default function WorkbenchPage() {
   const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [sessionRailCollapsed, setSessionRailCollapsed] = useState(false);
+  const [openedFilePath, setOpenedFilePath] = useState<string | null>(null);
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -237,6 +239,17 @@ export default function WorkbenchPage() {
         : activeRunInProgress
           ? "Agent 运行中，暂不能编辑文件"
           : "";
+  const inspectorModeClass =
+    inspectorTab === "files" ? "filesActive" : inspectorTab === "diff" ? "diffActive" : "artifactsActive";
+  const fileEditorOpen = inspectorTab === "files" && !inspectorCollapsed && Boolean(openedFilePath);
+  const shouldCollapseSessionRail = fileEditorOpen && sessionRailCollapsed;
+  const shellClassName = [
+    "agenthubShell",
+    inspectorModeClass,
+    inspectorCollapsed ? "inspectorCollapsed" : "",
+    shouldCollapseSessionRail ? "railCollapsed" : "",
+    fileEditorOpen ? "fileEditorOpen" : "",
+  ].filter(Boolean).join(" ");
   const memberMutationLocked = !sessionWritable || activeRunInProgress;
   const sessionReadOnly = Boolean(activeSession && activeSession.status !== "active");
   const mode = sessionMode(activeSession);
@@ -415,6 +428,12 @@ export default function WorkbenchPage() {
   }, [chatActionLocked]);
 
   useEffect(() => {
+    if (inspectorTab === "files" && !inspectorCollapsed && !sandboxEditorDisabledReason) return;
+    setSessionRailCollapsed(false);
+    setOpenedFilePath(null);
+  }, [inspectorTab, inspectorCollapsed, sandboxEditorDisabledReason]);
+
+  useEffect(() => {
     if (!authenticated || !activeSessionId) return;
     void refreshDeploymentPreflight(activeSessionId);
     void refreshDiffContext(activeSessionId);
@@ -541,6 +560,8 @@ export default function WorkbenchPage() {
 
   async function loadSession(sessionId: string) {
     setRenamingSession(false);
+    setSessionRailCollapsed(false);
+    setOpenedFilePath(null);
     setSessionTabs((current) => activateSessionTab(openSessionTab(current, sessionId), sessionId));
     ensureWorkspace(sessionId);
     const result = await getSessionDetail(sessionId);
@@ -997,11 +1018,36 @@ export default function WorkbenchPage() {
   function focusDiffPanel() {
     setInspectorCollapsed(false);
     setInspectorTab("diff");
+    setSessionRailCollapsed(false);
+    setOpenedFilePath(null);
   }
 
   function focusArtifactsPanel() {
     setInspectorCollapsed(false);
     setInspectorTab("artifacts");
+    setSessionRailCollapsed(false);
+    setOpenedFilePath(null);
+  }
+
+  function selectInspectorTab(tab: InspectorTab) {
+    setInspectorTab(tab);
+    if (tab !== "files") {
+      setSessionRailCollapsed(false);
+      setOpenedFilePath(null);
+    }
+  }
+
+  function toggleInspectorCollapsed() {
+    setInspectorCollapsed((current) => {
+      const next = !current;
+      if (next) setSessionRailCollapsed(false);
+      return next;
+    });
+  }
+
+  function handleFileOpened(path: string) {
+    setOpenedFilePath(path);
+    setSessionRailCollapsed(true);
   }
 
   function addReplyTarget(message: HubMessageDto) {
@@ -1117,7 +1163,7 @@ export default function WorkbenchPage() {
   }
 
   return (
-    <main className={`agenthubShell ${inspectorCollapsed ? "inspectorCollapsed" : ""} ${inspectorTab === "diff" ? "diffActive" : "artifactsActive"}`}>
+    <main className={shellClassName}>
       <aside className="sessionRail">
         <div className="imRailTop">
           <button className="railNavButton primary" type="button" onClick={openCreateGroupDialog}>
@@ -1310,6 +1356,12 @@ export default function WorkbenchPage() {
           })}
         </nav>
       </aside>
+      {shouldCollapseSessionRail && (
+        <button className="railRestoreButton" type="button" title="展开左侧会话栏" onClick={() => setSessionRailCollapsed(false)}>
+          <MenuUnfoldOutlined />
+          <span>会话</span>
+        </button>
+      )}
 
       <section className="conversationPane">
         <header className="conversationHeader">
@@ -1595,7 +1647,7 @@ export default function WorkbenchPage() {
             className="inspectorToggle"
             type="button"
             title={inspectorCollapsed ? "展开 Inspector" : "收起 Inspector"}
-            onClick={() => setInspectorCollapsed((current) => !current)}
+            onClick={toggleInspectorCollapsed}
           >
             {inspectorCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             <span>{inspectorCollapsed ? "展开" : "收起"}</span>
@@ -1603,19 +1655,19 @@ export default function WorkbenchPage() {
           <button
             className={inspectorTab === "files" ? "active" : ""}
             type="button"
-            onClick={() => setInspectorTab("files")}
+            onClick={() => selectInspectorTab("files")}
           >
             <FileOutlined />
             <span>文件</span>
           </button>
-          <button className={inspectorTab === "diff" ? "active" : ""} type="button" onClick={() => setInspectorTab("diff")}>
+          <button className={inspectorTab === "diff" ? "active" : ""} type="button" onClick={() => selectInspectorTab("diff")}>
             <BranchesOutlined />
             <span>审查</span>
           </button>
           <button
             className={inspectorTab === "artifacts" ? "active" : ""}
             type="button"
-            onClick={() => setInspectorTab("artifacts")}
+            onClick={() => selectInspectorTab("artifacts")}
           >
             <FileDoneOutlined />
             <span>Artifacts</span>
@@ -1630,6 +1682,7 @@ export default function WorkbenchPage() {
                 disabledReason={sandboxEditorDisabledReason}
                 onSaved={() => setInspectorTab("diff")}
                 onNotice={setNotice}
+                onFileOpened={handleFileOpened}
               />
             )}
             {inspectorTab === "diff" && (

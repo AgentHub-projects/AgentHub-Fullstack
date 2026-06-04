@@ -263,11 +263,13 @@ export function FilePanel({
   disabledReason,
   onSaved,
   onNotice,
+  onFileOpened,
 }: {
   sessionId?: string | null;
   disabledReason?: string;
   onSaved?: () => void;
   onNotice?: (message: string) => void;
+  onFileOpened?: (path: string) => void;
 }) {
   const [agents, setAgents] = useState<SandboxAgentBranchDto[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
@@ -378,6 +380,7 @@ export function FilePanel({
     setFile(result.data);
     setDraft(result.data.content);
     setError("");
+    onFileOpened?.(result.data.path);
   }
 
   async function saveFile() {
@@ -411,93 +414,126 @@ export function FilePanel({
 
   const branch = connection?.branch ?? selectedAgent?.branch ?? null;
   const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
+  const fileName = file ? fileNameFromPath(file.path) : "";
+  const fileLanguage = file?.language ?? "text";
 
   return (
-    <div className="panelScroll filePanel">
+    <div className={`panelScroll filePanel ${file ? "hasFile" : ""}`}>
       <header className="filePanelHeader">
         <div>
           <strong>文件</strong>
           <span>{branch ? `分支 ${branch}` : "沙箱文件编辑"}</span>
         </div>
-        <button
-          type="button"
-          title="刷新文件列表"
-          disabled={!selectedAgentId || selectedAgent?.status !== "ready" || !canUseSandbox || loadingTree}
-          onClick={() => selectedAgentId && void connectAndLoadRoot(selectedAgentId)}
-        >
-          <ReloadOutlined />
-        </button>
       </header>
 
       {disabledReason ? (
         <PanelEmpty icon={<FileOutlined />} text={disabledReason} />
       ) : (
-        <>
-          <label className="fileAgentPicker">
-            <span>Agent</span>
-            <select
-              value={selectedAgentId ?? ""}
-              disabled={loadingAgents || agents.length === 0}
-              onChange={(event) => setSelectedAgentId(Number(event.target.value))}
-            >
-              {agents.map((agent) => (
-                <option disabled={agent.status !== "ready"} key={agent.agentId} value={agent.agentId}>
-                  {agent.agentName} {agent.branch ? `· ${agent.branch}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {error && <div className="filePanelNotice">{error}</div>}
-
-          <section className="fileBrowser" aria-label="沙箱文件列表">
-            <div className="fileBrowserTop">
-              <span title={currentPath || "/"}>{currentPath || "/"}</span>
-              {currentPath && (
-                <button type="button" onClick={() => void openDirectory(parentPath)}>
-                  返回上级
-                </button>
-              )}
+        <div className="fileWorkspace">
+          <section className="fileExplorerPane" aria-label="沙箱文件资源管理器">
+            <div className="fileExplorerHeader">
+              <div>
+                <strong><FolderOpenOutlined /> 资源管理器</strong>
+                <span>{selectedAgent?.agentName ?? "选择 Agent"}</span>
+              </div>
+              <button
+                type="button"
+                title="刷新文件列表"
+                disabled={!selectedAgentId || selectedAgent?.status !== "ready" || !canUseSandbox || loadingTree}
+                onClick={() => selectedAgentId && void connectAndLoadRoot(selectedAgentId)}
+              >
+                <ReloadOutlined />
+              </button>
             </div>
-            <div className="fileTreeList">
-              {loadingTree ? (
-                <span className="fileMuted">正在加载文件...</span>
-              ) : treeItems.length === 0 ? (
-                <span className="fileMuted">暂无文件</span>
-              ) : (
-                treeItems.map((item) => (
-                  <button
-                    className={`fileTreeItem ${file?.path === item.path ? "active" : ""}`}
-                    type="button"
-                    key={`${item.type}:${item.path}`}
-                    onClick={() => (item.type === "directory" ? void openDirectory(item.path) : void openFile(item.path))}
-                  >
-                    {item.type === "directory" ? <FolderOpenOutlined /> : <FileOutlined />}
-                    <span>{item.name}</span>
-                    {item.type === "file" && item.sizeBytes != null ? <small>{formatBytes(item.sizeBytes)}</small> : null}
+
+            <label className="fileAgentPicker">
+              <span>Agent</span>
+              <select
+                value={selectedAgentId ?? ""}
+                disabled={loadingAgents || agents.length === 0}
+                onChange={(event) => setSelectedAgentId(Number(event.target.value))}
+              >
+                {agents.map((agent) => (
+                  <option disabled={agent.status !== "ready"} key={agent.agentId} value={agent.agentId}>
+                    {agent.agentName} {agent.branch ? `· ${agent.branch}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {error && <div className="filePanelNotice">{error}</div>}
+
+            <section className="fileBrowser" aria-label="沙箱文件列表">
+              <div className="fileBrowserTop">
+                <span title={currentPath || "/"}>{currentPath || "/"}</span>
+                {currentPath && (
+                  <button type="button" onClick={() => void openDirectory(parentPath)}>
+                    返回上级
                   </button>
-                ))
-              )}
-            </div>
+                )}
+              </div>
+              <div className="fileTreeList">
+                {loadingTree ? (
+                  <span className="fileMuted">正在加载文件...</span>
+                ) : treeItems.length === 0 ? (
+                  <span className="fileMuted">暂无文件</span>
+                ) : (
+                  treeItems.map((item) => (
+                    <button
+                      className={`fileTreeItem ${item.type} ${file?.path === item.path ? "active" : ""}`}
+                      type="button"
+                      title={item.path}
+                      key={`${item.type}:${item.path}`}
+                      onClick={() => (item.type === "directory" ? void openDirectory(item.path) : void openFile(item.path))}
+                    >
+                      {item.type === "directory" ? <RightOutlined /> : <FileOutlined />}
+                      <span>{item.name}</span>
+                      {item.type === "file" && item.sizeBytes != null ? <small>{formatBytes(item.sizeBytes)}</small> : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
           </section>
 
-          <section className="fileEditor" aria-label="沙箱文件编辑器">
-            <div className="fileEditorTop">
-              <span title={file?.path ?? ""}>{file?.path ?? "选择一个文件"}</span>
-              <button type="button" disabled={!dirty || saving || loadingFile} onClick={() => void saveFile()}>
+          <section className="fileEditorPane" aria-label="沙箱文件编辑器">
+            <div className="fileEditorTabs">
+              <div className={`fileEditorTab ${file ? "active" : "empty"}`}>
+                {file ? <FileOutlined /> : <CodeOutlined />}
+                <span title={file?.path ?? ""}>{file ? fileName : "未打开文件"}</span>
+                {dirty && <small>未保存</small>}
+              </div>
+              <button className="fileSaveButton" type="button" disabled={!dirty || saving || loadingFile} onClick={() => void saveFile()}>
                 <SaveOutlined />
                 <span>{saving ? "保存中" : "保存"}</span>
               </button>
             </div>
-            <textarea
-              spellCheck={false}
-              value={draft}
-              placeholder={loadingFile ? "正在读取文件..." : "从上方文件列表选择文件"}
-              disabled={!file || loadingFile}
-              onChange={(event) => setDraft(event.target.value)}
-            />
+            <div className="fileEditorPathBar">
+              <span title={file?.path ?? ""}>{file?.path ?? "从左侧资源管理器选择文件"}</span>
+              {loadingFile && <small>正在读取...</small>}
+            </div>
+            {file ? (
+              <textarea
+                spellCheck={false}
+                value={draft}
+                placeholder={loadingFile ? "正在读取文件..." : ""}
+                disabled={loadingFile}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            ) : (
+              <div className="fileEditorEmpty">
+                <CodeOutlined />
+                <strong>选择一个文件开始编辑</strong>
+                <span>目录浏览保持在左侧，打开文件后这里会显示可编辑内容。</span>
+              </div>
+            )}
+            <footer className="fileEditorStatus">
+              <span>{file ? fileLanguage : "No file"}</span>
+              <span>{file ? `${draft.length} 字符` : "Ready"}</span>
+              <span>{dirty ? "已修改" : file ? "已同步" : "空闲"}</span>
+            </footer>
           </section>
-        </>
+        </div>
       )}
     </div>
   );
@@ -967,6 +1003,10 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
 function PanelEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {

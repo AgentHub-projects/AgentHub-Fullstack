@@ -2097,6 +2097,7 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+
 .pinnedKeyMeta span {
   min-width: 0;
   overflow: hidden;
@@ -2116,6 +2117,7 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 800;
 }
+
 
 .pinnedPartList {
   display: grid;
@@ -4094,6 +4096,7 @@ div.agentChoice {
 /* Codex-like desktop workbench refresh */
 .agenthubShell {
   grid-template-columns: 320px minmax(0, 1fr) 390px;
+  position: relative;
   background: #ffffff;
 }
 
@@ -4101,10 +4104,57 @@ div.agentChoice {
   grid-template-columns: 320px minmax(0, 1fr) clamp(520px, 42vw, 760px);
 }
 
+.agenthubShell.filesActive {
+  grid-template-columns: 320px minmax(0, 1fr) clamp(600px, 46vw, 820px);
+}
+
+.agenthubShell.filesActive.fileEditorOpen {
+  grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
+}
+
+.agenthubShell.filesActive.fileEditorOpen.railCollapsed {
+  grid-template-columns: 0 minmax(420px, 1fr) clamp(700px, 58vw, 960px);
+}
+
 .agenthubShell.inspectorCollapsed,
 .agenthubShell.diffActive.inspectorCollapsed,
-.agenthubShell.artifactsActive.inspectorCollapsed {
+.agenthubShell.artifactsActive.inspectorCollapsed,
+.agenthubShell.filesActive.inspectorCollapsed {
   grid-template-columns: 320px minmax(0, 1fr) 56px;
+}
+
+.agenthubShell.railCollapsed .sessionRail {
+  overflow: hidden;
+  min-width: 0;
+  border-right: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.railRestoreButton {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 15;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid #dcdcdc;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #242424;
+  padding: 0 11px;
+  box-shadow: 0 8px 20px rgba(17, 17, 17, 0.08);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.railRestoreButton:hover {
+  border-color: #cfcfcf;
+  background: #ffffff;
 }
 
 .sessionRail {
@@ -4581,15 +4631,80 @@ div.agentChoice {
 }
 
 .filePanel {
-  grid-template-rows: auto auto minmax(150px, 0.75fr) minmax(260px, 1.25fr);
-  gap: 12px;
+  align-content: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
   overflow: hidden;
-  padding: 14px;
+  padding: 0;
+  background: #ffffff;
 }
 
-.filePanelHeader,
+.filePanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 48px;
+  gap: 12px;
+  border-bottom: 1px solid #ececec;
+  padding: 0 14px;
+}
+
+.filePanelHeader > div,
+.fileExplorerHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.filePanelHeader strong,
+.fileExplorerHeader strong {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  overflow: hidden;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePanelHeader span,
+.fileExplorerHeader span,
+.fileMuted {
+  color: #777777;
+  font-size: 12px;
+}
+
+.fileWorkspace {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.34fr) minmax(360px, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.fileExplorerPane,
+.fileEditorPane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.fileExplorerPane {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  border-right: 1px solid #e8e8e8;
+  background: #fbfbfb;
+}
+
+.fileExplorerHeader,
 .fileBrowserTop,
-.fileEditorTop,
+.fileEditorTabs,
+.fileEditorPathBar,
+.fileEditorStatus,
 .fileTreeItem,
 .fileAgentPicker {
   display: flex;
@@ -4597,46 +4712,39 @@ div.agentChoice {
   min-width: 0;
 }
 
-.filePanelHeader {
+.fileExplorerHeader {
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  min-height: 48px;
+  border-bottom: 1px solid #eeeeee;
+  padding: 0 12px;
 }
 
-.filePanelHeader > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.filePanelHeader strong {
-  color: #111111;
-  font-size: 14px;
-  font-weight: 760;
-}
-
-.filePanelHeader span,
-.fileMuted {
-  color: #777777;
-  font-size: 12px;
-}
-
-.filePanelHeader button,
+.fileExplorerHeader button,
 .fileBrowserTop button,
-.fileEditorTop button {
+.fileSaveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
-  border-color: #e5e5e5;
+  border: 1px solid #e1e1e1;
+  border-radius: 7px;
   background: #ffffff;
-  color: #111111;
+  color: #242424;
   padding: 0 10px;
+}
+
+.fileExplorerHeader button {
+  width: 32px;
+  padding: 0;
 }
 
 .fileAgentPicker {
-  gap: 10px;
-  min-height: 36px;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
+  gap: 9px;
+  min-height: 40px;
+  border-bottom: 1px solid #eeeeee;
   background: #ffffff;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 .fileAgentPicker span {
@@ -4657,6 +4765,8 @@ div.agentChoice {
 }
 
 .filePanelNotice {
+  grid-row: 3;
+  margin: 10px 10px 0;
   border: 1px solid #f0d7a7;
   border-radius: 8px;
   background: #fffaf0;
@@ -4666,37 +4776,31 @@ div.agentChoice {
   line-height: 1.5;
 }
 
-.fileBrowser,
-.fileEditor {
+.fileBrowser {
   display: grid;
+  grid-row: 4;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  background: #ffffff;
 }
 
-.fileBrowser {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.fileBrowserTop,
-.fileEditorTop {
+.fileBrowserTop {
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-height: 38px;
   border-bottom: 1px solid #eeeeee;
-  padding: 0 10px;
+  background: #fbfbfb;
+  padding: 0 10px 0 12px;
 }
 
 .fileBrowserTop span,
-.fileEditorTop span {
+.fileEditorPathBar span {
   min-width: 0;
   overflow: hidden;
   color: #555555;
+  font-family: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4704,10 +4808,10 @@ div.agentChoice {
 .fileTreeList {
   display: grid;
   align-content: start;
-  gap: 2px;
+  gap: 1px;
   min-height: 0;
   overflow: auto;
-  padding: 6px;
+  padding: 7px 6px 12px;
 }
 
 .fileTreeItem {
@@ -4718,14 +4822,33 @@ div.agentChoice {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #222222;
+  color: #2a2a2a;
   padding: 0 8px;
   text-align: left;
 }
 
+.fileTreeItem.directory {
+  color: #3d4b48;
+}
+
 .fileTreeItem:hover,
 .fileTreeItem.active {
-  background: #f2f2f2;
+  background: #eeeeee;
+}
+
+.fileTreeItem.active {
+  color: #111111;
+  font-weight: 650;
+}
+
+.fileTreeItem .anticon {
+  flex: 0 0 14px;
+  color: #777777;
+  font-size: 12px;
+}
+
+.fileTreeItem.directory .anticon {
+  color: #687976;
 }
 
 .fileTreeItem span {
@@ -4742,24 +4865,83 @@ div.agentChoice {
   font-size: 11px;
 }
 
-.fileEditor {
-  grid-template-rows: auto minmax(0, 1fr);
+.fileEditorPane {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: #ffffff;
 }
 
-.fileEditorTop button {
+.fileEditorTabs {
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  border-bottom: 1px solid #e9e9e9;
+  background: #f8f8f8;
+  padding: 0 10px 0 0;
+}
+
+.fileEditorTab {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  max-width: min(320px, 70%);
+  gap: 8px;
+  border-right: 1px solid #e2e2e2;
+  background: #ffffff;
+  color: #242424;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.fileEditorTab.empty {
+  color: #777777;
+  background: #f8f8f8;
+}
+
+.fileEditorTab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileEditorTab small {
+  flex: 0 0 auto;
+  color: #946200;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.fileSaveButton {
   gap: 6px;
   border-color: #111111;
   background: #111111;
   color: #ffffff;
 }
 
-.fileEditorTop button:disabled {
+.fileSaveButton:disabled {
   border-color: #d4d4d4;
-  background: #f5f5f5;
+  background: #f1f1f1;
   color: #9a9a9a;
 }
 
-.fileEditor textarea {
+.fileEditorPathBar {
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  border-bottom: 1px solid #eeeeee;
+  background: #ffffff;
+  padding: 0 14px;
+}
+
+.fileEditorPathBar small {
+  flex: 0 0 auto;
+  color: #777777;
+  font-size: 12px;
+}
+
+.fileEditorPane textarea {
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -4768,11 +4950,84 @@ div.agentChoice {
   outline: 0;
   background: #ffffff;
   color: #111111;
-  padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  padding: 16px 18px;
+  font-family: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 13px;
   line-height: 1.65;
   tab-size: 2;
+}
+
+.fileEditorEmpty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  color: #777777;
+  padding: 24px;
+  text-align: center;
+}
+
+.fileEditorEmpty .anticon {
+  color: #b0b0b0;
+  font-size: 28px;
+}
+
+.fileEditorEmpty strong {
+  color: #242424;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.fileEditorEmpty span {
+  max-width: 320px;
+  color: #777777;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fileEditorStatus {
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 28px;
+  border-top: 1px solid #eeeeee;
+  background: #fbfbfb;
+  color: #6b6b6b;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.fileEditorStatus span:not(:last-child) {
+  border-right: 1px solid #dcdcdc;
+  padding-right: 12px;
+}
+
+@media (max-width: 899px) {
+  .agenthubShell.filesActive,
+  .agenthubShell.filesActive.fileEditorOpen,
+  .agenthubShell.filesActive.fileEditorOpen.railCollapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .agenthubShell.railCollapsed .sessionRail {
+    display: none;
+  }
+
+  .railRestoreButton {
+    top: 8px;
+    left: 8px;
+  }
+
+  .fileWorkspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 34%) minmax(260px, 1fr);
+  }
+
+  .fileExplorerPane {
+    border-right: 0;
+    border-bottom: 1px solid #e8e8e8;
+  }
 }
 
 .panelScroll.diffPanelLayout {
