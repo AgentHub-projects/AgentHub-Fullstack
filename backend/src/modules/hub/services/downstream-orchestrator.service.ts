@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleDestroy, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import type { AgentId, AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
 import { io } from "socket.io-client";
 import { HubEventService } from "./event.service";
@@ -21,6 +21,7 @@ const ENABLE_FILE_APPLY_DIFF = "DOWNSTREAM_ENABLE_FILE_APPLY_DIFF";
 /** 下游编排服务：通过 Socket.IO ACP 协议与下游 Agent 通信，管理连接生命周期和运行编排 */
 @Injectable()
 export class DownstreamOrchestratorService implements OnModuleDestroy {
+  private readonly logger = new Logger(DownstreamOrchestratorService.name);
   private readonly connections = new Map<string, ConnectionRecord>();
 
   constructor(
@@ -77,13 +78,17 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     try {
+      this.logger.log(`[startRun] runId=${input.runId} sessionId=${input.sessionId} 连接下游 ${downstreamUrl}`);
       const sessionDownstreamId = await this.readSessionDownstreamId(input.sessionId);
+      this.logger.log(`[startRun] session下游ID=${sessionDownstreamId ?? "空"} → ${sessionDownstreamId ? "复用已有下游session" : "将创建新下游session"}`);
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
         downstreamSessionId: sessionDownstreamId,
       });
       const downstreamSessionId = await connection.downstreamReady;
+      this.logger.log(`[startRun] 下游就绪 downstreamSessionId=${downstreamSessionId} 需bootstrap=${connection.needsBootstrap}`);
       if (!sessionDownstreamId && downstreamSessionId) {
         await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
+        this.logger.log(`[startRun] 下游sessionId已持久化到sessions表`);
       }
       const needsBootstrap = connection.needsBootstrap;
       const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
@@ -95,6 +100,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
       connection.activeRunId = input.runId;
       connection.activeOrchestratorAgentId = input.orchestrator.id;
+      const promptBrief = { ...promptInput, prompt: promptInput.prompt?.map((p: any) => ({ ...p, text: p.text?.slice(0, 500) + (p.text?.length > 500 ? `...[${p.text.length}字符]` : "") })) };
+      this.logger.log(`[发送] session/prompt: ${JSON.stringify(promptBrief)}`);
       connection.acp.notify("session/prompt", promptInput);
       connection.needsBootstrap = false;
       this.markDownstreamActivity(connection);
@@ -323,6 +330,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.connections.set(sessionId, record);
 
     socket.on("disconnect", () => {
+      this.logger.warn(`[连接] sessionId=${sessionId} 下游连接断开`);
       this.clearIdleTimer(record);
       record.needsBootstrap = true;
       if (this.connections.get(sessionId) === record) {
@@ -350,7 +358,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     socket.on("connect_error", () => {
-      // socket.io handles reconnection internally
+      this.logger.error(`[连接] sessionId=${sessionId} socket连接错误`);
     });
 
     // Legacy event channels for downstream compatibility
@@ -360,26 +368,31 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     // ACP handshake
     const loadSessionId = downstreamFeatureEnabled(ENABLE_SESSION_LOAD) ? record.downstreamSessionId : undefined;
+    this.logger.log(`[握手] sessionId=${sessionId} 发送initialize, 将执行 ${loadSessionId ? "session/load" : "session/new"}`);
     acp.notify("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
 
     try {
+      const method = loadSessionId ? "session/load" : "session/new";
+      this.logger.log(`[握手] 发送${method} params=${JSON.stringify(loadSessionId ? { sessionId: loadSessionId } : { _meta: { agentId: String(agent.id) } })}`);
       const result = await acp.request(
-        loadSessionId ? "session/load" : "session/new",
+        method,
         loadSessionId
           ? { sessionId: loadSessionId }
           : { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] },
       );
       const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
       if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
+      this.logger.log(`[握手] ${method} 成功, 下游sessionId=${resultSessionId}, result=${JSON.stringify(result)}`);
       record.downstreamSessionId = resultSessionId;
       record.needsBootstrap = !loadSessionId;
       record.loadedActiveRun = readActiveRun(result);
       await this.refreshSandboxMapping(sessionId, resultSessionId, result);
       record.resolveDownstreamReady?.(resultSessionId);
     } catch (error) {
+      this.logger.error(`[握手] 失败 ${error instanceof Error ? error.message : String(error)}`);
       if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
         record.downstreamSessionId = undefined;
         record.needsBootstrap = true;
@@ -478,6 +491,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const envelopeId = typeof envelope.id === "number" || typeof envelope.id === "string" ? envelope.id : undefined;
     const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
+    this.logger.log(`[接收] sessionId=${sessionId} method=${envelope.method ?? "无"} type=${stringValue(params.type) ?? stringValue(params.eventType) ?? "无"} id=${envelopeId ?? "无"}`);
+    this.logger.log(`[接收JSON] ${safeJson(envelope, 8000)}`);
 
     // Handle session/update (agent message chunks from downstream)
     if (envelope.method === "session/update") {
@@ -487,8 +502,23 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         const meta = asRecord(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
-        const runId = stringValue(meta.runId) ?? record.activeRunId;
+        let runId = stringValue(meta.runId) ?? record.activeRunId;
         if (!runId) {
+          // 从数据库查找该session最后一个running状态的run
+          const latestRun = await this.prisma.agentRun.findFirst({
+            where: { sessionId: record.sessionId, status: "running" },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          });
+          if (latestRun) {
+            runId = latestRun.id;
+            record.activeRunId = runId;
+            this.logger.log(`[session/update] 从数据库恢复runId=${runId}`);
+          }
+        }
+        this.logger.log(`[session/update] runId=${runId} hasText=${!!text} sessionUpdate=${sessionUpdate ?? "无"}`);
+        if (!runId) {
+          this.logger.warn(`[session/update] 缺少runId，丢弃`);
           if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
           return;
         }
@@ -503,7 +533,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             source: "downstream_agent",
             payload: { text, speaker },
           });
-          if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop") {
+          if (sessionUpdate === "agent_message_stop" || sessionUpdate === "stop" || sessionUpdate === "agent_message_chunk") {
+            this.logger.log(`[session/update] 消息完成 runId=${runId} sessionUpdate=${sessionUpdate}`);
             await this.events.append({
               sessionId: record.sessionId,
               runId,
@@ -512,6 +543,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
               source: "downstream_agent",
               payload: { text, speaker },
             });
+            // agent_message_chunk 代表下游已完整输出，触发 run 完成
+            if (sessionUpdate === "agent_message_chunk") {
+              this.logger.log(`[session/update] agent_message_chunk 自动完成run runId=${runId}`);
+              await this.markRunCompleted(record.sessionId, runId);
+            }
           }
         }
         if (envelopeId !== undefined) record.acp.respond(envelopeId);
@@ -525,10 +561,15 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     // Handle structured session/event reports from downstream agents.
-    if (envelope.method && envelope.method !== "session/event") return;
+    if (envelope.method && envelope.method !== "session/event") {
+      this.logger.warn(`[接收] 未知method=${envelope.method}，丢弃`);
+      return;
+    }
     const meta = asRecord(params._meta);
+    this.logger.log(`[session/event] params有runId=${!!params.runId} envelope有runId=${!!envelope.runId} activeRunId=${record.activeRunId}`);
     const runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? stringValue(envelope.runId) ?? record.activeRunId;
     if (!runId) {
+      this.logger.warn(`[session/event] 缺少runId，丢弃`);
       if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
       return;
     }
@@ -553,6 +594,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       agentIdValue(envelope.speaker);
 
     try {
+      this.logger.log(`[session/event] 持久化 eventType=${eventType} runId=${runId} speaker=${speakerAgentId}`);
       await this.events.append({
         sessionId: record.sessionId,
         runId,
@@ -565,9 +607,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       });
 
       if (eventType === "run.completed") {
+        this.logger.log(`[session/event] run完成 runId=${runId}`);
         await this.markRunCompleted(record.sessionId, runId);
       }
       if (eventType === "run.failed") {
+        this.logger.log(`[session/event] run失败 runId=${runId}`);
         await this.markRunFailed(
           record.sessionId,
           runId,
@@ -577,6 +621,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       }
       if (envelopeId !== undefined) record.acp.respond(envelopeId);
     } catch (error) {
+      this.logger.error(`[session/event] 持久化失败 ${error instanceof Error ? error.message : String(error)}`);
       if (envelopeId !== undefined) {
         const msg = error instanceof Error ? error.message : String(error);
         record.acp.respondError(envelopeId, errorCode(msg), msg);

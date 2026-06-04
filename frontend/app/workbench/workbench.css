@@ -1124,9 +1124,14 @@ textarea:focus-visible {
 }
 
 .codeBlock pre {
+  margin: 0;
   border: 0;
   border-radius: 0;
   max-height: 360px;
+  background: #011627;
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .codeBlock pre > div {
@@ -1135,14 +1140,19 @@ textarea:focus-visible {
 
 .codeBlock .lineNo {
   min-width: 44px;
-  padding-right: 12px;
+  padding-right: 16px;
   text-align: right;
-  color: var(--muted-soft);
+  color: #4b6479;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .codeBlock .lineContent {
   white-space: pre;
+}
+
+.codeBlock .lineContent span {
+  font-family: inherit;
 }
 
 .messageCardPart {

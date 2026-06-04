@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { Fragment } from "react";
 import type { HubMessagePartDto } from "@agenthub/shared";
 import {
   CheckCircleOutlined,
@@ -14,6 +14,7 @@ import {
   PushpinOutlined,
   RocketOutlined,
 } from "@ant-design/icons";
+import { Highlight, themes } from "prism-react-renderer";
 import { artifactContentUrl } from "../../lib/agenthub-api";
 import { diffMarker, parseUnifiedPatch } from "../../lib/workbench/diff";
 import { parseInlineMarkdown, parseMarkdownBlocks, type InlineSegment, type MarkdownBlock } from "../../lib/workbench/markdown";
@@ -576,10 +577,10 @@ function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactN
   return (
     <p key={key}>
       {block.text.split("\n").map((line, i, arr) => (
-        <React.Fragment key={i}>
+        <Fragment key={i}>
           <InlineText text={line} />
           {i < arr.length - 1 && <br />}
-        </React.Fragment>
+        </Fragment>
       ))}
     </p>
   );
@@ -596,7 +597,7 @@ function InlineText({ text }: { text: string }) {
         if (seg.kind === "link") return <a key={i} href={seg.url} target="_blank" rel="noreferrer">{seg.text}</a>;
         if (seg.kind === "image") return <img key={i} src={seg.url} alt={seg.alt} className="inlineImage" />;
         if (seg.kind === "strikethrough") return <del key={i}>{seg.text}</del>;
-        return <React.Fragment key={i}>{seg.text}</React.Fragment>;
+        return <>{seg.text}</>;
       })}
     </>
   );
@@ -617,7 +618,17 @@ function CodeBlock({
   onReference?: () => void;
   onExpand?: () => void;
 }) {
-  const lineCount = text ? text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n").length : 0;
+  const trimmed = text ? text.replace(/\r\n/g, "\n").replace(/\n$/, "") : "";
+  const lineCount = trimmed ? trimmed.split("\n").length : 0;
+  const lang = (language?.toLowerCase() ?? "text")
+    .replace(/^tsx$/, "tsx")
+    .replace(/^jsx$/, "jsx")
+    .replace(/^bash$/, "bash")
+    .replace(/^sh$/, "bash")
+    .replace(/^shell$/, "bash")
+    .replace(/^zsh$/, "bash")
+    .replace(/^yml$/, "yaml")
+    .replace(/^py$/, "python");
   return (
     <details className="codeBlock">
       <summary className="codeBlockHeader">
@@ -644,13 +655,28 @@ function CodeBlock({
             <CopyOutlined />
           </button>
           {onReference && (
-            <button type="button" title="引用代码" onClick={(event) => handleSummaryAction(event, onReference)}>
+            <button type="button" title="引用代码" onClick={(event) => handleSummaryAction(event, onReference!)}>
               <CommentOutlined />
             </button>
           )}
         </div>
       </summary>
-      <pre>{text}</pre>
+      <Highlight theme={themes.nightOwl} code={trimmed} language={lang}>
+        {({ tokens, getLineProps, getTokenProps }) => (
+          <pre>
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                <span className="lineNo">{i + 1}</span>
+                <span className="lineContent">
+                  {line.map((token, key) => (
+                    <span key={key} {...getTokenProps({ token })} />
+                  ))}
+                </span>
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
     </details>
   );
 }
