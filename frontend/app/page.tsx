@@ -737,6 +737,12 @@ export default function WorkbenchPage() {
     }
   }
 
+  function updateMessageInDetail(message: HubMessageDto) {
+    setDetail((current) =>
+      current ? { ...current, messages: upsertById(current.messages, message).sort(sortMessage) } : current,
+    );
+  }
+
   async function handlePin(message: HubMessageDto) {
     if (!activeSessionId) return;
     const result = await pinSessionMessage(activeSessionId, message.id, { pinned: !message.isPinned });
@@ -744,9 +750,7 @@ export default function WorkbenchPage() {
       setNotice(`Pin 失败：${result.error}`);
       return;
     }
-    setDetail((current) =>
-      current ? { ...current, messages: upsertById(current.messages, result.data).sort(sortMessage) } : current,
-    );
+    updateMessageInDetail(result.data);
   }
 
   async function handleCancel(run: HubRunDto) {
@@ -1100,9 +1104,30 @@ export default function WorkbenchPage() {
       setNotice(`Part Pin 失败：${result.error}`);
       return;
     }
-    setDetail((current) =>
-      current ? { ...current, messages: upsertById(current.messages, result.data).sort(sortMessage) } : current,
-    );
+    updateMessageInDetail(result.data);
+  }
+
+  async function handleUnpinKeyMessage(message: HubMessageDto) {
+    if (!activeSessionId) return;
+    const pinnedParts = message.parts.filter((part) => part.pinned);
+
+    if (message.isPinned) {
+      const result = await pinSessionMessage(activeSessionId, message.id, { pinned: false });
+      if (!result.ok) {
+        setNotice(`取消关键消息失败：${result.error}`);
+        return;
+      }
+      updateMessageInDetail(result.data);
+    }
+
+    for (const part of pinnedParts) {
+      const result = await pinSessionMessage(activeSessionId, message.id, { pinned: false, partId: part.id });
+      if (!result.ok) {
+        setNotice(`取消关键片段失败：${result.error}`);
+        return;
+      }
+      updateMessageInDetail(result.data);
+    }
   }
 
   if (!authenticated) {
@@ -1383,6 +1408,7 @@ export default function WorkbenchPage() {
         <PinnedKeyMessages
           messages={pinnedMessages}
           onReply={!chatActionLocked ? addReplyTarget : undefined}
+          onUnpin={handleUnpinKeyMessage}
           onOpenPart={setActivePartViewer}
         />
 
@@ -2220,10 +2246,12 @@ function sessionListPreview(session: HubSessionDto) {
 function PinnedKeyMessages({
   messages,
   onReply,
+  onUnpin,
   onOpenPart,
 }: {
   messages: HubMessageDto[];
   onReply?: (message: HubMessageDto) => void;
+  onUnpin?: (message: HubMessageDto) => void;
   onOpenPart?: (part: HubMessagePartDto) => void;
 }) {
   const visibleMessages = messages.slice(0, 5);
@@ -2245,11 +2273,23 @@ function PinnedKeyMessages({
             <article className="pinnedKeyItem" key={message.id}>
               <div className="pinnedKeyMeta">
                 <span>{messageSpeaker(message)} · {formatTime(message.updatedAt)}</span>
-                {onReply && (
-                  <button type="button" onClick={() => onReply(message)}>
-                    引用
-                  </button>
-                )}
+                <div className="pinnedKeyActions">
+                  {onReply && (
+                    <button type="button" onClick={() => onReply(message)}>
+                      引用
+                    </button>
+                  )}
+                  {onUnpin && (
+                    <button
+                      className="pinnedKeyCancel"
+                      type="button"
+                      title="取消关键消息"
+                      onClick={() => onUnpin(message)}
+                    >
+                      取消
+                    </button>
+                  )}
+                </div>
               </div>
               {message.isPinned && <p>{messagePreview(message)}</p>}
               {pinnedParts.length > 0 && (
