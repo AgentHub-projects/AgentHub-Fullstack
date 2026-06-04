@@ -182,13 +182,14 @@ model Agent {
 }
 
 model Session {
-  id               String             @id @default(uuid()) @db.Uuid
-  title            String             @default("Untitled Session")
-  status           SessionStatusDb    @default(active)
-  projectId        String?            @map("project_id") @db.Uuid
-  metadata         Json               @default("{}")
-  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                   String             @id @default(uuid()) @db.Uuid
+  title                String             @default("Untitled Session")
+  status               SessionStatusDb    @default(active)
+  projectId            String?            @map("project_id") @db.Uuid
+  downstreamSessionId  String?            @map("downstream_session_id")
+  metadata             Json               @default("{}")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   participants     SessionAgent[]
   messages         Message[]
   runs             AgentRun[]

@@ -77,13 +77,14 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
 
     try {
-      const reusableDownstreamSessionId = downstreamFeatureEnabled(ENABLE_SESSION_LOAD)
-        ? await this.findReusableDownstreamSessionId(input.sessionId)
-        : null;
+      const sessionDownstreamId = await this.readSessionDownstreamId(input.sessionId);
       const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
-        downstreamSessionId: reusableDownstreamSessionId,
+        downstreamSessionId: sessionDownstreamId,
       });
       const downstreamSessionId = await connection.downstreamReady;
+      if (!sessionDownstreamId && downstreamSessionId) {
+        await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
+      }
       const needsBootstrap = connection.needsBootstrap;
       const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
       const promptInput = await this.buildPromptInput(
@@ -216,7 +217,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
     if (!run) throw new Error("RUN_NOT_FOUND");
 
-    const downstreamSessionId = run.downstreamSessionId ?? await this.findReusableDownstreamSessionId(sessionId);
+    const downstreamSessionId = run.downstreamSessionId ?? await this.readSessionDownstreamId(sessionId);
     if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
 
     const record = await this.ensureConnection(
@@ -351,6 +352,11 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     socket.on("connect_error", () => {
       // socket.io handles reconnection internally
     });
+
+    // Legacy event channels for downstream compatibility
+    socket.on("session/event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
+    socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
+    socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
 
     // ACP handshake
     const loadSessionId = downstreamFeatureEnabled(ENABLE_SESSION_LOAD) ? record.downstreamSessionId : undefined;
@@ -686,17 +692,24 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
   /** 查找会话可复用的下游 session ID */
   private async findReusableDownstreamSessionId(sessionId: string) {
-    const agentRunModel = this.prisma.agentRun as any;
-    if (typeof agentRunModel.findFirst !== "function") return null;
-    const run = await agentRunModel.findFirst({
-      where: {
-        sessionId,
-        downstreamSessionId: { not: null },
-      },
-      orderBy: { createdAt: "desc" },
+    return this.readSessionDownstreamId(sessionId);
+  }
+
+  /** 读取 Session 表的下游 session ID */
+  private async readSessionDownstreamId(sessionId: string): Promise<string | null> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
       select: { downstreamSessionId: true },
     });
-    return run?.downstreamSessionId ?? null;
+    return session?.downstreamSessionId ?? null;
+  }
+
+  /** 将下游 session ID 持久化到 Session 表 */
+  private async persistSessionDownstreamId(sessionId: string, downstreamSessionId: string) {
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { downstreamSessionId },
+    });
   }
 
   /** 下游断开后恢复活跃 run：重新连接并恢复状态 */
