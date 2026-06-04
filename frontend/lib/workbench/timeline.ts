@@ -142,7 +142,7 @@ export function runStageLabel(run: HubRunDto, events: HubEventDto[]) {
 
   const latest = [...events].reverse().find((event) => event.eventType !== "run.status" && event.eventType !== "run.created");
   if (!latest) return "正在思考";
-  if (latest.eventType === "message.delta") return "正在生成回复";
+  if (latest.eventType === "message.delta" || latest.eventType === "message.completed") return "正在生成回复";
   if (latest.eventType === "tool.call") return `调用 ${payloadString(latest.payload, "tool") ?? "工具"}`;
   if (latest.eventType === "tool.result") return "处理工具结果";
   if (latest.eventType === "file.change") return "写入文件变更";

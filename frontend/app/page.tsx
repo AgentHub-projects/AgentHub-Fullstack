@@ -157,7 +157,7 @@ export default function WorkbenchPage() {
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [applyingFileChangeId, setApplyingFileChangeId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [sessionRailCollapsed, setSessionRailCollapsed] = useState(false);
   const [openedFilePath, setOpenedFilePath] = useState<string | null>(null);
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
@@ -370,6 +370,7 @@ export default function WorkbenchPage() {
     const disconnect = connectHubSocket(openSessionIds, {
       onState: () => undefined,
       onEvent: (event) => {
+        console.log("[frontend] onEvent", event.eventType, event.sessionId, event.runId, event.id);
         setWorkspaceDetail(event.sessionId, (current) =>
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,
         );
