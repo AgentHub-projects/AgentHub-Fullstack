@@ -886,7 +886,8 @@ function DocumentFallback({ title, text }: { title: string; text: string }) {
 }
 
 function UnifiedDiffView({ change }: { change: HubFileChangeDto }) {
-  return <UnifiedDiffLines lines={buildDiffLines(change)} />;
+  const lines = buildDiffLines(change).filter((line) => line.kind !== "meta");
+  return <UnifiedDiffLines lines={lines} />;
 }
 
 function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
