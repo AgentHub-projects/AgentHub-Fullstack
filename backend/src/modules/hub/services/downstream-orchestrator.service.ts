@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import type { AgentId, AgentInstanceDto, HubContextSnapshotDto } from "@agenthub/shared";
 import { io } from "socket.io-client";
+import Redis from "ioredis";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
@@ -11,7 +12,7 @@ import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-o
 import { AcpConnection } from "./acp-connection";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
-const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+const IDLE_TIMEOUT_SECONDS = 60 * 60; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
 const RECOVERY_TIMEOUT_MS = 3000;
 const ENABLE_SESSION_LOAD = "DOWNSTREAM_ENABLE_SESSION_LOAD";
@@ -23,6 +24,11 @@ const ENABLE_FILE_APPLY_DIFF = "DOWNSTREAM_ENABLE_FILE_APPLY_DIFF";
 export class DownstreamOrchestratorService implements OnModuleDestroy {
   private readonly logger = new Logger(DownstreamOrchestratorService.name);
   private readonly connections = new Map<string, ConnectionRecord>();
+
+  private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+  });
 
   constructor(
     @Inject(PrismaService)
@@ -36,7 +42,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     @Optional()
     @Inject(DownstreamSandboxRegistryService)
     private readonly sandboxRegistry?: DownstreamSandboxRegistryService,
-  ) {}
+  ) {
+    this.redis.on("error", () => undefined);
+  }
 
   /** 模块销毁时断开所有下游 WebSocket 连接 */
   onModuleDestroy() {
@@ -46,6 +54,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       record.acp.close();
     }
     this.connections.clear();
+    this.redis.disconnect();
   }
 
   /** 启动运行：建立连接→构建上下文快照→发送 session/prompt */
@@ -90,7 +99,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
         this.logger.log(`[startRun] 下游sessionId已更新到sessions表: ${sessionDownstreamId} → ${downstreamSessionId}`);
       }
-      const needsBootstrap = connection.needsBootstrap;
+      const sessionActive = await this.getSessionActive(input.sessionId);
+      const needsBootstrap = connection.needsBootstrap || !sessionActive;
+      this.logger.log(`[startRun] sessionActive=${sessionActive} needsBootstrap=${needsBootstrap}`);
       const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
       const promptInput = await this.buildPromptInput(
         { ...input, context: contextSnapshot },
@@ -404,6 +415,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   /** 更新下游连接最近活跃时间并调度空闲检查 */
   private markDownstreamActivity(record: ConnectionRecord) {
     record.lastActivityAt = Date.now();
+    void this.touchSessionActive(record.sessionId);
     this.scheduleIdleDisconnectCheck(record);
   }
 
@@ -416,37 +428,29 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
-  /** 调度空闲断开检查定时器 */
+  /** 调度空闲断开检查定时器（Redis TTL代替内存计时） */
   private scheduleIdleDisconnectCheck(record: ConnectionRecord) {
     this.clearIdleTimer(record);
-    const idleFor = Date.now() - record.lastActivityAt;
-    const delay = Math.max(0, IDLE_TIMEOUT_MS - idleFor);
-    record.idleTimer = setTimeout(() => {
-      this.closeIfIdle(record);
-    }, delay);
+    record.idleTimer = setTimeout(() => void this.closeIfIdle(record), IDLE_RECHECK_MS);
   }
 
   /** 空闲时断开连接：无活跃 run 且无 WebSocket 订阅者则断开 */
-  private closeIfIdle(record: ConnectionRecord) {
+  private async closeIfIdle(record: ConnectionRecord) {
     if (this.connections.get(record.key) !== record) return;
     if (record.activeRunId) {
       this.clearIdleTimer(record);
-      record.idleTimer = setTimeout(() => {
-        this.closeIfIdle(record);
-      }, IDLE_RECHECK_MS);
+      record.idleTimer = setTimeout(() => void this.closeIfIdle(record), IDLE_RECHECK_MS);
       return;
     }
-    const idleFor = Date.now() - record.lastActivityAt;
-    if (idleFor >= IDLE_TIMEOUT_MS && !this.gateway.hasSessionSubscribers(record.sessionId)) {
+    const active = await this.getSessionActive(record.sessionId);
+    if (!active && !this.gateway.hasSessionSubscribers(record.sessionId)) {
+      this.logger.log(`[空闲断连] sessionId=${record.sessionId} Redis已过期且无前端订阅，断开下游连接`);
       record.acp.close();
       this.connections.delete(record.key);
       return;
     }
     this.clearIdleTimer(record);
-    const delay = idleFor >= IDLE_TIMEOUT_MS ? IDLE_RECHECK_MS : Math.max(0, IDLE_TIMEOUT_MS - idleFor);
-    record.idleTimer = setTimeout(() => {
-      this.closeIfIdle(record);
-    }, delay);
+    record.idleTimer = setTimeout(() => void this.closeIfIdle(record), IDLE_RECHECK_MS);
   }
 
   /** 清除空闲断开定时器 */
@@ -457,7 +461,36 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  // ---- Redis session activity tracking ----
+
+  private sessionActivityKey(sessionId: string) {
+    return `agenthub:session:active:${sessionId}`;
+  }
+
+  /** 刷新 session 活跃时间（发送prompt或收到下游事件时调用） */
+  private async touchSessionActive(sessionId: string) {
+    try {
+      await this.redis.set(this.sessionActivityKey(sessionId), "1", "EX", IDLE_TIMEOUT_SECONDS);
+    } catch {
+      // Redis unavailable is non-fatal
+    }
+  }
+
+  /** 检查 session 是否仍活跃（Redis key存在=活跃） */
+  private async getSessionActive(sessionId: string): Promise<boolean> {
+    try {
+      return (await this.redis.exists(this.sessionActivityKey(sessionId))) === 1;
+    } catch {
+      return true; // Redis down → assume active
+    }
+  }
+
   /**
+
+<｜｜DSML｜｜parameter name="new_string" string="true">    record.acp.close();
+    this.connections.delete(record.key);
+    return;
+  }
    * 处理下游通知（session/update、session/event 及 legacy 事件）。
    * JSON-RPC 响应匹配已由 AcpConnection 内部处理，此处仅处理通知。
    */

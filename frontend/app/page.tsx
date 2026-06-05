@@ -1288,7 +1288,7 @@ export default function WorkbenchPage() {
           })}
         </nav>
       </aside>
-      {shouldCollapseSessionRail && (
+      {shouldCollapseSessionRail && inspectorCollapsed && (
         <button className="railRestoreButton" type="button" title="展开左侧会话栏" onClick={() => setSessionRailCollapsed(false)}>
           <MenuUnfoldOutlined />
           <span>会话</span>
