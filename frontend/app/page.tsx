@@ -225,15 +225,12 @@ export default function WorkbenchPage() {
     : null;
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
-  const projectBound = Boolean(activeSession?.projectId);
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
   const runActionLocked = !sessionWritable || activeRunInProgress;
-  const chatActionLocked = runActionLocked || !projectBound;
+  const chatActionLocked = runActionLocked;
   const sandboxEditorDisabledReason = !activeSessionId
     ? "请选择会话后编辑文件"
-    : !projectBound
-      ? "请先绑定项目后编辑文件"
-      : !sessionWritable
+    : !sessionWritable
         ? "归档会话不能编辑文件"
         : activeRunInProgress
           ? "Agent 运行中，暂不能编辑文件"
@@ -703,10 +700,6 @@ export default function WorkbenchPage() {
   async function handleSend() {
     const text = composer.trim();
     if (!text || !activeSessionId || runActionLocked || sending) return;
-    if (!projectBound) {
-      setNotice("请先绑定项目后再聊天");
-      return;
-    }
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -881,10 +874,6 @@ export default function WorkbenchPage() {
 
   async function handleRegenerate(message: HubMessageDto) {
     if (!activeSessionId || runActionLocked || sending) return;
-    if (!projectBound) {
-      setNotice("请先绑定项目后再重新生成");
-      return;
-    }
     setSending(true);
     try {
       const result = await regenerateSessionMessage(activeSessionId, message.id);
@@ -952,10 +941,6 @@ export default function WorkbenchPage() {
       setNotice("归档会话为只读，不能发起局部修改");
       return;
     }
-    if (!projectBound) {
-      setNotice("请先绑定项目后再继续修改产物");
-      return;
-    }
     const prompt = [
       `请修改产物「${artifact.title}」中的选中内容：`,
       "",
@@ -972,10 +957,6 @@ export default function WorkbenchPage() {
   function handleArtifactDraft(artifact: HubArtifactDto, editedText: string) {
     if (!sessionWritable) {
       setNotice("归档会话为只读，不能继续修改产物");
-      return;
-    }
-    if (!projectBound) {
-      setNotice("请先绑定项目后再继续修改产物");
       return;
     }
     const original = artifact.textContent?.trim();
@@ -1044,10 +1025,6 @@ export default function WorkbenchPage() {
 
   function addReplyTarget(message: HubMessageDto) {
     if (!sessionWritable) return;
-    if (!projectBound) {
-      setNotice("请先绑定项目后再引用消息");
-      return;
-    }
     setReplyTargets((current) => {
       if (current.some((item) => item.message.id === message.id && !item.partId)) return current;
       return [...current, { message, preview: message.contentText.slice(0, 48) || message.role }].slice(0, 5);
@@ -1056,10 +1033,6 @@ export default function WorkbenchPage() {
 
   function addReplyPartTarget(message: HubMessageDto, part: HubMessagePartDto) {
     if (!sessionWritable) return;
-    if (!projectBound) {
-      setNotice("请先绑定项目后再引用消息");
-      return;
-    }
     setReplyTargets((current) => {
       if (current.some((item) => item.message.id === message.id && item.partId === part.id)) return current;
       const preview = part.title ?? part.text?.slice(0, 48) ?? part.type;
@@ -1069,10 +1042,6 @@ export default function WorkbenchPage() {
 
   async function handleAttachmentFiles(files: FileList | null) {
     if (!activeSessionId || runActionLocked || !files?.length || uploadingAttachment) return;
-    if (!projectBound) {
-      setNotice("请先绑定项目后再上传附件");
-      return;
-    }
     const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
@@ -1197,38 +1166,8 @@ export default function WorkbenchPage() {
           </button>
         </div>
 
-        <div className="railHeader">
-          <div>
-            <span>项目</span>
-            <strong>{activeProject?.name ?? "未绑定项目"}</strong>
-          </div>
-        </div>
-
         <div className="statusStack">
-          <section className="projectBinder">
-            <select
-              value={activeSession?.projectId ?? ""}
-              disabled={!activeSessionId || !sessionWritable}
-              onChange={(event) => void handleBindProject(event.target.value || null)}
-            >
-              <option value="">未绑定项目</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="iconButton"
-              type="button"
-              title="新建项目"
-              disabled={!activeSessionId || !sessionWritable}
-              onClick={() => setProjectDialogOpen(true)}
-            >
-              <PlusOutlined />
-            </button>
-          </section>
-          <section className="groupSummary">
+        <section className="groupSummary">
             <button
               className="groupSummaryHeader"
               type="button"
@@ -1314,7 +1253,6 @@ export default function WorkbenchPage() {
                     <time>{formatTime(session.updatedAt)}</time>
                   </span>
                   <span className="sessionItemBottom">
-                    <small>{sessionListPreview(session)}</small>
                     {sessionBusy && <span className="sessionStateBadge">运行</span>}
                   </span>
                 </button>
@@ -1385,23 +1323,6 @@ export default function WorkbenchPage() {
               >
                 <EditOutlined />
               </button>
-            )}
-            {activeSession && (
-              <div className="deployActionWrap">
-                <button
-                  className="ghostButton"
-                  type="button"
-                  title={activeRunInProgress ? "当前 run 运行中，完成后可部署" : deploymentPreflightText(deploymentPreflight)}
-                  disabled={runActionLocked || deployingSessionId === activeSession.id || !deploymentPreflight?.canDeploy}
-                  onClick={() => void handleStartDeployment()}
-                >
-                  {deployingSessionId === activeSession.id ? <LoadingOutlined /> : <RocketOutlined />}
-                  <span>部署到 Vercel</span>
-                </button>
-                {deploymentPreflight && !deploymentPreflight.canDeploy && (
-                  <span className="deployHint">{deploymentPreflightText(deploymentPreflight)}</span>
-                )}
-              </div>
             )}
             {latestRun && <RunBadge run={latestRun} />}
             {latestRun && isRunning(latestRun.status) && (
@@ -1556,8 +1477,6 @@ export default function WorkbenchPage() {
                   ? sessionReadOnly ? "归档会话为只读" : "请选择会话"
                   : activeRunInProgress
                     ? "当前 run 运行中，完成后可继续发送"
-                  : !projectBound
-                    ? "请先绑定项目后再开始聊天"
                   : mode === "direct"
                     ? "输入要交给这个 Agent 的任务"
                     : "输入任务，使用 @frontend-agent 指定群聊成员"
@@ -1571,8 +1490,6 @@ export default function WorkbenchPage() {
                 ? "归档会话只读"
                 : !activeSession
                   ? "请选择会话"
-                : !projectBound
-                  ? "请先绑定项目"
                 : mode === "direct"
                 ? directAgent
                   ? `单聊：${directAgent.name}`
@@ -1745,7 +1662,7 @@ export default function WorkbenchPage() {
                     required
                   />
                 </label>
-                <p className="dialogHint">会话必须绑定项目后才能发送消息、上传附件或引用关键内容。</p>
+                <p className="dialogHint">创建单聊或群聊会话，选择 Agent 开始对话。</p>
               </div>
               <footer>
                 <button className="ghostButton" type="button" disabled={creatingProject} onClick={closeProjectDialog}>

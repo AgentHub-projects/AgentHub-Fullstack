@@ -4,7 +4,7 @@ import { HubEventService } from "../src/modules/hub/services/event.service";
 const now = new Date("2026-06-02T09:00:00.000Z");
 
 describe("HubEventService artifact message parts", () => {
-  it("buffers message deltas without persisting or broadcasting each chunk", async () => {
+  it("buffers message deltas without persisting them and broadcasts each chunk", async () => {
     const { service, prisma, gateway } = createService();
     prisma.message.create.mockImplementation(async ({ data }: any) => messageRow({ ...data, id: "message-1" }));
 
@@ -37,7 +37,23 @@ describe("HubEventService artifact message parts", () => {
     expect(prisma.agentEvent.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ eventType: "message.completed", seq: 3n }),
     }));
-    expect(gateway.emitEvent).toHaveBeenCalledTimes(1);
+    expect(gateway.emitEvent).toHaveBeenCalledTimes(3);
+    expect(gateway.emitEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      id: "transient:run-1:1",
+      eventType: "message.delta",
+      seq: 1,
+      payload: { text: "hello " },
+    }));
+    expect(gateway.emitEvent).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      id: "transient:run-1:2",
+      eventType: "message.delta",
+      seq: 2,
+      payload: { text: "world" },
+    }));
+    expect(gateway.emitEvent).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      eventType: "message.completed",
+      seq: 3,
+    }));
     expect(prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ contentText: "hello world" }),
     }));
