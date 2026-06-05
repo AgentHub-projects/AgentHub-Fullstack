@@ -2454,8 +2454,8 @@ export default function WorkbenchPage() {
       )}
 
       {archiveConfirmSession && (
-        <div className="dialogOverlay" onClick={() => setArchiveConfirmSession(null)}>
-          <section className="dialogContainer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="dialogLayer" role="presentation" onMouseDown={() => setArchiveConfirmSession(null)}>
+          <section className="agentDialog" role="dialog" aria-modal="true">
             <header>
               <strong>归档会话</strong>
             </header>

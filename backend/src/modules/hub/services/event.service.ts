@@ -76,14 +76,6 @@ export class HubEventService {
     }
     const seq = BigInt(input.seq ?? expectedSeq);
 
-    if (input.eventType === "message.delta") {
-      const dto = this.transientEvent(input, Number(seq), speaker?.id ?? null, speaker?.name ?? null);
-      await this.applySideEffects(dto);
-      this.markSeq(input.runId, Number(seq));
-      this.gateway.emitEvent(dto);
-      return dto;
-    }
-
     if (input.eventType === "file.change") {
       assertValidFileChangePayload(input.payload ?? {});
     }
