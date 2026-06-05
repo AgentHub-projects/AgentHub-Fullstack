@@ -9,7 +9,7 @@ export interface DownstreamSandboxMapping {
   agenthubSessionId: string;
   downstreamSessionId: string;
   sandboxBaseUrl: string;
-  workspaceId: string;
+  workspaceId?: string | null;
   agentBranches: Record<string, string>;
   updatedAt: string;
 }
@@ -35,10 +35,10 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     const sandbox = asRecord(result.sandbox);
     const sandboxBaseUrl = stringValue(sandbox.baseUrl)?.replace(/\/+$/, "");
     const workspaceId = stringValue(sandbox.workspaceId);
-    if (!sandboxBaseUrl || !workspaceId) {
+    if (!sandboxBaseUrl) {
       await this.redis.del(mappingKey(agenthubSessionId));
       this.logger.warn(
-        `[sandbox.mapping.delete] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} reason=missing_sandbox sandboxBaseUrl=${sandboxBaseUrl ?? "missing"} workspaceId=${workspaceId ?? "missing"}`,
+        `[sandbox.mapping.delete] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} reason=missing_sandbox sandboxBaseUrl=missing workspaceId=${workspaceId ?? "missing"}`,
       );
       return;
     }
@@ -47,13 +47,13 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
       agenthubSessionId,
       downstreamSessionId,
       sandboxBaseUrl,
-      workspaceId,
+      workspaceId: workspaceId ?? null,
       agentBranches: stringRecord(sandbox.agentBranches),
       updatedAt: new Date().toISOString(),
     };
     await this.redis.set(mappingKey(agenthubSessionId), JSON.stringify(mapping), "EX", SANDBOX_MAPPING_TTL_SECONDS);
     this.logger.log(
-      `[sandbox.mapping.save] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} sandboxBaseUrl=${sandboxBaseUrl} workspaceId=${workspaceId} branchCount=${Object.keys(mapping.agentBranches).length}`,
+      `[sandbox.mapping.save] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} sandboxBaseUrl=${sandboxBaseUrl} workspaceId=${workspaceId ?? "none"} branchCount=${Object.keys(mapping.agentBranches).length}`,
     );
   }
 
@@ -62,12 +62,12 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     if (!raw) return null;
     try {
       const mapping = JSON.parse(raw) as DownstreamSandboxMapping;
-      if (!mapping.sandboxBaseUrl || !mapping.workspaceId || !mapping.downstreamSessionId) return null;
+      if (!mapping.sandboxBaseUrl || !mapping.downstreamSessionId) return null;
       return {
         agenthubSessionId: mapping.agenthubSessionId,
         downstreamSessionId: mapping.downstreamSessionId,
         sandboxBaseUrl: mapping.sandboxBaseUrl.replace(/\/+$/, ""),
-        workspaceId: mapping.workspaceId,
+        workspaceId: mapping.workspaceId ?? null,
         agentBranches: stringRecord(mapping.agentBranches),
         updatedAt: mapping.updatedAt,
       };

@@ -79,6 +79,22 @@ describe("DownstreamSandboxRegistryService", () => {
     expect(latestRedis().del).toHaveBeenCalledWith("agenthub:downstream-sandbox:session-1");
   });
 
+  it("keeps filesystem mapping when sandbox workspace id is omitted", async () => {
+    const service = new DownstreamSandboxRegistryService(prismaMock() as any);
+    await service.saveFromSessionResult("session-1", "downstream-session-1", {
+      sandbox: {
+        baseUrl: "http://sandbox.local",
+      },
+    });
+
+    await expect(service.getFilesystemConnection("session-1")).resolves.toEqual({
+      sandboxBaseUrl: "http://sandbox.local",
+      downstreamSessionId: "downstream-session-1",
+      workspaceId: null,
+      branchOptions: [],
+    });
+  });
+
   it("returns filesystem connection info with downstream session id and branch options", async () => {
     const service = new DownstreamSandboxRegistryService(prismaMock() as any);
     await service.saveFromSessionResult("session-1", "downstream-session-1", {
