@@ -4113,44 +4113,18 @@ div.agentChoice {
 
 /* Codex-like desktop workbench refresh */
 .agenthubShell {
-  grid-template-columns: 320px minmax(0, 1fr) 390px;
+  grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
   position: relative;
   background: #ffffff;
 }
 
-.agenthubShell.diffActive {
-  grid-template-columns: 320px minmax(0, 1fr) clamp(520px, 42vw, 760px);
-}
-
-.agenthubShell.filesActive {
-  grid-template-columns: 320px minmax(0, 1fr) clamp(600px, 46vw, 820px);
-}
-
-.agenthubShell.filesActive {
-  grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
-}
-
-.agenthubShell.filesActive.railCollapsed {
-  grid-template-columns: 0 minmax(0, 1fr) clamp(620px, 46vw, 820px);
-}
-
-.agenthubShell.filesActive.fileEditorOpen {
-  grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
-}
-
-.agenthubShell.filesActive.fileEditorOpen.railCollapsed {
-  grid-template-columns: 0 minmax(0, 1fr) clamp(620px, 46vw, 820px);
-}
-
-.agenthubShell.inspectorCollapsed,
-.agenthubShell.diffActive.inspectorCollapsed,
-.agenthubShell.artifactsActive.inspectorCollapsed,
-.agenthubShell.filesActive.inspectorCollapsed {
-  grid-template-columns: 320px minmax(0, 1fr) 56px;
-}
-
+/* 右侧面板打开时统一宽度 */
 .agenthubShell.railCollapsed {
-  grid-template-columns: 0 minmax(0, 1fr) 360px;
+  grid-template-columns: 0 minmax(0, 1fr) clamp(640px, 50vw, 900px);
+}
+
+.agenthubShell.inspectorCollapsed {
+  grid-template-columns: 320px minmax(0, 1fr) 56px;
 }
 
 .agenthubShell.railCollapsed.inspectorCollapsed {
