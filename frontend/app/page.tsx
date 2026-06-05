@@ -6,6 +6,7 @@ import type {
   AgentTemplateDto,
   CreateSessionAgentRequest,
   DeploymentPreflightResponse,
+  FilesystemChangedEventDto,
   HubArtifactDto,
   HubFileChangeDto,
   HubMessageDto,
@@ -43,6 +44,7 @@ import {
   archiveSession,
   bindSessionProject,
   cancelRun,
+  connectSandboxFilesystemSocket,
   connectHubSocket,
   createSession,
   createProject,
@@ -50,6 +52,7 @@ import {
   deleteAgent,
   getAuthState,
   getDeploymentPreflight,
+  getSandboxFilesystemConnection,
   getSessionDiffContext,
   getSessionDetail,
   listAgents,
@@ -65,6 +68,8 @@ import {
   updateSession,
   updateAgent,
   upsertById,
+  type SandboxFilesystemClient,
+  type SocketState,
 } from "../lib/agenthub-api";
 import { ArtifactPanel, ArtifactViewerLayer, DiffPanel, FilePanel } from "./workbench/inspector";
 import { MessagePartViewerLayer } from "./workbench/rich-text";
@@ -101,6 +106,19 @@ import {
 } from "../lib/workbench/session-tabs";
 import { buildConversationItems } from "../lib/workbench/timeline";
 import type { InspectorTab, MentionMatch } from "../lib/workbench/types";
+import {
+  SANDBOX_BASELINE_DEPTH,
+  SANDBOX_BASELINE_MAX_FILES,
+  type SandboxDiffSessionState,
+  type SandboxFileSnapshot,
+  makeFilesystemDraftChange,
+  makeSandboxObservedChange,
+  removeObservedChange,
+  shouldTrackSandboxEntry,
+  shouldTrackSandboxPath,
+  snapshotFromReadFile,
+  upsertObservedChange,
+} from "../lib/workbench/sandbox-diff";
 
 const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
   messages: [],
@@ -160,7 +178,10 @@ export default function WorkbenchPage() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [sessionRailCollapsed, setSessionRailCollapsed] = useState(false);
   const [openedFilePath, setOpenedFilePath] = useState<string | null>(null);
-  const [filesystemFileContents, setFilesystemFileContents] = useState<Record<string, { content: string; language?: string }>>({});
+  const [fileOpenRequest, setFileOpenRequest] = useState<{ path: string; nonce: number } | null>(null);
+  const [sandboxDiffStates, setSandboxDiffStates] = useState<Record<string, SandboxDiffSessionState>>({});
+  const [sandboxObservedChanges, setSandboxObservedChanges] = useState<Record<string, HubFileChangeDto[]>>({});
+  const [filesystemDraftChanges, setFilesystemDraftChanges] = useState<Record<string, HubFileChangeDto[]>>({});
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -207,6 +228,10 @@ export default function WorkbenchPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const sandboxDiffClientRef = useRef<SandboxFilesystemClient | null>(null);
+  const sandboxDiffSessionRef = useRef<string | null>(null);
+  const sandboxBaselinesRef = useRef<Record<string, Map<string, SandboxFileSnapshot>>>({});
+  const latestRunIdRef = useRef<string | null>(null);
 
   const activeSessionId = sessionTabs.activeId;
   const openSessionIds = sessionTabs.openIds;
@@ -229,6 +254,11 @@ export default function WorkbenchPage() {
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
   const runActionLocked = !sessionWritable || activeRunInProgress;
   const chatActionLocked = runActionLocked;
+  const sandboxDiffDisabledReason = !activeSessionId
+    ? "请选择会话后查看沙箱 Diff"
+    : !sessionWritable
+      ? "归档会话不能监听沙箱 Diff"
+      : "";
   const sandboxEditorDisabledReason = !activeSessionId
     ? "请选择会话后编辑文件"
     : !sessionWritable
@@ -270,6 +300,9 @@ export default function WorkbenchPage() {
   );
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
+  const activeSandboxDiffState = activeSessionId ? sandboxDiffStates[activeSessionId] : undefined;
+  const activeSandboxChanges = activeSessionId ? (sandboxObservedChanges[activeSessionId] ?? []) : [];
+  const activeFilesystemDraftChanges = activeSessionId ? (filesystemDraftChanges[activeSessionId] ?? []) : [];
   const pinnedMessages = useMemo(
     () =>
       [...(detail?.messages ?? [])]
@@ -319,6 +352,24 @@ export default function WorkbenchPage() {
       delete next[sessionId];
       return next;
     });
+    setSandboxDiffStates((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    setSandboxObservedChanges((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    setFilesystemDraftChanges((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    const nextBaselines = { ...sandboxBaselinesRef.current };
+    delete nextBaselines[sessionId];
+    sandboxBaselinesRef.current = nextBaselines;
   }
 
   function setDetail(value: SetStateAction<SessionDetailDto | null>) {
@@ -349,6 +400,115 @@ export default function WorkbenchPage() {
 
   function setInspectorTab(value: SetStateAction<InspectorTab>) {
     updateActiveWorkspace((current) => ({ ...current, inspectorTab: resolveState(value, current.inspectorTab) }));
+  }
+
+  function setSandboxDiffState(sessionId: string, patch: Partial<SandboxDiffSessionState>) {
+    setSandboxDiffStates((current) => {
+      const existing = current[sessionId] ?? ({ status: "idle", fileCount: 0 } satisfies SandboxDiffSessionState);
+      return {
+        ...current,
+        [sessionId]: {
+          ...existing,
+          ...patch,
+        },
+      };
+    });
+  }
+
+  function setSandboxSessionChanges(
+    sessionId: string,
+    updater: (changes: HubFileChangeDto[]) => HubFileChangeDto[],
+  ) {
+    setSandboxObservedChanges((current) => ({
+      ...current,
+      [sessionId]: updater(current[sessionId] ?? []),
+    }));
+  }
+
+  function setFilesystemDraftSessionChanges(
+    sessionId: string,
+    updater: (changes: HubFileChangeDto[]) => HubFileChangeDto[],
+  ) {
+    setFilesystemDraftChanges((current) => ({
+      ...current,
+      [sessionId]: updater(current[sessionId] ?? []),
+    }));
+  }
+
+  async function captureSandboxBaseline(sessionId: string, client: SandboxFilesystemClient) {
+    setSandboxDiffState(sessionId, { status: "baselining", error: undefined });
+    const listResult = await client.list(".", SANDBOX_BASELINE_DEPTH);
+    if (!listResult.ok) {
+      setSandboxDiffState(sessionId, { status: "error", error: listResult.error, updatedAt: new Date().toISOString() });
+      return;
+    }
+
+    const entries = listResult.data.entries
+      .filter(shouldTrackSandboxEntry)
+      .slice(0, SANDBOX_BASELINE_MAX_FILES);
+    const baseline = new Map<string, SandboxFileSnapshot>();
+    for (const entry of entries) {
+      const fileResult = await client.read(entry.path, 0, 0);
+      if (!fileResult.ok || !shouldTrackSandboxPath(fileResult.data.path, fileResult.data.size)) continue;
+      const snapshot = snapshotFromReadFile(fileResult.data);
+      baseline.set(snapshot.path, snapshot);
+    }
+
+    if (sandboxDiffSessionRef.current !== sessionId) return;
+    sandboxBaselinesRef.current = { ...sandboxBaselinesRef.current, [sessionId]: baseline };
+    setSandboxSessionChanges(sessionId, () => []);
+    setSandboxDiffState(sessionId, {
+      status: "ready",
+      fileCount: baseline.size,
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function ensureSandboxBaseline(sessionId: string) {
+    const client = sandboxDiffClientRef.current;
+    if (!client || sandboxDiffSessionRef.current !== sessionId) return;
+    const status = sandboxDiffStates[sessionId]?.status;
+    if (status === "ready" || status === "baselining") return;
+    await captureSandboxBaseline(sessionId, client);
+  }
+
+  async function handleSandboxFileChanged(
+    sessionId: string,
+    client: SandboxFilesystemClient,
+    event: FilesystemChangedEventDto,
+  ) {
+    const path = event.path.replace(/\\/g, "/");
+    const baseline = sandboxBaselinesRef.current[sessionId]?.get(path) ?? null;
+    let current: SandboxFileSnapshot | null = null;
+
+    if (event.changeType !== "remove") {
+      if (!shouldTrackSandboxPath(path)) return;
+      const result = await client.read(path, 0, 0);
+      if (!result.ok) {
+        setSandboxDiffState(sessionId, { status: "error", error: result.error, updatedAt: new Date().toISOString() });
+        return;
+      }
+      if (!shouldTrackSandboxPath(result.data.path, result.data.size)) return;
+      current = snapshotFromReadFile(result.data);
+    }
+
+    const change = makeSandboxObservedChange({
+      sessionId,
+      runId: latestRunIdRef.current,
+      event,
+      baseline,
+      current,
+    });
+
+    if (!change) {
+      setSandboxSessionChanges(sessionId, (changes) => removeObservedChange(changes, path));
+      return;
+    }
+
+    setSandboxSessionChanges(sessionId, (changes) => upsertObservedChange(changes, change));
+    setSandboxDiffState(sessionId, { status: "ready", updatedAt: new Date().toISOString() });
+    if (sessionId === activeSessionId) setInspectorTab("diff");
   }
 
   useEffect(() => {
@@ -445,6 +605,59 @@ export default function WorkbenchPage() {
     setSessionRailCollapsed(false);
     setOpenedFilePath(null);
   }, [inspectorTab, inspectorCollapsed, sandboxEditorDisabledReason]);
+
+  useEffect(() => {
+    latestRunIdRef.current = latestRun?.id ?? null;
+  }, [latestRun?.id]);
+
+  useEffect(() => {
+    sandboxDiffClientRef.current?.disconnect();
+    sandboxDiffClientRef.current = null;
+    sandboxDiffSessionRef.current = null;
+    if (!authenticated || !activeSessionId || sandboxDiffDisabledReason) return;
+
+    const sessionId = activeSessionId;
+    let cancelled = false;
+    setSandboxDiffState(sessionId, { status: "connecting", error: undefined });
+
+    void getSandboxFilesystemConnection(sessionId).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setSandboxDiffState(sessionId, {
+          status: "unavailable",
+          error: result.error,
+          updatedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      let client: SandboxFilesystemClient;
+      client = connectSandboxFilesystemSocket(result.data, {
+        onState: (state: SocketState) => {
+          if (cancelled) return;
+          if (state === "connecting") setSandboxDiffState(sessionId, { status: "connecting" });
+          if (state === "unavailable" || state === "disconnected") {
+            setSandboxDiffState(sessionId, { status: "unavailable", updatedAt: new Date().toISOString() });
+          }
+        },
+        onChanged: (event) => {
+          void handleSandboxFileChanged(sessionId, client, event);
+        },
+      });
+      sandboxDiffClientRef.current = client;
+      sandboxDiffSessionRef.current = sessionId;
+      void captureSandboxBaseline(sessionId, client);
+    });
+
+    return () => {
+      cancelled = true;
+      if (sandboxDiffSessionRef.current === sessionId) {
+        sandboxDiffClientRef.current?.disconnect();
+        sandboxDiffClientRef.current = null;
+        sandboxDiffSessionRef.current = null;
+      }
+    };
+  }, [authenticated, activeSessionId, sandboxDiffDisabledReason]);
 
   useEffect(() => {
     if (!authenticated || !activeSessionId) return;
@@ -705,6 +918,7 @@ export default function WorkbenchPage() {
     setComposer("");
     closeMentionMenu();
     try {
+      await ensureSandboxBaseline(activeSessionId);
       const targetAgentIds =
         mode === "direct" ? [] : parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
       const result = await sendSessionMessage(activeSessionId, {
@@ -1024,10 +1238,86 @@ export default function WorkbenchPage() {
     setSessionRailCollapsed(true);
   }
 
-  function handleFilesystemFileLoaded(path: string, content: string) {
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
-    const langMap: Record<string, string> = { ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", py: "python", css: "css", html: "html", json: "json", md: "markdown" };
-    setFilesystemFileContents((prev) => ({ ...prev, [path]: { content, language: langMap[ext] ?? ext } }));
+  function handleFilesystemFileLoaded(path: string) {
+    if (!activeSessionId) return;
+    setFilesystemDraftSessionChanges(activeSessionId, (changes) => removeObservedChange(changes, path));
+  }
+
+  function handleFilesystemDraftChanged(path: string, beforeContent: string, afterContent: string, language?: string | null) {
+    if (!activeSessionId) return;
+    const change = makeFilesystemDraftChange({
+      sessionId: activeSessionId,
+      path,
+      beforeContent,
+      afterContent,
+      language,
+    });
+    setFilesystemDraftSessionChanges(activeSessionId, (changes) =>
+      change ? upsertObservedChange(changes, change) : removeObservedChange(changes, path),
+    );
+  }
+
+  function handleOpenDiffFile(path: string) {
+    setFileOpenRequest({ path, nonce: Date.now() });
+    setOpenedFilePath(path);
+    setInspectorCollapsed(false);
+    setInspectorTab("files");
+  }
+
+  async function handleRefreshSandboxDiffFile(change: HubFileChangeDto) {
+    if (!activeSessionId || !sandboxDiffClientRef.current || sandboxDiffSessionRef.current !== activeSessionId) {
+      setNotice("沙箱 Diff 监听尚未连接");
+      return;
+    }
+    const result = await sandboxDiffClientRef.current.read(change.path, 0, 0);
+    if (!result.ok) {
+      setNotice(`刷新文件失败：${result.error}`);
+      return;
+    }
+    const current = snapshotFromReadFile(result.data);
+    const baseline = sandboxBaselinesRef.current[activeSessionId]?.get(current.path) ?? null;
+    const nextChange = makeSandboxObservedChange({
+      sessionId: activeSessionId,
+      runId: latestRunIdRef.current,
+      event: {
+        path: current.path,
+        changeType: baseline ? "write" : "create",
+        version: current.version,
+        mtime: current.mtime,
+        actor: "ui",
+      },
+      baseline,
+      current,
+    });
+    setSandboxSessionChanges(activeSessionId, (changes) =>
+      nextChange ? upsertObservedChange(changes, nextChange) : removeObservedChange(changes, current.path),
+    );
+    setNotice(nextChange ? `已刷新 ${change.path}` : `已刷新 ${change.path}，内容与基线一致`);
+  }
+
+  function handleSetSandboxBaseline(change: HubFileChangeDto) {
+    if (!activeSessionId) return;
+    const path = change.path.replace(/\\/g, "/");
+    const baselines = new Map(sandboxBaselinesRef.current[activeSessionId] ?? []);
+    if (change.afterContent != null) {
+      baselines.set(path, {
+        path,
+        content: change.afterContent,
+        version: typeof change.metadata.currentVersion === "string" ? change.metadata.currentVersion : change.afterSha256,
+        size: change.afterContent.length,
+        language: change.language ?? null,
+      });
+    } else {
+      baselines.delete(path);
+    }
+    sandboxBaselinesRef.current = { ...sandboxBaselinesRef.current, [activeSessionId]: baselines };
+    setSandboxSessionChanges(activeSessionId, (changes) => removeObservedChange(changes, path));
+    setSandboxDiffState(activeSessionId, {
+      status: "ready",
+      fileCount: baselines.size,
+      updatedAt: new Date().toISOString(),
+    });
+    setNotice(`已将 ${change.path} 设为新基线`);
   }
 
   function addReplyTarget(message: HubMessageDto) {
@@ -1592,34 +1882,29 @@ export default function WorkbenchPage() {
               <FilePanel
                 sessionId={activeSessionId}
                 disabledReason={sandboxEditorDisabledReason}
+                openRequest={fileOpenRequest}
                 onSaved={() => setInspectorTab("diff")}
                 onNotice={setNotice}
                 onFileOpened={handleFileOpened}
                 onFileContentLoaded={handleFilesystemFileLoaded}
+                onDraftChanged={handleFilesystemDraftChanged}
               />
             )}
             {inspectorTab === "diff" && (
               <DiffPanel
                 changes={[
                   ...(detail?.fileChanges ?? []),
-                  ...Object.entries(filesystemFileContents).map(([path, file]) => ({
-                    id: `fs-${path}`,
-                    sessionId: activeSessionId ?? "",
-                    runId: "",
-                    path,
-                    changeType: "modified" as const,
-                    language: file.language ?? null,
-                    afterContent: file.content,
-                    beforeTruncated: false,
-                    afterTruncated: false,
-                    stats: {} as Record<string, unknown>,
-                    metadata: {} as Record<string, unknown>,
-                    createdAt: new Date().toISOString(),
-                  })),
+                  ...activeSandboxChanges,
+                  ...activeFilesystemDraftChanges,
                 ]}
                 diffContext={activeSessionId ? diffContexts[activeSessionId] : undefined}
+                sandboxState={activeSandboxDiffState}
+                sandboxDisabledReason={sandboxDiffDisabledReason}
                 applyingId={applyingFileChangeId}
                 onApply={handleApplyFileChange}
+                onOpenFile={handleOpenDiffFile}
+                onRefreshSandboxFile={handleRefreshSandboxDiffFile}
+                onSetSandboxBaseline={handleSetSandboxBaseline}
               />
             )}
             {inspectorTab === "artifacts" && (

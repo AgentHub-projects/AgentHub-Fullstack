@@ -29,6 +29,9 @@ export function buildFileTreeRows(changes: HubFileChangeDto[]): FileTreeRow[] {
 
 export function buildDiffLines(change: HubFileChangeDto): DiffLine[] {
   if (change.patch?.trim()) return parseUnifiedPatch(change.patch);
+  if (change.metadata?.baselineAvailable === false) {
+    return snapshotLines(change.afterContent ?? change.beforeContent ?? "");
+  }
   return diffText(change.beforeContent ?? "", change.afterContent ?? "");
 }
 
@@ -68,6 +71,7 @@ export function parseUnifiedPatch(patch: string): DiffLine[] {
 }
 
 export function countChangeLines(change: HubFileChangeDto, kind: "add" | "remove") {
+  if (change.metadata?.baselineAvailable === false) return 0;
   const value = change.stats[kind === "add" ? "additions" : "deletions"];
   if (typeof value === "number") return value;
   return buildDiffLines(change).filter((line) => line.kind === kind).length;
@@ -124,4 +128,10 @@ function diffText(before: string, after: string): DiffLine[] {
 function splitLinesForDiff(text: string) {
   if (!text) return [];
   return text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+}
+
+function snapshotLines(text: string): DiffLine[] {
+  const lines = splitLinesForDiff(text);
+  if (lines.length === 0) return [{ kind: "context", text: "缺少基线，无法生成准确 diff" }];
+  return lines.map((line, index) => ({ kind: "context", newLine: index + 1, text: line }));
 }

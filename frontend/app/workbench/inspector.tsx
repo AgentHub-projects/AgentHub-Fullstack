@@ -47,6 +47,12 @@ import {
   parseUnifiedPatch,
 } from "../../lib/workbench/diff";
 import { buildTextEdits, sortFilesystemEntries } from "../../lib/workbench/filesystem";
+import {
+  type SandboxDiffSessionState,
+  isFilesystemDraftChange,
+  isSandboxObservedChange,
+  sandboxDiffLabel,
+} from "../../lib/workbench/sandbox-diff";
 import type { DiffLine } from "../../lib/workbench/types";
 import {
   artifactLabel,
@@ -59,13 +65,23 @@ import { RichText } from "./rich-text";
 export function DiffPanel({
   changes,
   diffContext,
+  sandboxState,
+  sandboxDisabledReason,
   applyingId,
   onApply,
+  onOpenFile,
+  onRefreshSandboxFile,
+  onSetSandboxBaseline,
 }: {
   changes: HubFileChangeDto[];
   diffContext?: SessionDiffContextDto | null;
+  sandboxState?: SandboxDiffSessionState;
+  sandboxDisabledReason?: string;
   applyingId?: string | null;
   onApply?: (change: HubFileChangeDto) => void;
+  onOpenFile?: (path: string) => void;
+  onRefreshSandboxFile?: (change: HubFileChangeDto) => void;
+  onSetSandboxBaseline?: (change: HubFileChangeDto) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(() => new Set());
@@ -88,8 +104,11 @@ export function DiffPanel({
     });
   }, [changes, selectedId]);
 
-  if (changes.length === 0) return <PanelEmpty icon={<BranchesOutlined />} text="暂无文件变更" />;
+  if (changes.length === 0) {
+    return <PanelEmpty icon={<BranchesOutlined />} text={diffEmptyText(sandboxState, sandboxDisabledReason)} />;
+  }
   const activeChange = changes.find((change) => change.id === selectedId) ?? changes[0];
+  const localBaselineActive = changes.some((change) => isSandboxObservedChange(change) || isFilesystemDraftChange(change));
 
   function toggleFile(change: HubFileChangeDto) {
     setSelectedId(change.id);
@@ -112,7 +131,7 @@ export function DiffPanel({
   return (
     <div className="panelScroll diffPanelLayout">
       <section className="diffReviewOverview" aria-label="文件变更总览">
-        <DiffBranchContext context={diffContext} />
+        <DiffBranchContext context={diffContext} localBaselineActive={localBaselineActive} sandboxState={sandboxState} />
         <div className="diffReviewFiles">
           {changes.map((change) => {
             const expanded = expandedFileIds.has(change.id);
@@ -145,6 +164,9 @@ export function DiffPanel({
                       applyStatus={applyStatus}
                       applying={applyingId === change.id}
                       onApply={onApply}
+                      onOpenFile={onOpenFile}
+                      onRefreshSandboxFile={onRefreshSandboxFile}
+                      onSetSandboxBaseline={onSetSandboxBaseline}
                     />
                   </div>
                 </div>
@@ -158,9 +180,19 @@ export function DiffPanel({
   );
 }
 
-function DiffBranchContext({ context }: { context?: SessionDiffContextDto | null }) {
-  const baseRef = context?.baseRef ?? "main";
-  const targetRef = context?.targetRef ?? "working tree";
+function DiffBranchContext({
+  context,
+  localBaselineActive,
+  sandboxState,
+}: {
+  context?: SessionDiffContextDto | null;
+  localBaselineActive?: boolean;
+  sandboxState?: SandboxDiffSessionState;
+}) {
+  const baseRef = localBaselineActive ? "浏览器观测基线" : context?.baseRef ?? "main";
+  const targetRef = localBaselineActive ? "当前沙箱文件" : context?.targetRef ?? "working tree";
+  const showSandboxContext = Boolean(localBaselineActive && sandboxState);
+  const showProjectContext = Boolean(!showSandboxContext && context?.projectName);
   return (
     <details className="diffBranchContext">
       <summary>
@@ -171,8 +203,24 @@ function DiffBranchContext({ context }: { context?: SessionDiffContextDto | null
       </summary>
       <div className="diffBranchPopover">
         <strong>Diff 审查范围</strong>
-        <p>{context?.explanation ?? "右侧 Diff 展示当前会话产生的文件变更；这里用于说明审查范围，不会切换 Git 分支。"}</p>
-        {context?.projectName && (
+        <p>
+          {localBaselineActive
+            ? "沙箱 Diff 对比的是浏览器建立的轻量文件基线与当前沙箱文件；缺少基线的文件只展示当前快照，不伪装成完整 Git diff。"
+            : context?.explanation ?? "右侧 Diff 展示当前会话产生的文件变更；这里用于说明审查范围，不会切换 Git 分支。"}
+        </p>
+        {showSandboxContext && sandboxState && (
+          <dl>
+            <div>
+              <dt>基线文件</dt>
+              <dd>{sandboxState.fileCount}</dd>
+            </div>
+            <div>
+              <dt>状态</dt>
+              <dd>{sandboxStateLabel(sandboxState)}</dd>
+            </div>
+          </dl>
+        )}
+        {showProjectContext && context && (
           <dl>
             <div>
               <dt>项目</dt>
@@ -194,7 +242,7 @@ function DiffBranchContext({ context }: { context?: SessionDiffContextDto | null
             )}
           </dl>
         )}
-        <small>{context?.canChangeBase ? "可以切换审查基准。" : "当前只读说明审查范围，不执行分支切换。"}</small>
+        <small>{localBaselineActive || !context?.canChangeBase ? "当前只读说明审查范围，不执行分支切换。" : "可以切换审查基准。"}</small>
       </div>
     </details>
   );
@@ -205,17 +253,27 @@ function DiffFileStatus({
   applyStatus,
   applying,
   onApply,
+  onOpenFile,
+  onRefreshSandboxFile,
+  onSetSandboxBaseline,
 }: {
   change: HubFileChangeDto;
   applyStatus: ReturnType<typeof fileChangeApplyStatus>;
   applying: boolean;
   onApply?: (change: HubFileChangeDto) => void;
+  onOpenFile?: (path: string) => void;
+  onRefreshSandboxFile?: (change: HubFileChangeDto) => void;
+  onSetSandboxBaseline?: (change: HubFileChangeDto) => void;
 }) {
   const applyMessage = fileChangeApplyMessage(change);
   const applyLocked = applyStatus === "queued" || applyStatus === "applied";
-  const showApplyButton = onApply && !applyLocked;
+  const sandboxChange = isSandboxObservedChange(change);
+  const draftChange = isFilesystemDraftChange(change);
+  const localChange = sandboxChange || draftChange;
+  const showApplyButton = onApply && !applyLocked && !localChange;
   return (
     <div className="diffReviewFileMeta">
+      <span className={`diffSource ${localChange ? "local" : "backend"}`}>{sandboxDiffLabel(change)}</span>
       <span className={`changeType ${change.changeType}`}>{fileChangeTypeLabel(change.changeType)}</span>
       {applyStatus && <span className={`applyStatus ${applyStatus}`}>{fileChangeApplyLabel(applyStatus)}</span>}
       {showApplyButton && (
@@ -227,6 +285,24 @@ function DiffFileStatus({
         >
           <CheckCircleOutlined />
           <span>{applying ? "应用中" : "应用"}</span>
+        </button>
+      )}
+      {onOpenFile && localChange && (
+        <button className="diffApplyInlineButton" type="button" onClick={() => onOpenFile(change.path)}>
+          <FileOutlined />
+          <span>打开文件</span>
+        </button>
+      )}
+      {sandboxChange && onRefreshSandboxFile && (
+        <button className="diffApplyInlineButton" type="button" onClick={() => onRefreshSandboxFile(change)}>
+          <ReloadOutlined />
+          <span>刷新</span>
+        </button>
+      )}
+      {sandboxChange && onSetSandboxBaseline && (
+        <button className="diffApplyInlineButton" type="button" onClick={() => onSetSandboxBaseline(change)}>
+          <CheckCircleOutlined />
+          <span>设为基线</span>
         </button>
       )}
       {change.afterTruncated || change.beforeTruncated ? <span className="diffMetaNote">已截断</span> : null}
@@ -242,6 +318,26 @@ function fileChangeTypeLabel(type: HubFileChangeDto["changeType"]) {
   return "修改";
 }
 
+function diffEmptyText(state?: SandboxDiffSessionState, disabledReason?: string) {
+  if (disabledReason) return disabledReason;
+  if (!state) return "沙箱 Diff 监听尚未启动";
+  if (state.status === "connecting") return "正在连接沙箱 Diff 监听";
+  if (state.status === "baselining") return "正在建立浏览器观测基线";
+  if (state.status === "ready") return "当前基线后暂无文件变更";
+  if (state.status === "unavailable") return state.error ? `沙箱 Diff 不可用：${state.error}` : "沙箱 Diff 不可用";
+  if (state.status === "error") return state.error ? `沙箱 Diff 读取失败：${state.error}` : "沙箱 Diff 读取失败";
+  return "暂无文件变更";
+}
+
+function sandboxStateLabel(state: SandboxDiffSessionState) {
+  if (state.status === "ready") return "已建立";
+  if (state.status === "baselining") return "建立中";
+  if (state.status === "connecting") return "连接中";
+  if (state.status === "unavailable") return "不可用";
+  if (state.status === "error") return "读取失败";
+  return "空闲";
+}
+
 function DiffFileDetails({
   change,
   expanded,
@@ -251,6 +347,11 @@ function DiffFileDetails({
 }) {
   return (
     <section className={`diffViewerCard ${expanded ? "expanded" : "collapsed"}`} hidden={!expanded}>
+      {change.metadata?.baselineAvailable === false && (
+        <div className="diffSnapshotNotice">
+          缺少浏览器基线，仅展示当前文件快照；这里不统计新增/删除行。
+        </div>
+      )}
       <UnifiedDiffView change={change} />
     </section>
   );
@@ -259,17 +360,21 @@ function DiffFileDetails({
 export function FilePanel({
   sessionId,
   disabledReason,
+  openRequest,
   onSaved,
   onNotice,
   onFileOpened,
   onFileContentLoaded,
+  onDraftChanged,
 }: {
   sessionId?: string | null;
   disabledReason?: string;
+  openRequest?: { path: string; nonce: number } | null;
   onSaved?: () => void;
   onNotice?: (message: string) => void;
   onFileOpened?: (path: string) => void;
   onFileContentLoaded?: (path: string, content: string) => void;
+  onDraftChanged?: (path: string, beforeContent: string, afterContent: string, language?: string | null) => void;
 }) {
   const clientRef = useRef<SandboxFilesystemClient | null>(null);
   const currentPathRef = useRef("");
@@ -364,6 +469,12 @@ export function FilePanel({
     };
   }, [connection?.downstreamSessionId, branch, disabledReason]);
 
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client || socketState !== "connected" || !openRequest?.path) return;
+    void readFile(client, openRequest.path);
+  }, [openRequest?.nonce, socketState]);
+
   function handleFilesystemChanged(changedPath: string) {
     const client = clientRef.current;
     if (!client) return;
@@ -442,6 +553,7 @@ export function FilePanel({
     };
     setFile(nextFile);
     setDraft(nextFile.content);
+    onDraftChanged?.(nextFile.path, nextFile.content, nextFile.content, languageFromPath(nextFile.path));
     setError("");
     onNotice?.(`已保存到 ${result.data.branchName ?? branchLabel}`);
     onSaved?.();
@@ -559,7 +671,11 @@ export function FilePanel({
                 value={draft}
                 placeholder={loadingFile ? "正在读取文件..." : ""}
                 disabled={loadingFile}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setDraft(next);
+                  if (file) onDraftChanged?.(file.path, file.content, next, fileLanguage);
+                }}
               />
             ) : (
               <div className="fileEditorEmpty">
