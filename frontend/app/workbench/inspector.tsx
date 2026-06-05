@@ -586,7 +586,6 @@ export function FilePanel({
             <div className="fileExplorerHeader">
               <div>
                 <strong><FolderOpenOutlined /> 资源管理器</strong>
-                <span>{connection ? `${branchLabel} · ${socketStateLabel(socketState)}` : "未连接"}</span>
               </div>
               <button
                 type="button"
@@ -598,25 +597,10 @@ export function FilePanel({
               </button>
             </div>
 
-            <label className="fileAgentPicker">
-              <span>分支</span>
-              <input
-                value={branchDraft}
-                disabled={loadingConnection || !connection}
-                placeholder="main"
-                onBlur={(event) => handleBranchChange(event.target.value)}
-                onChange={(event) => setBranchDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
-            </label>
-
             {error && <div className="filePanelNotice">{error}</div>}
 
             <section className="fileBrowser" aria-label="沙箱文件列表">
               <div className="fileBrowserTop">
-                <span title={currentPath || "/"}>{currentPath || "/"}</span>
                 {currentPath && (
                   <button type="button" onClick={() => void openDirectory(parentPath)}>
                     返回上级
@@ -661,11 +645,13 @@ export function FilePanel({
                 <span>{saving ? "保存中" : "保存"}</span>
               </button>
             </div>
+            {file && (
             <div className="fileEditorPathBar">
-              <span title={file?.path ?? ""}>{file?.path ?? "从左侧资源管理器选择文件"}</span>
+              <span title={file.path}>{file.path}</span>
               {loadingFile && <small>正在读取...</small>}
             </div>
-            {file ? (
+            )}
+            {file && (
               <textarea
                 spellCheck={false}
                 value={draft}
@@ -677,12 +663,6 @@ export function FilePanel({
                   if (file) onDraftChanged?.(file.path, file.content, next, fileLanguage);
                 }}
               />
-            ) : (
-              <div className="fileEditorEmpty">
-                <CodeOutlined />
-                <strong>选择一个文件开始编辑</strong>
-                <span>目录浏览保持在左侧，打开文件后这里会显示可编辑内容。</span>
-              </div>
             )}
             <footer className="fileEditorStatus">
               <span>{file ? fileLanguage : "No file"}</span>

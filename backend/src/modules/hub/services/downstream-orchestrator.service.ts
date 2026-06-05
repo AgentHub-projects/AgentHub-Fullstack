@@ -133,25 +133,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (session) this.gateway.emitSession(mapSession(session));
   }
 
-  /** 为文件面板刷新下游session（发送 session/new 获取新ID并持久化） */
-  async refreshFilesystemSession(sessionId: string): Promise<string | null> {
-    const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
-    if (!downstreamUrl) return null;
-    try {
-      this.logger.log(`[filesystem.refresh] sessionId=${sessionId} 发送session/new`);
-      const connection = await this.ensureConnection(sessionId, downstreamUrl, { id: 1 } as AgentInstanceDto, { forceSessionNew: true });
-      const newSessionId = await connection.downstreamReady;
-      if (newSessionId) {
-        await this.persistSessionDownstreamId(sessionId, newSessionId);
-        this.logger.log(`[filesystem.refresh] sessionId=${sessionId} newDownstreamSessionId=${newSessionId}`);
-        return newSessionId;
-      }
-    } catch (error) {
-      this.logger.warn(`[filesystem.refresh] 失败 ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return null;
-  }
-
   /** 关闭会话对应的下游连接 */
   async closeSession(sessionId: string) {
     const record = this.connections.get(sessionId);
@@ -258,14 +239,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       downstreamSessionId?: string | null;
       activeRunId?: string;
       activeOrchestratorAgentId?: AgentId;
-      forceSessionNew?: boolean;
     } = {},
   ): Promise<ConnectionRecord> {
-    if (options.forceSessionNew) {
-      const existing = this.connections.get(sessionId);
-      if (existing) { existing.closing = true; existing.acp.close(); this.connections.delete(sessionId); }
-      options.downstreamSessionId = undefined;
-    }
     const existing = this.connections.get(sessionId);
     if (existing?.socket.connected) {
       return existing;
@@ -376,14 +351,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private async dispatchPrompt(
     input: StartRunInput,
     downstreamUrl: string,
-    options: { forceSessionNew?: boolean; allowSessionNewFallback: boolean },
+    options: { allowSessionNewFallback: boolean },
   ) {
-    const sessionDownstreamId = options.forceSessionNew ? null : await this.readSessionDownstreamId(input.sessionId);
+    const sessionDownstreamId = await this.readSessionDownstreamId(input.sessionId);
     this.logger.log(`[startRun] session下游ID=${sessionDownstreamId ?? "空"} → ${sessionDownstreamId ? "复用已有下游session" : "将创建新下游session"}`);
 
     const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
       downstreamSessionId: sessionDownstreamId,
-      forceSessionNew: options.forceSessionNew,
     });
     const downstreamSessionId = await connection.downstreamReady;
     if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
@@ -426,7 +400,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           source: "agenthub_backend",
           payload: { status: "connecting", reason: "downstream_session_invalid" },
         });
-        await this.dispatchPrompt(input, downstreamUrl, { forceSessionNew: true, allowSessionNewFallback: false });
+        await this.dispatchPrompt(input, downstreamUrl, { allowSessionNewFallback: false });
         return;
       }
       throw error;
