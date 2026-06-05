@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post } from "@nestjs/common";
+import { PublicRoute } from "../auth/public.decorator";
 import type { CreateSessionAgentRequest, UpdateAgentRequest } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { mapSession } from "../mappers/hub.mappers";
@@ -66,7 +67,9 @@ export class HubAgentController {
   /**
    * 获取 Agent 的初始化提示词（下游 Agent 启动时调用此接口获取 system prompt）
    * GET /api/agents/:id/prompt → { agentId, systemPrompt }
+   * 注意：下游 Agent 无 Auth Cookie，此接口为公开路由
    */
+  @PublicRoute()
   @Get(":id/prompt")
   async getAgentPrompt(@Param("id") id: string) {
     const result = await this.agents.getAgentPrompt(Number(id));

@@ -4126,6 +4126,14 @@ div.agentChoice {
   grid-template-columns: 320px minmax(0, 1fr) clamp(600px, 46vw, 820px);
 }
 
+.agenthubShell.filesActive {
+  grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
+}
+
+.agenthubShell.filesActive.railCollapsed {
+  grid-template-columns: 0 minmax(0, 1fr) clamp(620px, 46vw, 820px);
+}
+
 .agenthubShell.filesActive.fileEditorOpen {
   grid-template-columns: 320px minmax(0, 1fr) clamp(640px, 50vw, 900px);
 }
