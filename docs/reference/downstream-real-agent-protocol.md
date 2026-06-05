@@ -22,15 +22,15 @@ AgentHub 后端负责：
 - 接收前端用户消息，创建 `agent_runs`。
 - 构造上下文快照并渲染为 prompt 文本。
 - 作为 Socket.IO client 主动连接下游 Orchestrator。
-- 发送 `initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel` 等 ACP 消息。
+- 发送 `initialize`、`session/new`、`session/prompt`、`session/cancel` 等 ACP 消息。
 - 接收下游 `session/event`、`session/update` 事件，归一化后落库。
 - 将事件派生为 `messages`、`file_changes`、`artifacts`，并推送前端 WebSocket。
 
 下游 Agent/Orchestrator 负责：
 
 - 暴露 Socket.IO WebSocket 服务。
-- 响应 `session/new`、`session/load`（JSON-RPC request）。
-- 接收 `session/prompt`、`session/cancel`（JSON-RPC notification）。
+- 响应 `initialize`、`session/new`、`session/prompt`（JSON-RPC request）。
+- 接收 `session/cancel`（JSON-RPC notification）。
 - 维护真实执行环境和下游 session。
 - 将事件通过 `session/event` 或 `session/update` 回传给 AgentHub。
 
@@ -78,14 +78,12 @@ AgentHub 发送的消息分类：
 
 | 方法 | 角色 | 说明 |
 | --- | --- | --- |
-| `initialize` | **Notification** | 连接初始化，不等待响应 |
+| `initialize` | **Request** | 连接初始化，等待响应 |
 | `session/new` | **Request** | 创建下游 session，等待返回 `sessionId` |
-| `session/load` | **Request** | 加载已有 session，等待返回 `sessionId` |
-| `session/prompt` | **Notification** | 发送用户任务，不等待响应，发送后立即标记 run 为 `running` |
+| `session/prompt` | **Request** | 发送用户任务；已有 session 通过 `sessionId` 直接恢复 |
 | `session/cancel` | **Notification** | 取消运行，不等待响应 |
 | `session/context_delta` | **Notification** | 上下文增量变更（pin、成员），不等待响应 |
 | `file/apply_diff` | **Notification** | 应用文件差异，不等待响应 |
-| `run/status` | **Request** | 查询 run 状态（断线恢复用） |
 
 ### 4.2 Request（带 id，期望响应）
 
@@ -200,15 +198,16 @@ AgentHub error（失败）：
 
 ## 5. 连接初始化
 
-Socket.IO 连接成功后，AgentHub 立即发送 `initialize`（notification）。
+Socket.IO 连接成功后，AgentHub 立即发送 `initialize`（request）。
 
 ### 5.1 initialize
 
-AgentHub -> 下游（notification，无 `id`）：
+AgentHub -> 下游（request）：
 
 ```json
 {
   "jsonrpc": "2.0",
+  "id": 1,
   "method": "initialize",
   "params": {
     "protocolVersion": 1,
@@ -220,7 +219,7 @@ AgentHub -> 下游（notification，无 `id`）：
 }
 ```
 
-`initialize` 是 notification，**下游无需回复**。AgentHub 在发送后不会等待响应，也不会持久化任何 capabilities 信息。联通性判断完全依赖后续 `session/new` 或 `session/load` 是否成功。
+下游需返回初始化结果；`agentCapabilities.loadSession` 不应声明为 `true`，如保留字段则返回 `false`。AgentHub 每次新建连接都会先等待 `initialize` 成功，再继续 `session/new` 或 `session/prompt`。
 
 ### 5.2 事件处理注册
 
@@ -284,65 +283,19 @@ AgentHub -> 下游：
 `result.sessionId` 必填。AgentHub 保存该 id 用于后续 `session/prompt` 和 `session/cancel`。
 `result.sandbox` 可选；提供时 AgentHub 会把 `agenthubSessionId -> 下游沙箱地址/workspace/Agent 分支` 映射写入 Redis，前端文件面板据此直连下游文件 API。缺少可用 sandbox 时会清理旧映射。
 
-### 6.2 加载下游 Session（session/load）
+### 6.2 复用下游 Session
 
-`session/load` 由环境变量 `DOWNSTREAM_ENABLE_SESSION_LOAD` 控制，**默认关闭**。
+旧加载接口已删除。AgentHub 如果已有可复用的 `downstreamSessionId`，会在新连接上先发送 `initialize`，然后直接发送 `session/prompt`，其中 `params.sessionId` 使用该旧下游 session id。
 
-启用后，如果有可复用的 `downstreamSessionId`，AgentHub 会发送 `session/load` 而不是 `session/new`。
-
-AgentHub -> 下游：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "session/load",
-  "params": {
-    "sessionId": "downstream-session-xxx"
-  }
-}
-```
-
-下游返回：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "sessionId": "downstream-session-xxx",
-    "activeRun": {
-      "runId": "agenthub-run-id",
-      "status": "running"
-    },
-    "sandbox": {
-      "baseUrl": "http://localhost:4100",
-      "workspaceId": "workspace-xxx",
-      "agentBranches": {
-        "2": "agent-2"
-      }
-    }
-  }
-}
-```
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `result.sessionId` | string | 必填，下游 session id |
-| `result.activeRun` | object | 可选，当前活跃 run 信息，用于断线恢复 |
-| `result.activeRun.runId` | string | 可以从 `activeRun.runId`、`activeRun.id`、`result.activeRunId` 或 `result.runId` 读取 |
-| `result.activeRun.status` | string | 可以从 `activeRun.status`、`result.activeRunStatus` 或 `result.status` 读取 |
-| `result.sandbox` | object | 可选，下游沙箱直连信息；结构同 `session/new` |
-
-如果 `session/load` 失败且没有 active run，AgentHub 会回退到 `session/new`（除非 `allowSessionNewFallback` 为 `false`，如在 apply diff 场景中）。
+如果下游在 `session/prompt` 响应中返回 `SESSION_NOT_FOUND`，AgentHub 会回退到 `session/new` 并用 bootstrap prompt 恢复上下文。
 
 ### 6.3 超时
 
-`session/new` 和 `session/load` 的默认超时为 3000ms。超时后 AgentHub 会以 `SESSION/NEW_TIMEOUT` 或 `SESSION/LOAD_TIMEOUT` 拒绝。
+`initialize` 和 `session/new` 的默认超时为 3000ms。超时后 AgentHub 会以 `INITIALIZE_TIMEOUT` 或 `SESSION/NEW_TIMEOUT` 拒绝。
 
 ## 7. 发送任务：session/prompt
 
-用户发送消息后，AgentHub 创建 run，构造上下文快照，然后向下游发送 `session/prompt`（**notification**）。
+用户发送消息后，AgentHub 创建 run，构造上下文快照，然后向下游发送 `session/prompt`（**request**）。
 
 ### 7.1 Payload 结构
 
@@ -351,6 +304,7 @@ AgentHub -> 下游：
 ```json
 {
   "jsonrpc": "2.0",
+  "id": 2,
   "method": "session/prompt",
   "params": {
     "sessionId": "downstream-session-xxx",
@@ -911,7 +865,7 @@ AgentHub 会先将本地 run 状态更新为 `cancelled`，再发送此 notifica
 
 ### 10.2 应用 Diff（file/apply_diff）
 
-由环境变量 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 控制，**默认关闭**。启用后还依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD=true`。
+由环境变量 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 控制，**默认关闭**。启用后复用已有下游 `sessionId`，不会发送旧加载请求。
 
 AgentHub -> 下游（notification）：
 
@@ -1017,15 +971,14 @@ AgentHub -> 下游（notification）：
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `DOWNSTREAM_ENABLE_SESSION_LOAD` | `false` | 开启后复用 `downstreamSessionId` 并发送 `session/load`；支持断线恢复查询 `run/status` |
 | `DOWNSTREAM_ENABLE_CONTEXT_DELTA` | `false` | 开启后发送 `session/context_delta`（pin、成员变更） |
-| `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` | `false` | 开启后允许发送 `file/apply_diff`，依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD` |
+| `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` | `false` | 开启后允许发送 `file/apply_diff` |
 
 取值：`"1"`、`"true"`、`"yes"`（不区分大小写）均视为开启。
 
 关闭时的行为：
 
-- `session/load` 不发送，每条新连接都走 `session/new` + `bootstrap` prompt。
+- 已有下游 `sessionId` 时复用该 id 直接发送 `session/prompt`；没有时发送 `session/new`。
 - `session/context_delta` 不发送，成员和 pin 信息通过下一次 prompt 上下文传递。
 - `file/apply_diff` 返回 `DOWNSTREAM_APPLY_NOT_SUPPORTED`。
 
@@ -1040,55 +993,9 @@ AgentHub -> 下游（notification）：
 
 AgentHub 不启用 Socket.IO 自动重连。
 
-如果下游连接断开且当前有 active run（状态为 `queued`、`context_building`、`connecting` 或 `running`）：
+如果下游连接断开且当前有 active run（状态为 `queued`、`context_building`、`connecting` 或 `running`），AgentHub 会直接标记 run failed，错误码 `DOWNSTREAM_DISCONNECTED`。
 
-1. 若 `DOWNSTREAM_ENABLE_SESSION_LOAD` 关闭 → 直接标记 run failed，错误码 `DOWNSTREAM_DISCONNECTED`。
-2. 若开启但无 `downstreamSessionId` → 同样标记 failed。
-3. 若开启且有 `downstreamSessionId` → 触发恢复流程。
-
-**恢复流程**：
-
-1. 重新建立 Socket.IO 连接。
-2. 重新发送 `initialize`（notification）。
-3. 发送 `session/load`（request），传入已有 `downstreamSessionId`。
-4. 等待 `downstreamReady`。
-5. 读取恢复后的 run 状态（优先用 `session/load` 返回的 `activeRun`，否则发送 `run/status` 查询）。
-
-AgentHub -> 下游（`run/status` request）：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 10,
-  "method": "run/status",
-  "params": {
-    "runId": "agenthub-run-id"
-  }
-}
-```
-
-下游返回：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 10,
-  "result": {
-    "run": {
-      "runId": "agenthub-run-id",
-      "status": "running"
-    }
-  }
-}
-```
-
-状态处理：
-
-| 下游状态 | AgentHub 行为 |
-| --- | --- |
-| `completed` / `ready` / `success` | 标记 run completed |
-| `failed` / `error` | 标记 run failed（`DOWNSTREAM_RUN_FAILED`） |
-| 其他值 | 恢复 run 状态为 `running`，继续等待下游事件 |
+后续用户再次发送消息时，AgentHub 会重新建立 Socket.IO 连接，发送 `initialize`，并用已有 `downstreamSessionId` 直接发送 `session/prompt`。
 
 ## 14. 事件序号与幂等
 
@@ -1238,8 +1145,9 @@ AgentHub -> 下游（`run/status` request）：
 真实下游至少需要：
 
 - 支持 Socket.IO WebSocket，在 `acp:message` event 上收发 JSON-RPC 2.0 消息。
+- 响应 `initialize` request。
 - 响应 `session/new` request，返回 `result.sessionId`。
-- 接收 `session/prompt` notification。
+- 响应 `session/prompt` request。
 - 回传事件时使用 `session/event` 或 `session/update`，且 `_meta.runId` 必须精确匹配 AgentHub 下发的 run id。
 - 多 Agent 输出必须在 `_meta.agentId` 中提供 AgentHub Agent 实例 id（转为字符串）。
 - 文件变更必须提供 `path` 和 `patch` 或 before/after content。
@@ -1247,19 +1155,16 @@ AgentHub -> 下游（`run/status` request）：
 
 建议额外支持：
 
-- `session/load`（与 `DOWNSTREAM_ENABLE_SESSION_LOAD` 配合）
-- `run/status`（断线恢复用）
 - `session/cancel`
 - `file/apply_diff`（与 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 配合）
 - `session/context_delta`（与 `DOWNSTREAM_ENABLE_CONTEXT_DELTA` 配合）
 
 ## 19. 当前实现限制
 
-- `initialize` 为 notification，不读取下游响应。
-- `session/prompt` 发送后 AgentHub 不等待下游 accepted 响应，直接标记 run 为 `running`。
+- `initialize` 为 request，AgentHub 会等待响应。
+- `session/prompt` 使用 request 发送；AgentHub 只等待短窗口错误响应，随后依靠下游事件推进 run。
 - 只有 `_meta.runId` 被读取作为 run id，不再兼容顶层 `runId` 或 `params.runId`。
 - 只有 `_meta.agentId` 被读取作为 speaker，不再兼容 `params.speaker`、`payload.speaker` 或顶层 `speaker`。
 - `artifact.chunk` 当前为简化文本累加，不是完整二进制 chunk 合并协议。
 - 真实 worker Agent 调度由下游 Orchestrator 负责，不在 AgentHub 内完成。
-- 断线恢复依赖 `DOWNSTREAM_ENABLE_SESSION_LOAD=true`，且要求下游支持 `session/load` 和 `run/status`。
 - Mock 模式下 `DOWNSTREAM_ORCHESTRATOR_WS_URL` 未配置时，AgentHub 自动生成模拟事件覆盖 message.completed、file.change、artifact.upsert、run.completed。

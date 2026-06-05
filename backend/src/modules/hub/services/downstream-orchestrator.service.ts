@@ -12,10 +12,20 @@ import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-o
 import { AcpConnection } from "./acp-connection";
 import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
+type StartRunInput = {
+  sessionId: string;
+  runId: string;
+  userMessageId: string;
+  promptText: string;
+  messageContext?: Record<string, unknown>;
+  orchestrator: AgentInstanceDto;
+  mentionedAgents: AgentInstanceDto[];
+};
+
 const IDLE_TIMEOUT_SECONDS = 60 * 60; // 1 hour
 const IDLE_RECHECK_MS = 60 * 1000;
 const RECOVERY_TIMEOUT_MS = 3000;
-const ENABLE_SESSION_LOAD = "DOWNSTREAM_ENABLE_SESSION_LOAD";
+const PROMPT_RESPONSE_GRACE_MS = 50;
 const ENABLE_CONTEXT_DELTA = "DOWNSTREAM_ENABLE_CONTEXT_DELTA";
 const ENABLE_FILE_APPLY_DIFF = "DOWNSTREAM_ENABLE_FILE_APPLY_DIFF";
 
@@ -58,15 +68,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 
   /** 启动运行：建立连接→构建上下文快照→发送 session/prompt */
-  async startRun(input: {
-    sessionId: string;
-    runId: string;
-    userMessageId: string;
-    promptText: string;
-    messageContext?: Record<string, unknown>;
-    orchestrator: AgentInstanceDto;
-    mentionedAgents: AgentInstanceDto[];
-  }) {
+  async startRun(input: StartRunInput) {
     await this.prisma.agentRun.update({
       where: { id: input.runId },
       data: { status: "connecting" },
@@ -88,59 +90,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     try {
       this.logger.log(`[startRun] runId=${input.runId} sessionId=${input.sessionId} 连接下游 ${downstreamUrl}`);
-      const sessionDownstreamId = await this.readSessionDownstreamId(input.sessionId);
-      this.logger.log(`[startRun] session下游ID=${sessionDownstreamId ?? "空"} → ${sessionDownstreamId ? "复用已有下游session" : "将创建新下游session"}`);
-      const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
-        downstreamSessionId: sessionDownstreamId,
-      });
-      const downstreamSessionId = await connection.downstreamReady;
-      this.logger.log(`[startRun] 下游就绪 downstreamSessionId=${downstreamSessionId} 需bootstrap=${connection.needsBootstrap}`);
-      if (downstreamSessionId && downstreamSessionId !== sessionDownstreamId) {
-        await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
-        this.logger.log(`[startRun] 下游sessionId已更新到sessions表: ${sessionDownstreamId} → ${downstreamSessionId}`);
-      }
-      const sessionActive = await this.getSessionActive(input.sessionId);
-      const needsBootstrap = connection.needsBootstrap || !sessionActive;
-      this.logger.log(`[startRun] sessionActive=${sessionActive} needsBootstrap=${needsBootstrap}`);
-      const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
-      const promptInput = await this.buildPromptInput(
-        { ...input, context: contextSnapshot },
-        downstreamSessionId!,
-        needsBootstrap,
-      );
-
-      connection.activeRunId = input.runId;
-      connection.activeOrchestratorAgentId = input.orchestrator.id;
-      const promptId = Date.now();
-      const promptBrief = { ...promptInput, prompt: promptInput.prompt?.map((p: any) => ({ ...p, text: p.text?.slice(0, 200) + (p.text?.length > 200 ? `...[${p.text.length}字符]` : "") })) };
-      this.logger.log(`[发送JSON] session/prompt: ${JSON.stringify({ jsonrpc: "2.0", id: promptId, method: "session/prompt", params: promptBrief })}`);
-      connection.socket.emit("acp:message", { jsonrpc: "2.0", id: promptId, method: "session/prompt", params: promptInput });
-      connection.needsBootstrap = false;
-      this.markDownstreamActivity(connection);
-
-      await this.prisma.agentRun.update({
-        where: { id: input.runId },
-        data: {
-          status: "running",
-          startedAt: new Date(),
-          downstreamSessionId,
-          downstreamRunId: input.runId,
-        },
-      });
-      const session = await this.prisma.session.update({
-        where: { id: input.sessionId },
-        data: { updatedAt: new Date() },
-        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
-      });
-      this.gateway.emitSession(mapSession(session));
-      await this.events.append({
-        sessionId: input.sessionId,
-        runId: input.runId,
-        eventType: "run.status",
-        speakerAgentId: input.orchestrator.id,
-        source: "agenthub_backend",
-        payload: { status: "running", downstream: "prompt_sent" },
-      });
+      await this.dispatchPrompt(input, downstreamUrl, { allowSessionNewFallback: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.failRun(input.sessionId, input.runId, input.orchestrator.id, "DOWNSTREAM_PROMPT_FAILED", message);
@@ -245,7 +195,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
     if (!downstreamUrl) throw new Error("DOWNSTREAM_NOT_CONNECTED");
-    if (!downstreamFeatureEnabled(ENABLE_SESSION_LOAD)) throw new Error("DOWNSTREAM_SESSION_LOAD_NOT_ENABLED");
 
     const run = await this.prisma.agentRun.findUnique({
       where: { id: runId },
@@ -262,7 +211,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       { id: run.orchestratorAgentId } as AgentInstanceDto,
       {
         downstreamSessionId,
-        allowSessionNewFallback: false,
       },
     );
     const loadedSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
@@ -301,7 +249,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
   }
 
-  /** 建立或复用下游 Socket.IO 连接，完成 ACP initialize + session load/new 握手 */
+  /** 建立或复用下游 Socket.IO 连接，完成 ACP initialize + session new/复用握手 */
   private async ensureConnection(
     sessionId: string,
     downstreamUrl: string,
@@ -310,7 +258,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       downstreamSessionId?: string | null;
       activeRunId?: string;
       activeOrchestratorAgentId?: AgentId;
-      allowSessionNewFallback?: boolean;
       forceSessionNew?: boolean;
     } = {},
   ): Promise<ConnectionRecord> {
@@ -372,23 +319,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         this.connections.delete(sessionId);
       }
       if (record.activeRunId && !record.closing) {
-        if (downstreamFeatureEnabled(ENABLE_SESSION_LOAD)) {
-          void this.recoverActiveRunAfterDisconnect({
-            sessionId,
-            runId: record.activeRunId,
-            orchestratorAgentId: record.activeOrchestratorAgentId ?? 1,
-            downstreamSessionId: record.downstreamSessionId,
-            downstreamUrl,
-          });
-        } else {
-          void this.failRun(
-            sessionId,
-            record.activeRunId,
-            record.activeOrchestratorAgentId ?? 1,
-            "DOWNSTREAM_DISCONNECTED",
-            "downstream disconnected",
-          );
-        }
+        void this.failRun(
+          sessionId,
+          record.activeRunId,
+          record.activeOrchestratorAgentId ?? 1,
+          "DOWNSTREAM_DISCONNECTED",
+          "downstream disconnected",
+        );
       }
     });
 
@@ -401,21 +338,20 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
     socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
 
-    // ACP handshake - 有缓存的下游session就复用
-    // 有缓存的下游sessionId → 直接复用，下游不支持session/load
-    if (record.downstreamSessionId) {
-      this.logger.log(`[握手] 复用下游sessionId=${record.downstreamSessionId}`);
-      record.resolveDownstreamReady?.(record.downstreamSessionId);
-      this.markDownstreamActivity(record);
-      this.scheduleIdleDisconnectCheck(record);
-      return record;
-    }
-
     const initParams = { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } };
-    this.logger.log(`[发送JSON] initialize: ${JSON.stringify({ jsonrpc: "2.0", method: "initialize", params: initParams })}`);
-    acp.notify("initialize", initParams);
-
     try {
+      this.logger.log(`[发送JSON] initialize: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "initialize", params: initParams })}`);
+      const initResult = await acp.request("initialize", initParams);
+      this.logger.log(`[接收JSON] initialize响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: initResult })}`);
+
+      if (record.downstreamSessionId) {
+        this.logger.log(`[握手] 复用下游sessionId=${record.downstreamSessionId}`);
+        record.resolveDownstreamReady?.(record.downstreamSessionId);
+        this.markDownstreamActivity(record);
+        this.scheduleIdleDisconnectCheck(record);
+        return record;
+      }
+
       const sessionParams = { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] };
       this.logger.log(`[发送JSON] session/new: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/new", params: sessionParams })}`);
       const result = await acp.request("session/new", sessionParams);
@@ -424,17 +360,118 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       this.logger.log(`[接收JSON] session/new响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result })}`);
       record.downstreamSessionId = resultSessionId;
       record.needsBootstrap = true;
-      record.loadedActiveRun = readActiveRun(result);
       await this.refreshSandboxMapping(sessionId, resultSessionId, result);
       record.resolveDownstreamReady?.(resultSessionId);
     } catch (error) {
-      this.logger.error(`[握手] session/new失败 ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(`[握手] 失败 ${error instanceof Error ? error.message : String(error)}`);
       record.rejectDownstreamReady?.(error instanceof Error ? error : new Error(String(error)));
     }
 
     this.markDownstreamActivity(record);
     this.scheduleIdleDisconnectCheck(record);
     return record;
+  }
+
+  /** 准备下游 session 并发送 prompt；旧 sessionId 失效时可回退 session/new。 */
+  private async dispatchPrompt(
+    input: StartRunInput,
+    downstreamUrl: string,
+    options: { forceSessionNew?: boolean; allowSessionNewFallback: boolean },
+  ) {
+    const sessionDownstreamId = options.forceSessionNew ? null : await this.readSessionDownstreamId(input.sessionId);
+    this.logger.log(`[startRun] session下游ID=${sessionDownstreamId ?? "空"} → ${sessionDownstreamId ? "复用已有下游session" : "将创建新下游session"}`);
+
+    const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
+      downstreamSessionId: sessionDownstreamId,
+      forceSessionNew: options.forceSessionNew,
+    });
+    const downstreamSessionId = await connection.downstreamReady;
+    if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
+
+    this.logger.log(`[startRun] 下游就绪 downstreamSessionId=${downstreamSessionId} 需bootstrap=${connection.needsBootstrap}`);
+    if (downstreamSessionId !== sessionDownstreamId) {
+      await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
+      this.logger.log(`[startRun] 下游sessionId已更新到sessions表: ${sessionDownstreamId ?? "空"} → ${downstreamSessionId}`);
+    }
+
+    const sessionActive = await this.getSessionActive(input.sessionId);
+    const needsBootstrap = connection.needsBootstrap || !sessionActive;
+    this.logger.log(`[startRun] sessionActive=${sessionActive} needsBootstrap=${needsBootstrap}`);
+    const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
+    const promptInput = await this.buildPromptInput(
+      { ...input, context: contextSnapshot },
+      downstreamSessionId,
+      needsBootstrap,
+    );
+
+    connection.activeRunId = input.runId;
+    connection.activeOrchestratorAgentId = input.orchestrator.id;
+    const promptResponse = this.sendPromptRequest(connection, promptInput as Record<string, unknown>);
+    connection.needsBootstrap = false;
+    this.markDownstreamActivity(connection);
+    await this.markPromptSent(input, downstreamSessionId);
+
+    try {
+      const result = await promptResponse;
+      await this.handlePromptResult(connection, result);
+    } catch (error) {
+      if (isPromptResponseTimeout(error)) return;
+      if (options.allowSessionNewFallback && sessionDownstreamId && isReusableSessionMissingError(error)) {
+        this.logger.warn(`[startRun] 下游sessionId失效，回退session/new: ${sessionDownstreamId}`);
+        await this.events.append({
+          sessionId: input.sessionId,
+          runId: input.runId,
+          eventType: "run.status",
+          speakerAgentId: input.orchestrator.id,
+          source: "agenthub_backend",
+          payload: { status: "connecting", reason: "downstream_session_invalid" },
+        });
+        await this.dispatchPrompt(input, downstreamUrl, { forceSessionNew: true, allowSessionNewFallback: false });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private sendPromptRequest(record: ConnectionRecord, promptInput: Record<string, unknown>) {
+    const promptBrief = briefPromptInput(promptInput);
+    this.logger.log(`[发送JSON] session/prompt: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/prompt", params: promptBrief })}`);
+    return record.acp.request("session/prompt", promptInput, PROMPT_RESPONSE_GRACE_MS);
+  }
+
+  private async markPromptSent(input: StartRunInput, downstreamSessionId: string) {
+    await this.prisma.agentRun.update({
+      where: { id: input.runId },
+      data: {
+        status: "running",
+        startedAt: new Date(),
+        downstreamSessionId,
+        downstreamRunId: input.runId,
+      },
+    });
+    const session = await this.prisma.session.update({
+      where: { id: input.sessionId },
+      data: { updatedAt: new Date() },
+      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    this.gateway.emitSession(mapSession(session));
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "run.status",
+      speakerAgentId: input.orchestrator.id,
+      source: "agenthub_backend",
+      payload: { status: "running", downstream: "prompt_sent" },
+    });
+  }
+
+  private async handlePromptResult(record: ConnectionRecord, result: Record<string, unknown>) {
+    const stopReason = stringValue(result.stopReason);
+    if (!stopReason) return;
+    const runId = record.activeRunId;
+    if (!runId) return;
+    this.logger.log(`[result] stopReason=${stopReason} 完成run runId=${runId}`);
+    await this.markRunCompleted(record.sessionId, runId);
   }
 
   /** 更新下游连接最近活跃时间并调度空闲检查 */
@@ -511,11 +548,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 
   /**
-
-<｜｜DSML｜｜parameter name="new_string" string="true">    record.acp.close();
-    this.connections.delete(record.key);
-    return;
-  }
    * 处理下游通知（session/update、session/event 及 legacy 事件）。
    * JSON-RPC 响应匹配已由 AcpConnection 内部处理，此处仅处理通知。
    */
@@ -597,18 +629,20 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       return;
     }
 
+    if (envelope.error) {
+      const message = downstreamErrorMessage(envelope.error);
+      const code = downstreamErrorCode(envelope.error, message);
+      this.logger.warn(`[result] 下游请求失败 code=${code} message=${message}`);
+      if (record.activeRunId) {
+        await this.failRun(record.sessionId, record.activeRunId, record.activeOrchestratorAgentId ?? 1, code, message);
+      }
+      return;
+    }
+
     // Handle JSON-RPC result with stopReason (downstream task completion signal)
     if (envelope.result) {
       this.logger.log(`[result] 收到下游result ${JSON.stringify(envelope.result)}`);
-      const result = asRecord(envelope.result);
-      const stopReason = stringValue(result.stopReason);
-      if (stopReason) {
-        const runId = record.activeRunId;
-        if (runId) {
-          this.logger.log(`[result] stopReason=${stopReason} 完成run runId=${runId}`);
-          await this.markRunCompleted(record.sessionId, runId);
-        }
-      }
+      await this.handlePromptResult(record, asRecord(envelope.result));
       return;
     }
 
@@ -791,11 +825,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
-  /** 查找会话可复用的下游 session ID */
-  private async findReusableDownstreamSessionId(sessionId: string) {
-    return this.readSessionDownstreamId(sessionId);
-  }
-
   /** 读取 Session 表的下游 session ID */
   private async readSessionDownstreamId(sessionId: string): Promise<string | null> {
     const session = await this.prisma.session.findUnique({
@@ -811,100 +840,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       where: { id: sessionId },
       data: { downstreamSessionId },
     });
-  }
-
-  /** 下游断开后恢复活跃 run：重新连接并恢复状态 */
-  private async recoverActiveRunAfterDisconnect(input: {
-    sessionId: string;
-    runId: string;
-    orchestratorAgentId: AgentId;
-    downstreamSessionId?: string;
-    downstreamUrl: string;
-  }) {
-    const agentRunModel = this.prisma.agentRun as any;
-    if (typeof agentRunModel.findUnique !== "function") return;
-    const run = await agentRunModel.findUnique({ where: { id: input.runId } });
-    if (!run || !isActiveRunStatus(run.status)) return;
-    if (!input.downstreamSessionId) {
-      await this.failRun(
-        input.sessionId,
-        input.runId,
-        input.orchestratorAgentId,
-        "DOWNSTREAM_DISCONNECTED",
-        "downstream disconnected without a reusable session",
-      );
-      return;
-    }
-
-    try {
-      const record = await this.ensureConnection(
-        input.sessionId,
-        input.downstreamUrl,
-        { id: input.orchestratorAgentId } as AgentInstanceDto,
-        {
-          downstreamSessionId: input.downstreamSessionId,
-          activeRunId: input.runId,
-          activeOrchestratorAgentId: input.orchestratorAgentId,
-        },
-      );
-      await record.downstreamReady;
-      const status = await this.readRecoveredRunStatus(record, input.runId);
-      if (status === "completed" || status === "ready" || status === "success") {
-        await this.completeRun(input.sessionId, input.runId, input.orchestratorAgentId, {
-          status: "completed",
-          recovered: true,
-        });
-        return;
-      }
-      if (status === "failed" || status === "error") {
-        await this.failRun(
-          input.sessionId,
-          input.runId,
-          input.orchestratorAgentId,
-          "DOWNSTREAM_RUN_FAILED",
-          "downstream run failed during recovery",
-        );
-        return;
-      }
-      await this.prisma.agentRun.update({
-        where: { id: input.runId },
-        data: { status: "running", downstreamSessionId: input.downstreamSessionId },
-      });
-      await this.events.append({
-        sessionId: input.sessionId,
-        runId: input.runId,
-        eventType: "run.status",
-        speakerAgentId: input.orchestratorAgentId,
-        source: "agenthub_backend",
-        payload: { status: "running", downstream: "recovered" },
-      });
-      const session = await this.prisma.session.findUnique({
-        where: { id: input.sessionId },
-        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
-      });
-      if (session) this.gateway.emitSession(mapSession(session));
-    } catch (error) {
-      await this.failRun(
-        input.sessionId,
-        input.runId,
-        input.orchestratorAgentId,
-        "DOWNSTREAM_DISCONNECTED",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
-  /** 读取恢复后下游 run 的状态 */
-  private async readRecoveredRunStatus(record: ConnectionRecord, runId: string) {
-    if (record.loadedActiveRun?.runId) {
-      if (record.loadedActiveRun.runId !== runId) throw new Error("DOWNSTREAM_ACTIVE_RUN_MISMATCH");
-      return record.loadedActiveRun.status ?? "running";
-    }
-    const result = await record.acp.request("run/status", { runId });
-    const statusRun = asRecord(result.run ?? result.activeRun ?? result);
-    const statusRunId = stringValue(statusRun.runId) ?? stringValue(statusRun.id);
-    if (statusRunId && statusRunId !== runId) throw new Error("DOWNSTREAM_RUN_STATUS_MISMATCH");
-    return stringValue(statusRun.status) ?? "running";
   }
 
   /** 检查 run 是否已被取消 */
@@ -1143,21 +1078,35 @@ function agentIdValue(value: unknown): AgentId | undefined {
   return undefined;
 }
 
-function isActiveRunStatus(status: string) {
-  return status === "queued" || status === "context_building" || status === "connecting" || status === "running";
-}
-
-function readActiveRun(result: Record<string, unknown>) {
-  const activeRun = asRecord(result.activeRun ?? result.run);
-  const runId =
-    stringValue(activeRun.runId) ??
-    stringValue(activeRun.id) ??
-    stringValue(result.activeRunId) ??
-    stringValue(result.runId);
-  const status = stringValue(activeRun.status) ?? stringValue(result.activeRunStatus) ?? stringValue(result.status);
-  return runId || status ? { runId, status } : undefined;
-}
-
 function errorCode(message: string) {
   return /^[A-Z0-9_]+$/.test(message) ? message : "DOWNSTREAM_EVENT_FAILED";
+}
+
+function briefPromptInput(promptInput: Record<string, unknown>) {
+  const prompt = Array.isArray(promptInput.prompt)
+    ? promptInput.prompt.map((part) => {
+      const record = asRecord(part);
+      const text = stringValue(record.text);
+      return text ? { ...record, text: `${text.slice(0, 200)}${text.length > 200 ? `...[${text.length}字符]` : ""}` } : record;
+    })
+    : promptInput.prompt;
+  return { ...promptInput, prompt };
+}
+
+function isPromptResponseTimeout(error: unknown) {
+  return error instanceof Error && error.message === "SESSION/PROMPT_TIMEOUT";
+}
+
+function isReusableSessionMissingError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.message === "SESSION_NOT_FOUND" || error.message === "DOWNSTREAM_SESSION_NOT_FOUND";
+}
+
+function downstreamErrorMessage(error: NonNullable<DownstreamEnvelope["error"]>) {
+  return typeof error === "string" ? error : error.message ?? "DOWNSTREAM_REQUEST_FAILED";
+}
+
+function downstreamErrorCode(error: NonNullable<DownstreamEnvelope["error"]>, message: string) {
+  if (typeof error !== "string" && typeof error.code === "string" && /^[A-Z0-9_]+$/.test(error.code)) return error.code;
+  return errorCode(message);
 }

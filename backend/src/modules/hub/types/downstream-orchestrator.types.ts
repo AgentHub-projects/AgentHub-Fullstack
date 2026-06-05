@@ -14,7 +14,6 @@ export type ConnectionRecord = {
   rejectDownstreamReady?: (error: Error) => void;
   activeRunId?: string;
   activeOrchestratorAgentId?: AgentId;
-  loadedActiveRun?: { runId?: string; status?: string };
   idleTimer: NodeJS.Timeout | null;
   autoCompleteTimer?: ReturnType<typeof setTimeout>;
   lastActivityAt: number;

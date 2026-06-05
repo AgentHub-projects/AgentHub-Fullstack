@@ -9,21 +9,20 @@
 - 给 Agent 阅读的上下文会渲染进 `prompt[0].text`。
 - 下游回传事件必须带 `_meta.runId`，否则 AgentHub 拒绝落库（返回 `RUN_ID_REQUIRED`）。
 - speaker 归属使用 `_meta.agentId`，不从 `params.speaker`、`payload.speaker` 或顶层 `speaker` 推断。
-- AgentHub 发送 `initialize`、`session/prompt`、`session/cancel`、`file/apply_diff`、`session/context_delta` 均使用 JSON-RPC **notification**（无 `id`），不等待下游响应。
-- `session/new`、`session/load`、`run/status` 使用 JSON-RPC **request**（带 `id`），等待下游响应，默认超时 3000ms。
-- `session/load`、`session/context_delta`、`file/apply_diff` 是预留能力，默认关闭；后续下游兼容后再打开。
+- AgentHub 发送 `initialize`、`session/new`、`session/prompt` 均使用 JSON-RPC **request**（带 `id`）。
+- AgentHub 发送 `session/cancel`、`file/apply_diff`、`session/context_delta` 使用 JSON-RPC **notification**（无 `id`）。
+- `session/context_delta`、`file/apply_diff` 是预留能力，默认关闭；后续下游兼容后再打开。
 
 ## 2. 能力开关
 
 | 环境变量 | 默认 | 说明 |
 |---|---:|---|
-| `DOWNSTREAM_ENABLE_SESSION_LOAD` | 关闭 | 开启后复用历史 `downstreamSessionId`，并允许断线恢复查询 `run/status`。 |
 | `DOWNSTREAM_ENABLE_CONTEXT_DELTA` | 关闭 | 开启后发送成员变更、pin 更新等 `session/context_delta`。 |
 | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` | 关闭 | 开启后允许向下游发送 `file/apply_diff`。 |
 
 关闭状态下：
 
-- `session/load` 不会发送，断线后的下一轮通过新的 `session/new` + bootstrap prompt 恢复上下文。
+- 已有 `downstreamSessionId` 时不会发送 `session/new`，断线后的下一轮通过 `session/prompt.sessionId` 直接恢复下游 session。
 - `session/context_delta` 不会发送，成员和 pin 信息通过下一次 prompt 上下文传递。
 - `file/apply_diff` 会返回 `DOWNSTREAM_APPLY_NOT_SUPPORTED`，避免前端显示已排队但下游没有执行。
 
@@ -31,11 +30,12 @@
 
 ### 3.1 initialize
 
-连接 Socket.IO `/acp` 后，AgentHub 先发送 ACP 初始化通知：
+连接 Socket.IO `/acp` 后，AgentHub 先发送 ACP 初始化 request：
 
 ```json
 {
   "jsonrpc": "2.0",
+  "id": 1,
   "method": "initialize",
   "params": {
     "protocolVersion": 1,
@@ -49,6 +49,8 @@
   }
 }
 ```
+
+下游返回的 capabilities 不应再声明已删除的加载能力；如果仍保留兼容字段，应返回禁用状态。
 
 ### 3.2 session/new
 
@@ -81,22 +83,9 @@
 }
 ```
 
-### 3.3 session/load（可选）
+### 3.3 复用下游 Session
 
-仅当 `DOWNSTREAM_ENABLE_SESSION_LOAD=true` 时启用：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "session/load",
-  "params": {
-    "sessionId": "<downstream-session-id>"
-  }
-}
-```
-
-如果 load 失败且当前没有 active run，AgentHub 可以回退 `session/new`。断线恢复 active run 依赖下游同时支持 `session/load` 和 `run/status`。
+旧加载接口已删除。AgentHub 断线后如已有 `downstreamSessionId`，会在新连接上先发送 `initialize`，再直接发送 `session/prompt`，其中 `sessionId` 使用旧下游 session id。
 
 ### 3.4 session/prompt
 
@@ -202,7 +191,7 @@
 
 ### 3.7 file/apply_diff（可选）
 
-仅当 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 时发送。该能力还要求 `DOWNSTREAM_ENABLE_SESSION_LOAD=true`，因为离线 apply diff 需要加载既有下游 session。
+仅当 `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 时发送。离线 apply diff 复用已保存的下游 `sessionId`，不会发送旧加载请求。
 
 ```json
 {
@@ -346,20 +335,18 @@ AgentHub ack：
 
 | ACP 方法 | 默认状态 | 方向 | 角色 | 说明 |
 |---|---|---|---|---|
-| `initialize` | 启用 | AgentHub → 下游 | **Notification** | 连接后固定发送，不等待响应。 |
+| `initialize` | 启用 | AgentHub → 下游 | **Request** | 每次新连接后固定发送，等待响应。 |
 | `session/new` | 启用 | AgentHub → 下游 | **Request** | 默认建新下游 session，等待返回 `sessionId`。 |
-| `session/load` | 可选 | AgentHub → 下游 | **Request** | `DOWNSTREAM_ENABLE_SESSION_LOAD=true` 后启用。 |
-| `session/prompt` | 启用 | AgentHub → 下游 | **Notification** | 顶层只含 `sessionId`、`prompt`、`_meta`。 |
+| `session/prompt` | 启用 | AgentHub → 下游 | **Request** | 顶层只含 `sessionId`、`prompt`、`_meta`；已有 session 直接靠该字段恢复。 |
 | `session/cancel` | 启用 | AgentHub → 下游 | **Notification** | 带 `sessionId`、`runId` 和 `_meta`。 |
 | `session/context_delta` | 可选 | AgentHub → 下游 | **Notification** | `DOWNSTREAM_ENABLE_CONTEXT_DELTA=true` 后启用。 |
 | `session/update` | 入站启用 | 下游 → AgentHub | Request | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
 | `session/event` | 入站启用 | 下游 → AgentHub | Request | 需要 `_meta.runId`，可带 `_meta.agentId`。 |
-| `file/apply_diff` | 可选 | AgentHub → 下游 | **Notification** | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 后启用，且依赖 `session/load`。 |
+| `file/apply_diff` | 可选 | AgentHub → 下游 | **Notification** | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF=true` 后启用，复用已有 `sessionId`。 |
 
 ## 6. 下游后续需要补齐
 
 - AgentGateway 或 Agent sandbox 在 `session/update` 中透传 `_meta.runId`。
 - 结构化事件统一发 `session/event`，并把 run/speaker 放入 `_meta`。
-- 若要启用断线恢复，实现 `session/load` 和 `run/status`。
 - 若要启用实时成员/pin 更新，实现 `session/context_delta`。
 - 若要启用一键应用 diff，实现 `file/apply_diff`。

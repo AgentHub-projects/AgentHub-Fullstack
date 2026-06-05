@@ -14,7 +14,7 @@ export class DownstreamSandboxRegistryService {
     private readonly orchestrator?: DownstreamOrchestratorService,
   ) {}
 
-  /** 记录下游 session/new 或 session/load 返回内容；AgentHub 不保存 sandbox 地址。 */
+  /** 记录下游 session/new 返回内容；AgentHub 不保存 sandbox 地址。 */
   async saveFromSessionResult(agenthubSessionId: string, downstreamSessionId: string, result: Record<string, unknown>) {
     this.logger.log(
       `[downstream.session.result] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} result=${safeJson(result)}`,

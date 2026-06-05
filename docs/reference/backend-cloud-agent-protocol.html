@@ -207,15 +207,16 @@
   }
 }</code></pre>
 
-      <h3>2.2 session/load</h3>
-      <p>连接成功后立即发送。当前实现没有单独的 <code>downstream_sessions</code> 表，发送的是 AgentHub session id。</p>
+      <h3>2.2 session 复用</h3>
+      <p>旧加载接口已删除。已有下游 session 时，后端在新连接上先发送 <code>initialize</code>，再通过 <code>session/prompt</code> 的 <code>sessionId</code> 直接复用。</p>
       <pre><code>{
   "jsonrpc": "2.0",
-  "id": "load-&lt;agenthubSessionId&gt;",
-  "method": "session/load",
+  "id": "prompt-&lt;runId&gt;",
+  "method": "session/prompt",
   "params": {
-    "agenthubSessionId": "&lt;agenthub-session-id&gt;",
-    "cwd": "/workspace"
+    "sessionId": "&lt;downstream-session-id&gt;",
+    "prompt": [{ "type": "text", "text": "..." }],
+    "_meta": { "agenthubSessionId": "&lt;agenthub-session-id&gt;" }
   }
 }</code></pre>
 
@@ -414,7 +415,7 @@
       <ul>
         <li>当前实现没有持久化下游 session 绑定表；连接记录保存在后端内存 <code>connections</code> Map 中。</li>
         <li>同一连接存活时，第二次及之后的 <code>session/prompt</code> 使用 <code>mode: "incremental"</code>，只发送 prompt、pins 和 metadata。</li>
-        <li>断线后下一次 run 会重新连接，重新发送 <code>initialize</code>、<code>session/load</code>，并以 <code>mode: "bootstrap"</code> 发送 prompt。</li>
+        <li>断线后下一次 run 会重新连接，重新发送 <code>initialize</code>，并用已有下游 <code>sessionId</code> 直接发送 <code>session/prompt</code>。</li>
         <li>空闲连接在 1 小时后检查；如果前端仍有该 session 的订阅者，连接会继续保留并延后检查。</li>
         <li>未配置 <code>DOWNSTREAM_ORCHESTRATOR_WS_URL</code> 时，后端会走 mock 路径，模拟 <code>message.delta</code>、<code>file.change</code>、<code>artifact.upsert</code>、<code>message.completed</code>、<code>run.completed</code>。</li>
       </ul>

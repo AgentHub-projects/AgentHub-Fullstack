@@ -184,7 +184,7 @@ Session 绑定 GitHub 项目后才能发送消息。工作台左侧为会话列�
 
 ### 下游沙箱编辑
 
-下游在 `session/new` / `session/load` 返回沙箱地址、workspace 和 Agent 分支映射。AgentHub 后端只把该映射保存到 Redis，Inspector 的「文件」面板读取映射后直连下游沙箱文件 API。编辑保存后由下游通过通用 ACP `session/event:file.change` 回传 Diff。
+下游在 `session/new` 返回沙箱地址、workspace 和 Agent 分支映射。AgentHub 后端只把该映射保存到 Redis，Inspector 的「文件」面板读取映射后直连下游沙箱文件 API。编辑保存后由下游通过通用 ACP `session/event:file.change` 回传 Diff。
 
 ### Diff 审查
 
