@@ -413,69 +413,62 @@ export interface ApplyFileChangeResponse {
   status: "queued";
 }
 
-export type SandboxWorkspaceStatus = "ready" | "unavailable" | "error";
-
-export interface SandboxAgentBranchDto {
-  agentId: AgentId;
-  agentName: string;
-  branch: string | null;
-  workspaceId: string | null;
-  status: SandboxWorkspaceStatus;
-  message?: string | null;
-}
-
-export interface SandboxAgentsResponse {
-  items: SandboxAgentBranchDto[];
-  sandboxConfigured: boolean;
-  workspaceId?: string | null;
-}
-
-export interface SandboxConnectRequest {
-  agentId: AgentId;
-}
-
-export interface SandboxConnectResponse {
-  agentId: AgentId;
+export interface SandboxFilesystemConnectionResponse {
   sandboxBaseUrl: string;
-  workspaceId: string;
-  branch: string;
-  latestRunId?: string | null;
+  downstreamSessionId: string;
+  workspaceId?: string | null;
+  branchOptions: string[];
 }
 
-export interface SandboxFileTreeItemDto {
+export interface FilesystemEntryDto {
   path: string;
   name: string;
-  type: "file" | "directory";
-  sizeBytes?: number | null;
-  sha256?: string | null;
-  updatedAt?: ISODateString | null;
+  kind: "file" | "dir";
+  size?: number | null;
+  mtime?: ISODateString | null;
+  version?: string | null;
 }
 
-export interface SandboxFileDto {
+export interface FilesystemReadFileDto {
   path: string;
   content: string;
-  sha256?: string | null;
-  language?: string | null;
-  branch?: string | null;
-  updatedAt?: ISODateString | null;
+  size: number;
+  mtime: ISODateString;
+  version: string;
 }
 
-export interface SandboxSaveFileRequest {
-  agentId: AgentId;
-  path: string;
-  content: string;
-  baseSha?: string | null;
-  branch?: string | null;
-  agenthubSessionId?: string;
-  runId?: string | null;
+export interface FilesystemTextEditDto {
+  startLine: number;
+  startColumn: number;
+  endLine?: number;
+  endColumn?: number;
+  text: string;
 }
 
-export interface SandboxSaveFileResponse {
-  ok: boolean;
+export interface FilesystemUpdateFileDto {
   path: string;
-  branch?: string | null;
-  sha256?: string | null;
-  fileChangeId?: string | null;
+  size: number;
+  mtime: ISODateString;
+  version: string;
+  branchName?: string | null;
+  commitSha?: string | null;
+}
+
+export interface FilesystemSocketErrorDto {
+  code: string;
+  message: string;
+}
+
+export type FilesystemSocketAck<T> =
+  | { requestId?: string; ok: true; data: T }
+  | { requestId?: string; ok: false; error: FilesystemSocketErrorDto };
+
+export interface FilesystemChangedEventDto {
+  path: string;
+  changeType: "write" | "create" | "remove" | "rename" | string;
+  mtime?: ISODateString | null;
+  version?: string | null;
+  actor?: string | null;
 }
 
 export interface PinHubMessageRequest {

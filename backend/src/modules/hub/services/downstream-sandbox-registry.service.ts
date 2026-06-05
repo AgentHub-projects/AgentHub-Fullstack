@@ -1,18 +1,6 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  OnModuleDestroy,
-  ServiceUnavailableException,
-} from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, ServiceUnavailableException } from "@nestjs/common";
 import Redis from "ioredis";
-import type {
-  AgentId,
-  SandboxAgentBranchDto,
-  SandboxAgentsResponse,
-  SandboxConnectResponse,
-} from "@agenthub/shared";
+import type { SandboxFilesystemConnectionResponse } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 
 const SANDBOX_MAPPING_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -28,6 +16,7 @@ export interface DownstreamSandboxMapping {
 
 @Injectable()
 export class DownstreamSandboxRegistryService implements OnModuleDestroy {
+  private readonly logger = new Logger(DownstreamSandboxRegistryService.name);
   private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
@@ -48,6 +37,9 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     const workspaceId = stringValue(sandbox.workspaceId);
     if (!sandboxBaseUrl || !workspaceId) {
       await this.redis.del(mappingKey(agenthubSessionId));
+      this.logger.warn(
+        `[sandbox.mapping.delete] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} reason=missing_sandbox sandboxBaseUrl=${sandboxBaseUrl ?? "missing"} workspaceId=${workspaceId ?? "missing"}`,
+      );
       return;
     }
 
@@ -60,6 +52,9 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
       updatedAt: new Date().toISOString(),
     };
     await this.redis.set(mappingKey(agenthubSessionId), JSON.stringify(mapping), "EX", SANDBOX_MAPPING_TTL_SECONDS);
+    this.logger.log(
+      `[sandbox.mapping.save] agenthubSessionId=${agenthubSessionId} downstreamSessionId=${downstreamSessionId} sandboxBaseUrl=${sandboxBaseUrl} workspaceId=${workspaceId} branchCount=${Object.keys(mapping.agentBranches).length}`,
+    );
   }
 
   async getMapping(sessionId: string): Promise<DownstreamSandboxMapping | null> {
@@ -67,7 +62,7 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     if (!raw) return null;
     try {
       const mapping = JSON.parse(raw) as DownstreamSandboxMapping;
-      if (!mapping.sandboxBaseUrl || !mapping.workspaceId) return null;
+      if (!mapping.sandboxBaseUrl || !mapping.workspaceId || !mapping.downstreamSessionId) return null;
       return {
         agenthubSessionId: mapping.agenthubSessionId,
         downstreamSessionId: mapping.downstreamSessionId,
@@ -81,43 +76,24 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     }
   }
 
-  /** 返回会话内可编辑 Agent 及其下游沙箱分支说明 */
-  async listAgents(sessionId: string): Promise<SandboxAgentsResponse> {
+  /** 返回前端直连 filesystem Socket.IO 所需的下游沙箱信息 */
+  async getFilesystemConnection(sessionId: string): Promise<SandboxFilesystemConnectionResponse> {
     const [session, mapping] = await Promise.all([this.loadSession(sessionId), this.getMapping(sessionId)]);
-    const items: SandboxAgentBranchDto[] = session.participants.map((participant) => {
-      const branch = mapping?.agentBranches[String(participant.agentId)] ?? null;
-      return {
-        agentId: participant.agentId,
-        agentName: participant.agent.name,
-        branch,
-        workspaceId: mapping?.workspaceId ?? null,
-        status: mapping && branch ? "ready" : "unavailable",
-        message: mapping ? (branch ? null : "下游未返回该 Agent 分支") : "下游沙箱尚未就绪",
-      };
-    });
-
-    return { items, sandboxConfigured: Boolean(mapping), workspaceId: mapping?.workspaceId ?? null };
-  }
-
-  /** 返回前端直连下游沙箱所需的地址和分支信息，不签发 AgentHub token */
-  async connect(sessionId: string, agentId: AgentId): Promise<SandboxConnectResponse> {
-    const [session, mapping, latestRunId] = await Promise.all([
-      this.loadSession(sessionId),
-      this.getMapping(sessionId),
-      this.findLatestRunId(sessionId),
-    ]);
-    if (!mapping) throw new ServiceUnavailableException("DOWNSTREAM_SANDBOX_NOT_READY");
-    const participant = session.participants.find((item) => item.agentId === agentId);
-    if (!participant) throw new BadRequestException("AGENT_NOT_IN_SESSION");
-    const branch = mapping.agentBranches[String(agentId)];
-    if (!branch) throw new ServiceUnavailableException("DOWNSTREAM_SANDBOX_AGENT_BRANCH_NOT_READY");
+    if (!mapping) {
+      this.logger.warn(`[filesystem.connect] agenthubSessionId=${sessionId} sandboxMapping=missing`);
+      throw new ServiceUnavailableException("DOWNSTREAM_SANDBOX_NOT_READY");
+    }
+    void session;
+    const branchOptions = uniqueStrings(Object.values(mapping.agentBranches));
+    this.logger.log(
+      `[filesystem.connect] agenthubSessionId=${sessionId} downstreamSessionId=${mapping.downstreamSessionId} sandboxBaseUrl=${mapping.sandboxBaseUrl} workspaceId=${mapping.workspaceId} branchOptions=${JSON.stringify(branchOptions)}`,
+    );
 
     return {
-      agentId,
       sandboxBaseUrl: mapping.sandboxBaseUrl,
+      downstreamSessionId: mapping.downstreamSessionId,
       workspaceId: mapping.workspaceId,
-      branch,
-      latestRunId,
+      branchOptions,
     };
   }
 
@@ -136,14 +112,6 @@ export class DownstreamSandboxRegistryService implements OnModuleDestroy {
     return session;
   }
 
-  private async findLatestRunId(sessionId: string) {
-    const run = await this.prisma.agentRun.findFirst({
-      where: { sessionId },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    return run?.id ?? null;
-  }
 }
 
 function mappingKey(sessionId: string) {
@@ -165,4 +133,8 @@ function stringRecord(value: unknown) {
     if (typeof item === "string" && item.trim()) output[key] = item.trim();
   }
   return output;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }

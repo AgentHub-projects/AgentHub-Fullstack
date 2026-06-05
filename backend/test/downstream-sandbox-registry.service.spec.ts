@@ -79,69 +79,30 @@ describe("DownstreamSandboxRegistryService", () => {
     expect(latestRedis().del).toHaveBeenCalledWith("agenthub:downstream-sandbox:session-1");
   });
 
-  it("lists agents from Redis mapping and marks missing branches unavailable", async () => {
+  it("returns filesystem connection info with downstream session id and branch options", async () => {
     const service = new DownstreamSandboxRegistryService(prismaMock() as any);
     await service.saveFromSessionResult("session-1", "downstream-session-1", {
       sandbox: {
         baseUrl: "http://sandbox.local",
         workspaceId: "workspace-1",
-        agentBranches: { 7: "agent-7" },
+        agentBranches: { 7: "agent-7", 8: "agent-8", duplicate: "agent-7" },
       },
     });
 
-    const result = await service.listAgents("session-1");
+    const result = await service.getFilesystemConnection("session-1");
 
     expect(result).toEqual({
-      sandboxConfigured: true,
-      workspaceId: "workspace-1",
-      items: [
-        {
-          agentId: 7,
-          agentName: "Frontend Agent",
-          branch: "agent-7",
-          workspaceId: "workspace-1",
-          status: "ready",
-          message: null,
-        },
-        {
-          agentId: 8,
-          agentName: "Backend Agent",
-          branch: null,
-          workspaceId: "workspace-1",
-          status: "unavailable",
-          message: "下游未返回该 Agent 分支",
-        },
-      ],
-    });
-  });
-
-  it("returns connection info with latest run id for ready agent", async () => {
-    const service = new DownstreamSandboxRegistryService(prismaMock() as any);
-    await service.saveFromSessionResult("session-1", "downstream-session-1", {
-      sandbox: {
-        baseUrl: "http://sandbox.local",
-        workspaceId: "workspace-1",
-        agentBranches: { 7: "agent-7" },
-      },
-    });
-
-    await expect(service.connect("session-1", 7)).resolves.toEqual({
-      agentId: 7,
       sandboxBaseUrl: "http://sandbox.local",
+      downstreamSessionId: "downstream-session-1",
       workspaceId: "workspace-1",
-      branch: "agent-7",
-      latestRunId: "run-1",
+      branchOptions: ["agent-7", "agent-8"],
     });
-    await expect(service.connect("session-1", 8)).rejects.toThrow("DOWNSTREAM_SANDBOX_AGENT_BRANCH_NOT_READY");
   });
 
-  it("marks agents unavailable when Redis mapping is missing", async () => {
+  it("rejects filesystem connection when Redis mapping is missing", async () => {
     const service = new DownstreamSandboxRegistryService(prismaMock() as any);
 
-    const result = await service.listAgents("session-1");
-
-    expect(result.sandboxConfigured).toBe(false);
-    expect(result.items.map((item) => item.message)).toEqual(["下游沙箱尚未就绪", "下游沙箱尚未就绪"]);
+    await expect(service.getFilesystemConnection("session-1")).rejects.toThrow("DOWNSTREAM_SANDBOX_NOT_READY");
   });
 });
 

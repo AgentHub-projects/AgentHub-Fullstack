@@ -10,6 +10,12 @@ import type {
   CreateHubSessionRequest,
   CreateSessionAgentRequest,
   FrontendRealtimeEnvelope,
+  FilesystemChangedEventDto,
+  FilesystemEntryDto,
+  FilesystemReadFileDto,
+  FilesystemSocketAck,
+  FilesystemTextEditDto,
+  FilesystemUpdateFileDto,
   HubArtifactDto,
   HubArtifactVersionDto,
   HubEventDto,
@@ -21,13 +27,7 @@ import type {
   PinHubMessageRequest,
   DeploymentPreflightResponse,
   ProjectDto,
-  SandboxAgentsResponse,
-  SandboxConnectRequest,
-  SandboxConnectResponse,
-  SandboxFileDto,
-  SandboxFileTreeItemDto,
-  SandboxSaveFileRequest,
-  SandboxSaveFileResponse,
+  SandboxFilesystemConnectionResponse,
   SendBuildMessageRequest,
   SendBuildMessageResponse,
   SendHubMessageRequest,
@@ -235,67 +235,172 @@ export function applyFileChange(sessionId: string, fileChangeId: string) {
   );
 }
 
-export function listSandboxAgents(sessionId: string) {
-  return requestJson<SandboxAgentsResponse>(`/sessions/${encodeURIComponent(sessionId)}/sandbox/agents`);
+export function getSandboxFilesystemConnection(sessionId: string) {
+  return requestJson<SandboxFilesystemConnectionResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/sandbox/filesystem`,
+  );
 }
 
-export function connectSandbox(sessionId: string, body: SandboxConnectRequest) {
-  return requestJson<SandboxConnectResponse>(`/sessions/${encodeURIComponent(sessionId)}/sandbox/connect`, {
-    method: "POST",
-    body: JSON.stringify(body),
+export type SandboxFilesystemClient = {
+  list: (path?: string, depth?: number) => Promise<ApiResult<{ entries: FilesystemEntryDto[] }>>;
+  read: (path: string, lineStart?: number, lineEnd?: number) => Promise<ApiResult<FilesystemReadFileDto>>;
+  update: (input: {
+    path: string;
+    expectedVersion?: string | null;
+    edits: FilesystemTextEditDto[];
+    createDirs?: boolean;
+  }) => Promise<ApiResult<FilesystemUpdateFileDto>>;
+  disconnect: () => void;
+};
+
+export function connectSandboxFilesystemSocket(
+  connection: SandboxFilesystemConnectionResponse,
+  options: {
+    branch?: string;
+    onState?: (state: SocketState) => void;
+    onChanged?: (event: FilesystemChangedEventDto) => void;
+  } = {},
+): SandboxFilesystemClient {
+  const query: Record<string, string> = { sessionId: connection.downstreamSessionId };
+  if (options.branch?.trim()) query.branch = options.branch.trim();
+  logFilesystem("connect:start", {
+    sandboxBaseUrl: connection.sandboxBaseUrl,
+    downstreamSessionId: connection.downstreamSessionId,
+    branch: query.branch ?? "main(default)",
+    path: "/filesystem/socket.io",
+  });
+
+  const socket = io(connection.sandboxBaseUrl, {
+    path: "/filesystem/socket.io",
+    transports: ["websocket"],
+    query,
+  });
+
+  const ready = new Promise<ApiResult<void>>((resolve) => {
+    socket.once("connect", () => {
+      logFilesystem("connect:ok", {
+        socketId: socket.id,
+        downstreamSessionId: connection.downstreamSessionId,
+        branch: query.branch ?? "main(default)",
+      });
+      options.onState?.("connected");
+      resolve({ ok: true, data: undefined });
+    });
+    socket.once("connect_error", (error) => {
+      logFilesystem("connect:error", {
+        downstreamSessionId: connection.downstreamSessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      options.onState?.("unavailable");
+      resolve({ ok: false, error: error instanceof Error ? error.message : "Filesystem socket unavailable" });
+    });
+  });
+
+  options.onState?.("connecting");
+  socket.on("disconnect", (reason) => {
+    logFilesystem("disconnect", { downstreamSessionId: connection.downstreamSessionId, reason });
+    options.onState?.("disconnected");
+  });
+  socket.on("fs:changed", (event: FilesystemChangedEventDto) => {
+    logFilesystem("event:fs:changed", { downstreamSessionId: connection.downstreamSessionId, event });
+    options.onChanged?.(event);
+  });
+
+  return {
+    list: (path = ".", depth = 1) =>
+      emitFilesystemAck(socket, ready, "fs:list", connection.downstreamSessionId, {
+        requestId: requestId("list"),
+        path: path || ".",
+        depth,
+      }),
+    read: (path, lineStart = 0, lineEnd = 0) =>
+      emitFilesystemAck(socket, ready, "fs:read", connection.downstreamSessionId, {
+        requestId: requestId("read"),
+        path,
+        lineStart,
+        lineEnd,
+      }),
+    update: (input) =>
+      emitFilesystemAck(socket, ready, "fs:update", connection.downstreamSessionId, {
+        requestId: requestId("update"),
+        path: input.path,
+        expectedVersion: input.expectedVersion || undefined,
+        edits: input.edits,
+        createDirs: input.createDirs,
+      }),
+    disconnect: () => socket.disconnect(),
+  };
+}
+
+async function emitFilesystemAck<T>(
+  socket: Socket,
+  ready: Promise<ApiResult<void>>,
+  event: "fs:list" | "fs:read" | "fs:update",
+  downstreamSessionId: string,
+  payload: Record<string, unknown>,
+): Promise<ApiResult<T>> {
+  const connected = socket.connected ? { ok: true, data: undefined } as const : await ready;
+  if (!connected.ok) return connected;
+  logFilesystem("request", { downstreamSessionId, event, payload: sanitizeFilesystemPayload(payload) });
+
+  return new Promise((resolve) => {
+    socket.timeout(15000).emit(event, payload, (error: Error | null, response?: FilesystemSocketAck<T>) => {
+      if (error) {
+        logFilesystem("response:error", { downstreamSessionId, event, message: error.message });
+        resolve({ ok: false, error: error.message || "Filesystem socket timeout" });
+        return;
+      }
+      if (!response) {
+        logFilesystem("response:empty", { downstreamSessionId, event });
+        resolve({ ok: false, error: "Filesystem socket returned empty response" });
+        return;
+      }
+      if (!response.ok) {
+        logFilesystem("response:failed", { downstreamSessionId, event, response });
+        resolve({ ok: false, error: response.error.message || response.error.code });
+        return;
+      }
+      logFilesystem("response:ok", { downstreamSessionId, event, response: summarizeFilesystemResponse(response) });
+      resolve({ ok: true, data: response.data });
+    });
   });
 }
 
-async function requestSandboxJson<T>(
-  connection: SandboxConnectResponse,
-  path: string,
-  init?: RequestInit,
-): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(`${connection.sandboxBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...init?.headers,
+function requestId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logFilesystem(stage: string, details: Record<string, unknown>) {
+  console.info(`[filesystem] ${stage}`, details);
+}
+
+function sanitizeFilesystemPayload(payload: Record<string, unknown>) {
+  if (!Array.isArray(payload.edits)) return payload;
+  return {
+    ...payload,
+    edits: payload.edits.map((edit) => {
+      if (!edit || typeof edit !== "object") return edit;
+      const item = edit as Record<string, unknown>;
+      return { ...item, textLength: typeof item.text === "string" ? item.text.length : 0 };
+    }),
+  };
+}
+
+function summarizeFilesystemResponse<T>(response: FilesystemSocketAck<T>) {
+  if (!response.ok) return response;
+  const data = response.data;
+  if (data && typeof data === "object" && "content" in data) {
+    const record = data as Record<string, unknown>;
+    return {
+      ...response,
+      data: {
+        ...record,
+        contentLength: typeof record.content === "string" ? record.content.length : 0,
+        content: undefined,
       },
-    });
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-      return { ok: false, error: payload?.message ?? `HTTP ${response.status}` };
-    }
-    return { ok: true, data: (await response.json()) as T };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Sandbox request failed" };
+    };
   }
-}
-
-export function listSandboxTree(connection: SandboxConnectResponse, path = "") {
-  const params = new URLSearchParams({ agentId: String(connection.agentId) });
-  if (path) params.set("path", path);
-  return requestSandboxJson<{ items: SandboxFileTreeItemDto[] }>(
-    connection,
-    `/workspaces/${encodeURIComponent(connection.workspaceId)}/tree?${params.toString()}`,
-  );
-}
-
-export function readSandboxFile(connection: SandboxConnectResponse, path: string) {
-  const params = new URLSearchParams({ agentId: String(connection.agentId), path });
-  return requestSandboxJson<SandboxFileDto>(
-    connection,
-    `/workspaces/${encodeURIComponent(connection.workspaceId)}/files?${params.toString()}`,
-  );
-}
-
-export function saveSandboxFile(connection: SandboxConnectResponse, body: SandboxSaveFileRequest) {
-  return requestSandboxJson<SandboxSaveFileResponse>(
-    connection,
-    `/workspaces/${encodeURIComponent(connection.workspaceId)}/files`,
-    {
-      method: "PUT",
-      body: JSON.stringify(body),
-    },
-  );
+  return response;
 }
 
 export function startDeployment(sessionId: string) {

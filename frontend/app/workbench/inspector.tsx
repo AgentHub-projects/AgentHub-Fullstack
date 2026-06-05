@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type {
   AgentInstanceDto,
@@ -9,10 +9,9 @@ import type {
   HubArtifactVersionDto,
   HubEventDto,
   HubFileChangeDto,
-  SandboxAgentBranchDto,
-  SandboxConnectResponse,
-  SandboxFileDto,
-  SandboxFileTreeItemDto,
+  FilesystemEntryDto,
+  FilesystemReadFileDto,
+  SandboxFilesystemConnectionResponse,
   SessionDiffContextDto,
 } from "@agenthub/shared";
 import {
@@ -35,12 +34,10 @@ import {
 } from "@ant-design/icons";
 import {
   artifactContentUrl,
-  connectSandbox,
+  connectSandboxFilesystemSocket,
+  getSandboxFilesystemConnection,
   listArtifactVersions,
-  listSandboxAgents,
-  listSandboxTree,
-  readSandboxFile,
-  saveSandboxFile,
+  type SandboxFilesystemClient,
 } from "../../lib/agenthub-api";
 import { publicArtifactUrlFromArtifact, pptSlidesFromMetadata } from "../../lib/workbench/artifact-preview";
 import {
@@ -49,6 +46,7 @@ import {
   diffMarker,
   parseUnifiedPatch,
 } from "../../lib/workbench/diff";
+import { buildTextEdits, sortFilesystemEntries } from "../../lib/workbench/filesystem";
 import type { DiffLine } from "../../lib/workbench/types";
 import {
   artifactLabel,
@@ -271,47 +269,68 @@ export function FilePanel({
   onNotice?: (message: string) => void;
   onFileOpened?: (path: string) => void;
 }) {
-  const [agents, setAgents] = useState<SandboxAgentBranchDto[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
-  const [connection, setConnection] = useState<SandboxConnectResponse | null>(null);
+  const clientRef = useRef<SandboxFilesystemClient | null>(null);
+  const currentPathRef = useRef("");
+  const fileRef = useRef<FilesystemReadFileDto | null>(null);
+  const draftRef = useRef("");
+  const [connection, setConnection] = useState<SandboxFilesystemConnectionResponse | null>(null);
+  const [branch, setBranch] = useState("");
+  const [socketState, setSocketState] = useState<"connecting" | "connected" | "disconnected" | "unavailable">("disconnected");
   const [currentPath, setCurrentPath] = useState("");
-  const [treeItems, setTreeItems] = useState<SandboxFileTreeItemDto[]>([]);
-  const [file, setFile] = useState<SandboxFileDto | null>(null);
+  const [treeItems, setTreeItems] = useState<FilesystemEntryDto[]>([]);
+  const [file, setFile] = useState<FilesystemReadFileDto | null>(null);
   const [draft, setDraft] = useState("");
-  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [loadingConnection, setLoadingConnection] = useState(false);
   const [loadingTree, setLoadingTree] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedAgent = agents.find((agent) => agent.agentId === selectedAgentId) ?? null;
-  const canUseSandbox = Boolean(sessionId && !disabledReason);
+  const canUseSandbox = Boolean(sessionId && !disabledReason && connection);
   const dirty = Boolean(file && draft !== file.content);
+  const branchOptions = connection?.branchOptions.filter((item) => item !== "main") ?? [];
+  const branchLabel = branch || "main";
 
   useEffect(() => {
-    setAgents([]);
-    setSelectedAgentId(null);
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+
+  useEffect(() => {
+    fileRef.current = file;
+  }, [file]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    clientRef.current?.disconnect();
+    clientRef.current = null;
     setConnection(null);
+    setBranch("");
+    setSocketState("disconnected");
     setCurrentPath("");
     setTreeItems([]);
     setFile(null);
     setDraft("");
     setError("");
+    setLoadingConnection(false);
+    setLoadingTree(false);
+    setLoadingFile(false);
+    setSaving(false);
     if (!sessionId || disabledReason) return;
 
     let cancelled = false;
-    setLoadingAgents(true);
-    void listSandboxAgents(sessionId).then((result) => {
+    setLoadingConnection(true);
+    void getSandboxFilesystemConnection(sessionId).then((result) => {
       if (cancelled) return;
-      setLoadingAgents(false);
+      setLoadingConnection(false);
       if (!result.ok) {
-        setError(`沙箱 Agent 加载失败：${result.error}`);
+        setError(`沙箱文件视图尚未就绪：${result.error}`);
         return;
       }
-      setAgents(result.data.items);
-      const firstReady = result.data.items.find((agent) => agent.status === "ready") ?? result.data.items[0] ?? null;
-      setSelectedAgentId(firstReady?.agentId ?? null);
-      if (!result.data.sandboxConfigured) setError("下游沙箱尚未就绪，请先发起一次运行");
+      setConnection(result.data);
+      setError("");
     });
 
     return () => {
@@ -320,58 +339,71 @@ export function FilePanel({
   }, [sessionId, disabledReason]);
 
   useEffect(() => {
-    if (!sessionId || !selectedAgentId || disabledReason) return;
-    if (selectedAgent && selectedAgent.status !== "ready") return;
-    void connectAndLoadRoot(selectedAgentId);
-  }, [sessionId, selectedAgentId, selectedAgent?.status, disabledReason]);
+    clientRef.current?.disconnect();
+    clientRef.current = null;
+    setCurrentPath("");
+    setTreeItems([]);
+    setFile(null);
+    setDraft("");
+    if (!connection || disabledReason) return;
 
-  async function ensureConnection(agentId: number) {
-    if (!sessionId) return null;
-    if (connection && connection.agentId === agentId) return connection;
+    const client = connectSandboxFilesystemSocket(connection, {
+      branch: branch.trim() || undefined,
+      onState: setSocketState,
+      onChanged: (event) => handleFilesystemChanged(event.path),
+    });
+    clientRef.current = client;
+    void loadTree(client, "");
 
-    const result = await connectSandbox(sessionId, { agentId });
-    if (!result.ok) {
-      setError(`沙箱连接失败：${result.error}`);
-      return null;
+    return () => {
+      client.disconnect();
+      if (clientRef.current === client) clientRef.current = null;
+    };
+  }, [connection?.sandboxBaseUrl, connection?.downstreamSessionId, branch, disabledReason]);
+
+  function handleFilesystemChanged(changedPath: string) {
+    const client = clientRef.current;
+    if (!client) return;
+    void loadTree(client, currentPathRef.current);
+    const openedFile = fileRef.current;
+    if (openedFile && openedFile.path === changedPath && draftRef.current === openedFile.content) {
+      void readFile(client, openedFile.path, { silent: true });
     }
-    setConnection(result.data);
-    setError("");
-    return result.data;
   }
 
-  async function connectAndLoadRoot(agentId: number) {
-    const nextConnection = await ensureConnection(agentId);
-    if (!nextConnection) return;
-    await loadTree(nextConnection, "");
-  }
-
-  async function loadTree(nextConnection: SandboxConnectResponse, path: string) {
+  async function loadTree(client: SandboxFilesystemClient, path: string) {
     setLoadingTree(true);
-    const result = await listSandboxTree(nextConnection, path);
+    const nextPath = normalizeDirectoryPath(path);
+    const result = await client.list(nextPath || ".", 1);
     setLoadingTree(false);
     if (!result.ok) {
       setError(`文件列表加载失败：${result.error}`);
       return;
     }
-    setCurrentPath(path);
-    setTreeItems(result.data.items);
+    setCurrentPath(nextPath);
+    setTreeItems(sortFilesystemEntries(result.data.entries));
     setError("");
   }
 
   async function openDirectory(path: string) {
-    if (!selectedAgentId) return;
-    const nextConnection = await ensureConnection(selectedAgentId);
-    if (nextConnection) await loadTree(nextConnection, path);
+    const client = clientRef.current;
+    if (!client) return;
+    await loadTree(client, path);
   }
 
   async function openFile(path: string) {
-    if (!selectedAgentId) return;
-    const nextConnection = await ensureConnection(selectedAgentId);
-    if (!nextConnection) return;
-    onFileOpened?.(path);
-    setLoadingFile(true);
-    const result = await readSandboxFile(nextConnection, path);
-    setLoadingFile(false);
+    const client = clientRef.current;
+    if (!client) return;
+    await readFile(client, path);
+  }
+
+  async function readFile(client: SandboxFilesystemClient, path: string, options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      onFileOpened?.(path);
+      setLoadingFile(true);
+    }
+    const result = await client.read(path, 0, 0);
+    if (!options.silent) setLoadingFile(false);
     if (!result.ok) {
       setError(`文件读取失败：${result.error}`);
       return;
@@ -382,22 +414,15 @@ export function FilePanel({
   }
 
   async function saveFile() {
-    if (!sessionId || !selectedAgentId || !file || saving) return;
-    const nextConnection = await ensureConnection(selectedAgentId);
-    if (!nextConnection) return;
-    if (!nextConnection.latestRunId) {
-      setError("下游运行信息尚未就绪，暂不能保存文件");
-      return;
-    }
+    const client = clientRef.current;
+    if (!sessionId || !client || !file || saving) return;
+    const edits = buildTextEdits(file.content, draft);
+    if (edits.length === 0) return;
     setSaving(true);
-    const result = await saveSandboxFile(nextConnection, {
-      agentId: selectedAgentId,
+    const result = await client.update({
       path: file.path,
-      content: draft,
-      baseSha: file.sha256 ?? null,
-      branch: nextConnection.branch,
-      agenthubSessionId: sessionId,
-      runId: nextConnection.latestRunId,
+      expectedVersion: file.version,
+      edits,
     });
     setSaving(false);
     if (!result.ok) {
@@ -405,21 +430,29 @@ export function FilePanel({
       return;
     }
     const nextFile = {
-      ...file,
+      path: result.data.path,
       content: draft,
-      sha256: result.data.sha256 ?? file.sha256 ?? null,
-      branch: result.data.branch ?? nextConnection.branch,
+      size: result.data.size,
+      mtime: result.data.mtime,
+      version: result.data.version,
     };
     setFile(nextFile);
     setDraft(nextFile.content);
     setError("");
-    onNotice?.("已保存到下游沙箱，等待下游回传 Diff");
+    onNotice?.(`已保存到 ${result.data.branchName ?? branchLabel}`);
     onSaved?.();
+    void loadTree(client, currentPath);
+  }
+
+  function handleBranchChange(nextBranch: string) {
+    if (dirty && !window.confirm("当前文件未保存，切换分支会丢弃编辑，是否继续？")) return;
+    setBranch(nextBranch);
+    setError("");
   }
 
   const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
   const fileName = file ? fileNameFromPath(file.path) : "";
-  const fileLanguage = file?.language ?? "text";
+  const fileLanguage = file ? languageFromPath(file.path) : "text";
 
   return (
     <div className={`panelScroll filePanel ${file ? "hasFile" : ""}`}>
@@ -431,28 +464,29 @@ export function FilePanel({
             <div className="fileExplorerHeader">
               <div>
                 <strong><FolderOpenOutlined /> 资源管理器</strong>
-                <span>{selectedAgent?.agentName ?? "选择 Agent"}</span>
+                <span>{connection ? `${branchLabel} · ${socketStateLabel(socketState)}` : "未连接"}</span>
               </div>
               <button
                 type="button"
                 title="刷新文件列表"
-                disabled={!selectedAgentId || selectedAgent?.status !== "ready" || !canUseSandbox || loadingTree}
-                onClick={() => selectedAgentId && void connectAndLoadRoot(selectedAgentId)}
+                disabled={!canUseSandbox || loadingTree || socketState !== "connected"}
+                onClick={() => clientRef.current && void loadTree(clientRef.current, currentPath)}
               >
                 <ReloadOutlined />
               </button>
             </div>
 
             <label className="fileAgentPicker">
-              <span>Agent</span>
+              <span>分支</span>
               <select
-                value={selectedAgentId ?? ""}
-                disabled={loadingAgents || agents.length === 0}
-                onChange={(event) => setSelectedAgentId(Number(event.target.value))}
+                value={branch}
+                disabled={loadingConnection || !connection}
+                onChange={(event) => handleBranchChange(event.target.value)}
               >
-                {agents.map((agent) => (
-                  <option disabled={agent.status !== "ready"} key={agent.agentId} value={agent.agentId}>
-                    {agent.agentName} {agent.branch ? `· ${agent.branch}` : ""}
+                <option value="">main（默认）</option>
+                {branchOptions.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
                   </option>
                 ))}
               </select>
@@ -470,22 +504,24 @@ export function FilePanel({
                 )}
               </div>
               <div className="fileTreeList">
-                {loadingTree ? (
+                {loadingConnection || socketState === "connecting" ? (
+                  <span className="fileMuted">正在连接沙箱...</span>
+                ) : loadingTree ? (
                   <span className="fileMuted">正在加载文件...</span>
                 ) : treeItems.length === 0 ? (
                   <span className="fileMuted">暂无文件</span>
                 ) : (
                   treeItems.map((item) => (
                     <button
-                      className={`fileTreeItem ${item.type} ${file?.path === item.path ? "active" : ""}`}
+                      className={`fileTreeItem ${item.kind === "dir" ? "directory" : "file"} ${file?.path === item.path ? "active" : ""}`}
                       type="button"
                       title={item.path}
-                      key={`${item.type}:${item.path}`}
-                      onClick={() => (item.type === "directory" ? void openDirectory(item.path) : void openFile(item.path))}
+                      key={`${item.kind}:${item.path}`}
+                      onClick={() => (item.kind === "dir" ? void openDirectory(item.path) : void openFile(item.path))}
                     >
-                      {item.type === "directory" ? <RightOutlined /> : <FileOutlined />}
+                      {item.kind === "dir" ? <RightOutlined /> : <FileOutlined />}
                       <span>{item.name}</span>
-                      {item.type === "file" && item.sizeBytes != null ? <small>{formatBytes(item.sizeBytes)}</small> : null}
+                      {item.kind === "file" && item.size != null ? <small>{formatBytes(item.size)}</small> : null}
                     </button>
                   ))
                 )}
@@ -526,7 +562,7 @@ export function FilePanel({
             )}
             <footer className="fileEditorStatus">
               <span>{file ? fileLanguage : "No file"}</span>
-              <span>{file ? `${draft.length} 字符` : "Ready"}</span>
+              <span>{file ? `${draft.length} 字符 · ${formatBytes(file.size)}` : "Ready"}</span>
               <span>{dirty ? "已修改" : file ? "已同步" : "空闲"}</span>
             </footer>
           </section>
@@ -1003,8 +1039,32 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function normalizeDirectoryPath(path: string) {
+  return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
 function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function languageFromPath(path: string) {
+  const ext = fileNameFromPath(path).split(".").at(-1)?.toLowerCase();
+  if (!ext) return "text";
+  if (["ts", "tsx"].includes(ext)) return "typescript";
+  if (["js", "jsx", "mjs", "cjs"].includes(ext)) return "javascript";
+  if (ext === "json") return "json";
+  if (ext === "css") return "css";
+  if (ext === "html") return "html";
+  if (["md", "mdx"].includes(ext)) return "markdown";
+  if (["yml", "yaml"].includes(ext)) return "yaml";
+  return ext;
+}
+
+function socketStateLabel(state: "connecting" | "connected" | "disconnected" | "unavailable") {
+  if (state === "connected") return "已连接";
+  if (state === "connecting") return "连接中";
+  if (state === "unavailable") return "不可用";
+  return "已断开";
 }
 
 function PanelEmpty({ icon, text }: { icon: React.ReactNode; text: string }) {
