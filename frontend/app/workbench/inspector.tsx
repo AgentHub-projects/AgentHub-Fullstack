@@ -275,6 +275,7 @@ export function FilePanel({
   const draftRef = useRef("");
   const [connection, setConnection] = useState<SandboxFilesystemConnectionResponse | null>(null);
   const [branch, setBranch] = useState("");
+  const [branchDraft, setBranchDraft] = useState("");
   const [socketState, setSocketState] = useState<"connecting" | "connected" | "disconnected" | "unavailable">("disconnected");
   const [currentPath, setCurrentPath] = useState("");
   const [treeItems, setTreeItems] = useState<FilesystemEntryDto[]>([]);
@@ -288,7 +289,6 @@ export function FilePanel({
 
   const canUseSandbox = Boolean(sessionId && !disabledReason && connection);
   const dirty = Boolean(file && draft !== file.content);
-  const branchOptions = connection?.branchOptions.filter((item) => item !== "main") ?? [];
   const branchLabel = branch || "main";
 
   useEffect(() => {
@@ -308,6 +308,7 @@ export function FilePanel({
     clientRef.current = null;
     setConnection(null);
     setBranch("");
+    setBranchDraft("");
     setSocketState("disconnected");
     setCurrentPath("");
     setTreeItems([]);
@@ -359,7 +360,7 @@ export function FilePanel({
       client.disconnect();
       if (clientRef.current === client) clientRef.current = null;
     };
-  }, [connection?.sandboxBaseUrl, connection?.downstreamSessionId, branch, disabledReason]);
+  }, [connection?.downstreamSessionId, branch, disabledReason]);
 
   function handleFilesystemChanged(changedPath: string) {
     const client = clientRef.current;
@@ -445,8 +446,14 @@ export function FilePanel({
   }
 
   function handleBranchChange(nextBranch: string) {
-    if (dirty && !window.confirm("当前文件未保存，切换分支会丢弃编辑，是否继续？")) return;
-    setBranch(nextBranch);
+    const normalized = nextBranch.trim();
+    if (normalized === branch) return;
+    if (dirty && !window.confirm("当前文件未保存，切换分支会丢弃编辑，是否继续？")) {
+      setBranchDraft(branch);
+      return;
+    }
+    setBranch(normalized);
+    setBranchDraft(normalized);
     setError("");
   }
 
@@ -478,18 +485,16 @@ export function FilePanel({
 
             <label className="fileAgentPicker">
               <span>分支</span>
-              <select
-                value={branch}
+              <input
+                value={branchDraft}
                 disabled={loadingConnection || !connection}
-                onChange={(event) => handleBranchChange(event.target.value)}
-              >
-                <option value="">main（默认）</option>
-                {branchOptions.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
+                placeholder="main"
+                onBlur={(event) => handleBranchChange(event.target.value)}
+                onChange={(event) => setBranchDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
             </label>
 
             {error && <div className="filePanelNotice">{error}</div>}

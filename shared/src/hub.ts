@@ -414,10 +414,7 @@ export interface ApplyFileChangeResponse {
 }
 
 export interface SandboxFilesystemConnectionResponse {
-  sandboxBaseUrl: string;
   downstreamSessionId: string;
-  workspaceId?: string | null;
-  branchOptions: string[];
 }
 
 export interface FilesystemEntryDto {

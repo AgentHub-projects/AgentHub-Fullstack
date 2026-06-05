@@ -52,6 +52,7 @@ export type SocketState = "connecting" | "connected" | "disconnected" | "unavail
 const RAW_API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3001";
 const API_BASE_URL = RAW_API_BASE.endsWith("/api") ? RAW_API_BASE : `${RAW_API_BASE}/api`;
 const SOCKET_URL = RAW_API_BASE.replace(/\/api$/, "");
+const FILESYSTEM_SOCKET_ORIGIN = process.env.NEXT_PUBLIC_DOWNSTREAM_FILESYSTEM_ORIGIN?.replace(/\/$/, "") ?? "";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
@@ -263,14 +264,16 @@ export function connectSandboxFilesystemSocket(
 ): SandboxFilesystemClient {
   const query: Record<string, string> = { sessionId: connection.downstreamSessionId };
   if (options.branch?.trim()) query.branch = options.branch.trim();
+  const origin = filesystemSocketOrigin();
   logFilesystem("connect:start", {
-    sandboxBaseUrl: connection.sandboxBaseUrl,
+    origin,
     downstreamSessionId: connection.downstreamSessionId,
     branch: query.branch ?? "main(default)",
     path: "/filesystem/socket.io",
+    query,
   });
 
-  const socket = io(connection.sandboxBaseUrl, {
+  const socket = io(origin, {
     path: "/filesystem/socket.io",
     transports: ["websocket"],
     query,
@@ -341,7 +344,7 @@ async function emitFilesystemAck<T>(
 ): Promise<ApiResult<T>> {
   const connected = socket.connected ? { ok: true, data: undefined } as const : await ready;
   if (!connected.ok) return connected;
-  logFilesystem("request", { downstreamSessionId, event, payload: sanitizeFilesystemPayload(payload) });
+  logFilesystem("request", { downstreamSessionId, event, payload });
 
   return new Promise((resolve) => {
     socket.timeout(15000).emit(event, payload, (error: Error | null, response?: FilesystemSocketAck<T>) => {
@@ -360,7 +363,7 @@ async function emitFilesystemAck<T>(
         resolve({ ok: false, error: response.error.message || response.error.code });
         return;
       }
-      logFilesystem("response:ok", { downstreamSessionId, event, response: summarizeFilesystemResponse(response) });
+      logFilesystem("response:ok", { downstreamSessionId, event, response });
       resolve({ ok: true, data: response.data });
     });
   });
@@ -374,33 +377,10 @@ function logFilesystem(stage: string, details: Record<string, unknown>) {
   console.info(`[filesystem] ${stage}`, details);
 }
 
-function sanitizeFilesystemPayload(payload: Record<string, unknown>) {
-  if (!Array.isArray(payload.edits)) return payload;
-  return {
-    ...payload,
-    edits: payload.edits.map((edit) => {
-      if (!edit || typeof edit !== "object") return edit;
-      const item = edit as Record<string, unknown>;
-      return { ...item, textLength: typeof item.text === "string" ? item.text.length : 0 };
-    }),
-  };
-}
-
-function summarizeFilesystemResponse<T>(response: FilesystemSocketAck<T>) {
-  if (!response.ok) return response;
-  const data = response.data;
-  if (data && typeof data === "object" && "content" in data) {
-    const record = data as Record<string, unknown>;
-    return {
-      ...response,
-      data: {
-        ...record,
-        contentLength: typeof record.content === "string" ? record.content.length : 0,
-        content: undefined,
-      },
-    };
-  }
-  return response;
+function filesystemSocketOrigin() {
+  if (FILESYSTEM_SOCKET_ORIGIN) return FILESYSTEM_SOCKET_ORIGIN;
+  if (typeof window !== "undefined") return window.location.origin;
+  return SOCKET_URL;
 }
 
 export function startDeployment(sessionId: string) {
