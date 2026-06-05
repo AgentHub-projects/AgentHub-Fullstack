@@ -262,12 +262,14 @@ export function FilePanel({
   onSaved,
   onNotice,
   onFileOpened,
+  onFileContentLoaded,
 }: {
   sessionId?: string | null;
   disabledReason?: string;
   onSaved?: () => void;
   onNotice?: (message: string) => void;
   onFileOpened?: (path: string) => void;
+  onFileContentLoaded?: (path: string, content: string) => void;
 }) {
   const clientRef = useRef<SandboxFilesystemClient | null>(null);
   const currentPathRef = useRef("");
@@ -411,6 +413,7 @@ export function FilePanel({
     }
     setFile(result.data);
     setDraft(result.data.content);
+    onFileContentLoaded?.(result.data.path, result.data.content);
     setError("");
   }
 

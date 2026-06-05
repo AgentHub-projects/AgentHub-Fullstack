@@ -275,7 +275,7 @@ export function connectSandboxFilesystemSocket(
 
   const socket = io(origin, {
     path: "/filesystem/socket.io",
-    transports: ["websocket"],
+    transports: ["websocket", "polling"],
     query,
   });
 

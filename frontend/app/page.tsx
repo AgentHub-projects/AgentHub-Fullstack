@@ -160,6 +160,7 @@ export default function WorkbenchPage() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [sessionRailCollapsed, setSessionRailCollapsed] = useState(false);
   const [openedFilePath, setOpenedFilePath] = useState<string | null>(null);
+  const [filesystemFileContents, setFilesystemFileContents] = useState<Record<string, { content: string; language?: string }>>({});
   const [activeArtifactViewerId, setActiveArtifactViewerId] = useState<string | null>(null);
   const [activePartViewer, setActivePartViewer] = useState<HubMessagePartDto | null>(null);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -1023,6 +1024,12 @@ export default function WorkbenchPage() {
     setSessionRailCollapsed(true);
   }
 
+  function handleFilesystemFileLoaded(path: string, content: string) {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    const langMap: Record<string, string> = { ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", py: "python", css: "css", html: "html", json: "json", md: "markdown" };
+    setFilesystemFileContents((prev) => ({ ...prev, [path]: { content, language: langMap[ext] ?? ext } }));
+  }
+
   function addReplyTarget(message: HubMessageDto) {
     if (!sessionWritable) return;
     setReplyTargets((current) => {
@@ -1588,11 +1595,28 @@ export default function WorkbenchPage() {
                 onSaved={() => setInspectorTab("diff")}
                 onNotice={setNotice}
                 onFileOpened={handleFileOpened}
+                onFileContentLoaded={handleFilesystemFileLoaded}
               />
             )}
             {inspectorTab === "diff" && (
               <DiffPanel
-                changes={detail?.fileChanges ?? []}
+                changes={[
+                  ...(detail?.fileChanges ?? []),
+                  ...Object.entries(filesystemFileContents).map(([path, file]) => ({
+                    id: `fs-${path}`,
+                    sessionId: activeSessionId ?? "",
+                    runId: "",
+                    path,
+                    changeType: "modified" as const,
+                    language: file.language ?? null,
+                    afterContent: file.content,
+                    beforeTruncated: false,
+                    afterTruncated: false,
+                    stats: {} as Record<string, unknown>,
+                    metadata: {} as Record<string, unknown>,
+                    createdAt: new Date().toISOString(),
+                  })),
+                ]}
                 diffContext={activeSessionId ? diffContexts[activeSessionId] : undefined}
                 applyingId={applyingFileChangeId}
                 onApply={handleApplyFileChange}

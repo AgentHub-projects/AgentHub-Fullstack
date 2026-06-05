@@ -86,9 +86,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       });
       const downstreamSessionId = await connection.downstreamReady;
       this.logger.log(`[startRun] 下游就绪 downstreamSessionId=${downstreamSessionId} 需bootstrap=${connection.needsBootstrap}`);
-      if (!sessionDownstreamId && downstreamSessionId) {
+      if (downstreamSessionId && downstreamSessionId !== sessionDownstreamId) {
         await this.persistSessionDownstreamId(input.sessionId, downstreamSessionId);
-        this.logger.log(`[startRun] 下游sessionId已持久化到sessions表`);
+        this.logger.log(`[startRun] 下游sessionId已更新到sessions表: ${sessionDownstreamId} → ${downstreamSessionId}`);
       }
       const needsBootstrap = connection.needsBootstrap;
       const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
@@ -366,51 +366,33 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
 
     // ACP handshake - 有缓存的下游session就复用
-    const loadSessionId = record.downstreamSessionId;
+    // 有缓存的下游sessionId → 直接复用，下游不支持session/load
+    if (record.downstreamSessionId) {
+      this.logger.log(`[握手] 复用下游sessionId=${record.downstreamSessionId}`);
+      record.resolveDownstreamReady?.(record.downstreamSessionId);
+      this.markDownstreamActivity(record);
+      this.scheduleIdleDisconnectCheck(record);
+      return record;
+    }
+
     const initParams = { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } };
     this.logger.log(`[发送JSON] initialize: ${JSON.stringify({ jsonrpc: "2.0", method: "initialize", params: initParams })}`);
     acp.notify("initialize", initParams);
 
     try {
-      const method = loadSessionId ? "session/load" : "session/new";
-      const sessionParams = loadSessionId
-        ? { sessionId: loadSessionId }
-        : { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] };
-      this.logger.log(`[发送JSON] ${method}: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method, params: sessionParams })}`);
-      const result = await acp.request(method, sessionParams);
-      const resultSessionId = stringValue(result.sessionId) ?? loadSessionId;
+      const sessionParams = { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] };
+      this.logger.log(`[发送JSON] session/new: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/new", params: sessionParams })}`);
+      const result = await acp.request("session/new", sessionParams);
+      const resultSessionId = stringValue(result.sessionId);
       if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
-      this.logger.log(`[接收JSON] ${method}响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result })}`);
+      this.logger.log(`[接收JSON] session/new响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result })}`);
       record.downstreamSessionId = resultSessionId;
-      record.needsBootstrap = !loadSessionId;
+      record.needsBootstrap = true;
       record.loadedActiveRun = readActiveRun(result);
       await this.refreshSandboxMapping(sessionId, resultSessionId, result);
       record.resolveDownstreamReady?.(resultSessionId);
     } catch (error) {
-      this.logger.error(`[握手] 失败 ${error instanceof Error ? error.message : String(error)}`);
-      if (loadSessionId && !record.activeRunId && options.allowSessionNewFallback !== false) {
-        record.downstreamSessionId = undefined;
-        record.needsBootstrap = true;
-        try {
-          const result = await acp.request("session/new", {
-            _meta: { agentId: String(agent.id), agenthubSessionId: sessionId },
-            mcpServers: [],
-          });
-          const resultSessionId = stringValue(result.sessionId);
-          if (!resultSessionId) throw new Error("DOWNSTREAM_SESSION_ID_MISSING");
-          record.downstreamSessionId = resultSessionId;
-          record.loadedActiveRun = undefined;
-          await this.refreshSandboxMapping(sessionId, resultSessionId, result);
-          record.resolveDownstreamReady?.(resultSessionId);
-        } catch (fallbackError) {
-          record.rejectDownstreamReady?.(
-            fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)),
-          );
-        }
-        this.markDownstreamActivity(record);
-        this.scheduleIdleDisconnectCheck(record);
-        return record;
-      }
+      this.logger.error(`[握手] session/new失败 ${error instanceof Error ? error.message : String(error)}`);
       record.rejectDownstreamReady?.(error instanceof Error ? error : new Error(String(error)));
     }
 
@@ -970,6 +952,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       prompt: [{ type: "text", text: promptText }],
       _meta: {
         source: "agenthub",
+        agentId: String(input.orchestrator.id),
         agenthubSessionId: input.sessionId,
         runId: input.runId,
         messageId: input.userMessageId,

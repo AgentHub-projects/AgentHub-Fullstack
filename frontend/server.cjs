@@ -10,19 +10,26 @@ const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 const proxy = httpProxy.createProxyServer({ target: "http://localhost:3001", ws: true, proxyTimeout: 0, timeout: 0 });
+const filesystemProxy = httpProxy.createProxyServer({ target: "http://115.33.108.104:31056", ws: true, proxyTimeout: 0, timeout: 0 });
 
-proxy.on("error", (err, _req, res) => {
+function onProxyError(label, err, _req, res) {
   if (res && typeof res.writeHead === "function") {
     res.writeHead(502);
     res.end("Proxy error");
   }
-  console.error("proxy error:", err.message);
-});
+  console.error(`${label} proxy error:`, err.message);
+}
+proxy.on("error", (err, req, res) => onProxyError("socket.io", err, req, res));
+filesystemProxy.on("error", (err, req, res) => onProxyError("filesystem", err, req, res));
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
-    if (parsedUrl.pathname?.startsWith("/socket.io")) {
+    if (parsedUrl.pathname?.startsWith("/filesystem/socket.io")) {
+      req.socket.setTimeout(0);
+      res.socket?.setTimeout(0);
+      filesystemProxy.web(req, res);
+    } else if (parsedUrl.pathname?.startsWith("/socket.io")) {
       req.socket.setTimeout(0);
       res.socket?.setTimeout(0);
       proxy.web(req, res);
@@ -35,7 +42,9 @@ app.prepare().then(() => {
 
   server.on("upgrade", (req, socket, head) => {
     const parsedUrl = parse(req.url, true);
-    if (parsedUrl.pathname?.startsWith("/socket.io")) {
+    if (parsedUrl.pathname?.startsWith("/filesystem/socket.io")) {
+      filesystemProxy.ws(req, socket, head);
+    } else if (parsedUrl.pathname?.startsWith("/socket.io")) {
       proxy.ws(req, socket, head);
     }
   });
