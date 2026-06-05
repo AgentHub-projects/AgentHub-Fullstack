@@ -198,6 +198,7 @@ export default function WorkbenchPage() {
   const [orchName, setOrchName] = useState("");
   const [orchSearch, setOrchSearch] = useState("");
   const [orchDropdownOpen, setOrchDropdownOpen] = useState(false);
+  const [archiveConfirmSession, setArchiveConfirmSession] = useState<HubSessionDto | null>(null);
   const selectedOrchTpl = templates.find((t) => t.id === orchTemplateId);
 
   function closeGroupDialog() {
@@ -845,7 +846,13 @@ export default function WorkbenchPage() {
 
   async function handleArchiveSession(session: HubSessionDto) {
     if (sessionActionId || isRunning(session.lastRun?.status ?? "")) return;
-    if (!window.confirm(`归档会话「${session.title}」？`)) return;
+    setArchiveConfirmSession(session);
+  }
+
+  async function confirmArchiveSession() {
+    const session = archiveConfirmSession;
+    if (!session) return;
+    setArchiveConfirmSession(null);
     setSessionActionId(session.id);
     try {
       const result = await archiveSession(session.id);
@@ -2446,6 +2453,20 @@ export default function WorkbenchPage() {
         </div>
       )}
 
+      {archiveConfirmSession && (
+        <div className="dialogOverlay" onClick={() => setArchiveConfirmSession(null)}>
+          <section className="dialogContainer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <strong>归档会话</strong>
+            </header>
+            <p>确定要归档会话「{archiveConfirmSession.title}」吗？归档后不会删除数据，可随时恢复。</p>
+            <footer>
+              <button className="ghostButton" type="button" onClick={() => setArchiveConfirmSession(null)}>取消</button>
+              <button className="primaryButton" type="button" onClick={() => void confirmArchiveSession()}>确认归档</button>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
