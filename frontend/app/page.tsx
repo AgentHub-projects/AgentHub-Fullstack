@@ -238,7 +238,7 @@ export default function WorkbenchPage() {
   const inspectorModeClass =
     inspectorTab === "files" ? "filesActive" : inspectorTab === "diff" ? "diffActive" : "artifactsActive";
   const fileEditorOpen = inspectorTab === "files" && !inspectorCollapsed && Boolean(openedFilePath);
-  const shouldCollapseSessionRail = (inspectorTab === "files" || fileEditorOpen) && sessionRailCollapsed;
+  const shouldCollapseSessionRail = !inspectorCollapsed;
   const shellClassName = [
     "agenthubShell",
     inspectorModeClass,
@@ -348,8 +348,6 @@ export default function WorkbenchPage() {
 
   function setInspectorTab(value: SetStateAction<InspectorTab>) {
     updateActiveWorkspace((current) => ({ ...current, inspectorTab: resolveState(value, current.inspectorTab) }));
-    const next = resolveState(value, inspectorTab);
-    if (next === "files") setSessionRailCollapsed(true);
   }
 
   useEffect(() => {

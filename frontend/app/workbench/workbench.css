@@ -4149,6 +4149,14 @@ div.agentChoice {
   grid-template-columns: 320px minmax(0, 1fr) 56px;
 }
 
+.agenthubShell.railCollapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 360px;
+}
+
+.agenthubShell.railCollapsed.inspectorCollapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 56px;
+}
+
 .agenthubShell.railCollapsed .sessionRail {
   overflow: hidden;
   min-width: 0;
