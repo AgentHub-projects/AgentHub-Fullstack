@@ -264,7 +264,8 @@ export function MainGitDiffPanel({
   }, [refreshSignal]);
 
   useEffect(() => {
-    return connectMainGitSocket({
+    if (!downstreamSessionId) return;
+    return connectMainGitSocket(downstreamSessionId, {
       onState: setSocketState,
       onCommitted: () => {
         const viewingLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
@@ -273,7 +274,7 @@ export function MainGitDiffPanel({
         void refreshCommitList({ selectLatest: viewingLatest, silent: true });
       },
     });
-  }, [onNotice]);
+  }, [downstreamSessionId, onNotice]);
 
   useEffect(() => {
     setExpandedFiles(new Set());

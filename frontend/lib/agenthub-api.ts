@@ -432,7 +432,7 @@ export function connectSandboxFilesystemSocket(
   };
 }
 
-export function connectMainGitSocket(handlers: {
+export function connectMainGitSocket(sessionId: string, handlers: {
   onState?: (state: SocketState) => void;
   onCommitted?: () => void;
 }) {
@@ -440,6 +440,7 @@ export function connectMainGitSocket(handlers: {
   try {
     socket = io(filesystemSocketOrigin(), {
       path: "/filesystem/socket.io",
+      query: { sessionId },
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
     });
