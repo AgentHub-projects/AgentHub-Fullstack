@@ -54,6 +54,52 @@ const API_BASE_URL = RAW_API_BASE.endsWith("/api") ? RAW_API_BASE : `${RAW_API_B
 const SOCKET_URL = RAW_API_BASE.replace(/\/api$/, "");
 const FILESYSTEM_SOCKET_ORIGIN = process.env.NEXT_PUBLIC_DOWNSTREAM_FILESYSTEM_ORIGIN?.replace(/\/$/, "") ?? "";
 
+export type MainGitFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface MainGitCommitDto {
+  commitSha: string;
+  committedAt: string;
+  comment: string;
+}
+
+export interface MainGitCommitsResponse {
+  branchName: "main" | string;
+  items: MainGitCommitDto[];
+  hasMore: boolean;
+  nextCursor: string;
+}
+
+export interface MainGitDiffFileSummary {
+  path: string;
+  oldPath?: string;
+  status: MainGitFileStatus;
+  additions: number;
+  deletions: number;
+}
+
+export interface MainGitDiffFilesResponse {
+  branchName: "main" | string;
+  commitSha: string;
+  parentCommitSha: string;
+  files: MainGitDiffFileSummary[];
+}
+
+export interface MainGitFileDiffResponse {
+  branchName: "main" | string;
+  commitSha: string;
+  parentCommitSha: string;
+  path: string;
+  oldPath: string;
+  status: MainGitFileStatus;
+  baseFile: {
+    path: string;
+    exists: boolean;
+    content: string | null;
+    isBinary: boolean;
+  };
+  patch: string;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -73,6 +119,57 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<ApiResu
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Network request failed" };
   }
+}
+
+async function requestMainGitJson<T>(path: string, sessionId: string, init?: RequestInit): Promise<ApiResult<T>> {
+  try {
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("sessionId", sessionId);
+    const response = await fetch(url.toString(), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...init?.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+      return { ok: false, error: payload?.message ?? payload?.code ?? `HTTP ${response.status}` };
+    }
+    return { ok: true, data: (await response.json()) as T };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Network request failed" };
+  }
+}
+
+export function mainGitCommitsPath(options: { limit?: number; cursor?: string } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.cursor?.trim()) params.set("cursor", options.cursor.trim());
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return `/filesystem/git/main/commits${suffix}`;
+}
+
+export function mainGitDiffFilesPath(commitSha: string) {
+  return `/filesystem/git/main/commits/${encodeURIComponent(commitSha)}/diff/files`;
+}
+
+export function mainGitFileDiffPath(commitSha: string, path: string) {
+  const params = new URLSearchParams({ path });
+  return `/filesystem/git/main/commits/${encodeURIComponent(commitSha)}/diff/file?${params.toString()}`;
+}
+
+export function listMainGitCommits(sessionId: string, options: { limit?: number; cursor?: string } = {}) {
+  return requestMainGitJson<MainGitCommitsResponse>(mainGitCommitsPath(options), sessionId);
+}
+
+export function listMainGitCommitFiles(sessionId: string, commitSha: string) {
+  return requestMainGitJson<MainGitDiffFilesResponse>(mainGitDiffFilesPath(commitSha), sessionId);
+}
+
+export function getMainGitFileDiff(sessionId: string, commitSha: string, path: string) {
+  return requestMainGitJson<MainGitFileDiffResponse>(mainGitFileDiffPath(commitSha, path), sessionId);
 }
 
 export function artifactContentUrl(artifactId: string) {
@@ -332,6 +429,33 @@ export function connectSandboxFilesystemSocket(
         createDirs: input.createDirs,
       }),
     disconnect: () => socket.disconnect(),
+  };
+}
+
+export function connectMainGitSocket(handlers: {
+  onState?: (state: SocketState) => void;
+  onCommitted?: () => void;
+}) {
+  let socket: Socket | null = null;
+  try {
+    socket = io(filesystemSocketOrigin(), {
+      path: "/filesystem/socket.io",
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+    });
+  } catch {
+    handlers.onState?.("unavailable");
+    return () => undefined;
+  }
+
+  handlers.onState?.("connecting");
+  socket.on("connect", () => handlers.onState?.("connected"));
+  socket.on("disconnect", () => handlers.onState?.("disconnected"));
+  socket.on("connect_error", () => handlers.onState?.("unavailable"));
+  socket.on("main:committed", () => handlers.onCommitted?.());
+
+  return () => {
+    socket?.disconnect();
   };
 }
 

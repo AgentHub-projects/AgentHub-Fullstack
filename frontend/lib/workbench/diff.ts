@@ -48,7 +48,7 @@ export function parseUnifiedPatch(patch: string): DiffLine[] {
       result.push({ kind: "meta", text: raw });
       continue;
     }
-    if (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("diff --git") || raw.startsWith("index ")) {
+    if (isGitPatchMetaLine(raw)) {
       result.push({ kind: "meta", text: raw });
       continue;
     }
@@ -128,6 +128,26 @@ function diffText(before: string, after: string): DiffLine[] {
 function splitLinesForDiff(text: string) {
   if (!text) return [];
   return text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+}
+
+function isGitPatchMetaLine(line: string) {
+  return (
+    line.startsWith("+++") ||
+    line.startsWith("---") ||
+    line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("new file mode ") ||
+    line.startsWith("deleted file mode ") ||
+    line.startsWith("old mode ") ||
+    line.startsWith("new mode ") ||
+    line.startsWith("similarity index ") ||
+    line.startsWith("dissimilarity index ") ||
+    line.startsWith("rename from ") ||
+    line.startsWith("rename to ") ||
+    line.startsWith("copy from ") ||
+    line.startsWith("copy to ") ||
+    line.startsWith("Binary files ")
+  );
 }
 
 function snapshotLines(text: string): DiffLine[] {

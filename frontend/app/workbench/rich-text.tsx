@@ -190,9 +190,9 @@ function DiffPart({
         </div>
         <div>
           {onOpenDiffPanel && (
-            <button className="partPanelButton" type="button" title="在右侧查看 Diff" onClick={onOpenDiffPanel}>
+            <button className="partPanelButton" type="button" title="打开 main 审查" onClick={onOpenDiffPanel}>
               <BranchesOutlined />
-              <span>右侧 Diff</span>
+              <span>main 审查</span>
             </button>
           )}
           {onOpenPart && (
@@ -218,7 +218,7 @@ function DiffPart({
         </div>
       </div>
       <small className="partMessageHint">
-        文件变更详情在右侧 Diff 面板查看{lineCount ? ` · ${lineCount} 行 patch` : ""}
+        文件变更详情可打开右侧 main 审查查看{lineCount ? ` · ${lineCount} 行 patch` : ""}
       </small>
     </div>
   );

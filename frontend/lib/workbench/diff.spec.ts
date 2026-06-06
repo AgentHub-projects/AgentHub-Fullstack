@@ -44,6 +44,48 @@ describe("buildDiffLines", () => {
     expect(countChangeLines(change, "add")).toBe(0);
     expect(countChangeLines(change, "remove")).toBe(0);
   });
+
+  it("keeps git patch headers as metadata without moving hunk line numbers", () => {
+    const lines = buildDiffLines(changeFixture({
+      patch: [
+        "diff --git a/src/Old.ts b/src/New.ts",
+        "similarity index 88%",
+        "rename from src/Old.ts",
+        "rename to src/New.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/Old.ts",
+        "+++ b/src/New.ts",
+        "@@ -10,2 +10,2 @@",
+        " keep",
+        "-old",
+        "+new",
+      ].join("\n"),
+    }));
+
+    expect(lines.slice(0, 7).every((line) => line.kind === "meta")).toBe(true);
+    expect(lines[7]).toMatchObject({ kind: "meta", text: "@@ -10,2 +10,2 @@" });
+    expect(lines[8]).toMatchObject({ kind: "context", oldLine: 10, newLine: 10, text: "keep" });
+    expect(lines[9]).toMatchObject({ kind: "remove", oldLine: 11, text: "old" });
+    expect(lines[10]).toMatchObject({ kind: "add", newLine: 11, text: "new" });
+  });
+
+  it("parses added and deleted file mode headers as metadata", () => {
+    const lines = buildDiffLines(changeFixture({
+      patch: [
+        "diff --git a/src/New.ts b/src/New.ts",
+        "new file mode 100644",
+        "index 0000000..2222222",
+        "--- /dev/null",
+        "+++ b/src/New.ts",
+        "@@ -0,0 +1 @@",
+        "+created",
+      ].join("\n"),
+    }));
+
+    expect(lines.slice(0, 5).every((line) => line.kind === "meta")).toBe(true);
+    expect(lines[5]).toMatchObject({ kind: "meta", text: "@@ -0,0 +1 @@" });
+    expect(lines[6]).toMatchObject({ kind: "add", newLine: 1, text: "created" });
+  });
 });
 
 function changeFixture(overrides: Partial<HubFileChangeDto> = {}): HubFileChangeDto {

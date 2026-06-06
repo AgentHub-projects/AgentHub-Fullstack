@@ -8,9 +8,10 @@ const hostname = "0.0.0.0";
 const port = Number(process.env.PORT ?? 3000);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+const filesystemTarget = process.env.DOWNSTREAM_FILESYSTEM_ORIGIN ?? "http://115.33.108.104:31056";
 
 const proxy = httpProxy.createProxyServer({ target: "http://localhost:3001", ws: true, proxyTimeout: 0, timeout: 0 });
-const filesystemProxy = httpProxy.createProxyServer({ target: "http://115.33.108.104:31056", ws: true, proxyTimeout: 0, timeout: 0 });
+const filesystemProxy = httpProxy.createProxyServer({ target: filesystemTarget, ws: true, proxyTimeout: 0, timeout: 0 });
 
 function onProxyError(label, err, _req, res) {
   if (res && typeof res.writeHead === "function") {
@@ -28,6 +29,8 @@ app.prepare().then(() => {
     if (parsedUrl.pathname?.startsWith("/filesystem/socket.io")) {
       req.socket.setTimeout(0);
       res.socket?.setTimeout(0);
+      filesystemProxy.web(req, res);
+    } else if (parsedUrl.pathname?.startsWith("/filesystem/git")) {
       filesystemProxy.web(req, res);
     } else if (parsedUrl.pathname?.startsWith("/socket.io")) {
       req.socket.setTimeout(0);

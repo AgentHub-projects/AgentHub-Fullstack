@@ -187,7 +187,7 @@ function RunOutputLinks({
         {fileChangeCount > 0 && (
           <button type="button" onClick={onOpenDiffPanel} disabled={!onOpenDiffPanel}>
             <BranchesOutlined />
-            <span>右侧 Diff · {fileChangeCount}</span>
+            <span>main 审查 · {fileChangeCount}</span>
           </button>
         )}
         {artifactCount > 0 && (

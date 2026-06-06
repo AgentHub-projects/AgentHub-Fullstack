@@ -27,6 +27,7 @@ import {
   FolderOpenOutlined,
   InfoCircleOutlined,
   LinkOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   RightOutlined,
   SaveOutlined,
@@ -34,10 +35,18 @@ import {
 } from "@ant-design/icons";
 import {
   artifactContentUrl,
+  connectMainGitSocket,
   connectSandboxFilesystemSocket,
+  getMainGitFileDiff,
   getSandboxFilesystemConnection,
+  listMainGitCommitFiles,
+  listMainGitCommits,
   listArtifactVersions,
+  type MainGitCommitDto,
+  type MainGitDiffFileSummary,
+  type MainGitFileDiffResponse,
   type SandboxFilesystemClient,
+  type SocketState,
 } from "../../lib/agenthub-api";
 import { publicArtifactUrlFromArtifact, pptSlidesFromMetadata } from "../../lib/workbench/artifact-preview";
 import {
@@ -178,6 +187,375 @@ export function DiffPanel({
       </section>
     </div>
   );
+}
+
+const MAIN_GIT_COMMIT_LIMIT = 100;
+
+export function MainGitDiffPanel({
+  sessionId,
+  refreshSignal,
+  onNotice,
+}: {
+  sessionId: string;
+  refreshSignal?: number;
+  onNotice?: (message: string) => void;
+}) {
+  const [commits, setCommits] = useState<MainGitCommitDto[]>([]);
+  const [downstreamSessionId, setDownstreamSessionId] = useState("");
+  const [selectedSha, setSelectedSha] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loadingCommits, setLoadingCommits] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [commitError, setCommitError] = useState("");
+  const [socketState, setSocketState] = useState<SocketState>("disconnected");
+  const [newCommitNotice, setNewCommitNotice] = useState("");
+  const [filesByCommit, setFilesByCommit] = useState<Record<string, MainGitDiffFileSummary[]>>({});
+  const [filesLoading, setFilesLoading] = useState<Record<string, boolean>>({});
+  const [filesError, setFilesError] = useState<Record<string, string>>({});
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(() => new Set());
+  const [fileDiffs, setFileDiffs] = useState<Record<string, MainGitFileDiffResponse>>({});
+  const [fileDiffLoading, setFileDiffLoading] = useState<Record<string, boolean>>({});
+  const [fileDiffErrors, setFileDiffErrors] = useState<Record<string, string>>({});
+  const selectedShaRef = useRef("");
+  const latestShaRef = useRef("");
+  const refreshSignalMountedRef = useRef(false);
+
+  const latestSha = commits[0]?.commitSha ?? "";
+  const selectedCommit = commits.find((commit) => commit.commitSha === selectedSha) ?? null;
+  const selectedFiles = selectedSha ? (filesByCommit[selectedSha] ?? []) : [];
+  const selectedFilesLoading = selectedSha ? Boolean(filesLoading[selectedSha]) : false;
+  const selectedFilesError = selectedSha ? filesError[selectedSha] : "";
+  const selectedTotals = selectedFiles.reduce(
+    (total, file) => ({
+      additions: total.additions + file.additions,
+      deletions: total.deletions + file.deletions,
+    }),
+    { additions: 0, deletions: 0 },
+  );
+
+  useEffect(() => {
+    selectedShaRef.current = selectedSha;
+  }, [selectedSha]);
+
+  useEffect(() => {
+    latestShaRef.current = latestSha;
+  }, [latestSha]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    void getSandboxFilesystemConnection(sessionId).then((result) => {
+      if (result.ok) setDownstreamSessionId(result.data.downstreamSessionId);
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!downstreamSessionId) return;
+    void refreshCommitList({ selectLatest: true });
+  }, [downstreamSessionId]);
+
+  useEffect(() => {
+    if (!refreshSignalMountedRef.current) {
+      refreshSignalMountedRef.current = true;
+      return;
+    }
+    const shouldSelectLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
+    void refreshCommitList({ selectLatest: shouldSelectLatest, silent: true });
+  }, [refreshSignal]);
+
+  useEffect(() => {
+    return connectMainGitSocket({
+      onState: setSocketState,
+      onCommitted: () => {
+        const viewingLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
+        setNewCommitNotice(viewingLatest ? "" : "main 有新提交，当前仍停留在历史 commit");
+        if (!viewingLatest) onNotice?.("main 有新提交，已刷新提交列表，当前仍停留在历史 commit");
+        void refreshCommitList({ selectLatest: viewingLatest, silent: true });
+      },
+    });
+  }, [onNotice]);
+
+  useEffect(() => {
+    setExpandedFiles(new Set());
+    if (selectedSha) void loadCommitFiles(selectedSha);
+  }, [selectedSha]);
+
+  async function refreshCommitList(options: { selectLatest?: boolean; silent?: boolean } = {}) {
+    if (!downstreamSessionId) return;
+    if (!options.silent) setLoadingCommits(true);
+    setCommitError("");
+    const result = await listMainGitCommits(downstreamSessionId, { limit: MAIN_GIT_COMMIT_LIMIT });
+    if (!options.silent) setLoadingCommits(false);
+    if (!result.ok) {
+      setCommitError(result.error);
+      return;
+    }
+
+    setCommits((current) => mergeCommits(result.data.items, current));
+    setHasMore(result.data.hasMore);
+    setNextCursor(result.data.nextCursor);
+    const nextSelected = options.selectLatest
+      ? result.data.items[0]?.commitSha
+      : selectedShaRef.current || result.data.items[0]?.commitSha;
+    setSelectedSha(nextSelected ?? "");
+  }
+
+  async function loadMoreCommits() {
+    if (!hasMore || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    const result = await listMainGitCommits(downstreamSessionId, { limit: MAIN_GIT_COMMIT_LIMIT, cursor: nextCursor });
+    setLoadingMore(false);
+    if (!result.ok) {
+      setCommitError(result.error);
+      return;
+    }
+    setCommits((current) => mergeCommits(current, result.data.items));
+    setHasMore(result.data.hasMore);
+    setNextCursor(result.data.nextCursor);
+  }
+
+  async function loadCommitFiles(commitSha: string) {
+    if (filesByCommit[commitSha] || filesLoading[commitSha]) return;
+    setFilesLoading((current) => ({ ...current, [commitSha]: true }));
+    setFilesError((current) => ({ ...current, [commitSha]: "" }));
+    const result = await listMainGitCommitFiles(downstreamSessionId, commitSha);
+    setFilesLoading((current) => ({ ...current, [commitSha]: false }));
+    if (!result.ok) {
+      setFilesError((current) => ({ ...current, [commitSha]: result.error }));
+      return;
+    }
+    setFilesByCommit((current) => ({ ...current, [commitSha]: result.data.files }));
+  }
+
+  async function loadFileDiff(commitSha: string, path: string) {
+    const key = mainGitFileKey(commitSha, path);
+    if (fileDiffs[key] || fileDiffLoading[key]) return;
+    setFileDiffLoading((current) => ({ ...current, [key]: true }));
+    setFileDiffErrors((current) => ({ ...current, [key]: "" }));
+    const result = await getMainGitFileDiff(downstreamSessionId, commitSha, path);
+    setFileDiffLoading((current) => ({ ...current, [key]: false }));
+    if (!result.ok) {
+      setFileDiffErrors((current) => ({ ...current, [key]: result.error }));
+      return;
+    }
+    setFileDiffs((current) => ({ ...current, [key]: result.data }));
+  }
+
+  function toggleFile(file: MainGitDiffFileSummary) {
+    if (!selectedSha) return;
+    const key = mainGitFileKey(selectedSha, file.path);
+    setExpandedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else {
+        next.add(key);
+        void loadFileDiff(selectedSha, file.path);
+      }
+      return next;
+    });
+  }
+
+  function handleRefreshClick() {
+    const shouldSelectLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
+    setNewCommitNotice("");
+    void refreshCommitList({ selectLatest: shouldSelectLatest });
+  }
+
+  return (
+    <div className="panelScroll diffPanelLayout mainGitDiffPanel">
+      <section className="mainGitReviewHeader" aria-label="main 提交审查">
+        <div className="mainGitHeaderTop">
+          <span className="mainGitIcon" aria-hidden="true">
+            <BranchesOutlined />
+          </span>
+          <div>
+            <strong>main 提交审查</strong>
+            <small>按 commit 查看真实 Git diff · Socket {socketStateLabel(socketState)}</small>
+          </div>
+          <button
+            className="diffApplyInlineButton"
+            type="button"
+            disabled={loadingCommits}
+            onClick={handleRefreshClick}
+          >
+            {loadingCommits ? <LoadingOutlined /> : <ReloadOutlined />}
+            <span>刷新</span>
+          </button>
+        </div>
+
+        {commits.length > 0 && (
+          <div className="mainGitCommitPicker">
+            <label>
+              <span>Commit</span>
+              <select value={selectedSha} onChange={(event) => setSelectedSha(event.target.value)}>
+                {commits.map((commit) => (
+                  <option key={commit.commitSha} value={commit.commitSha}>
+                    {shortSha(commit.commitSha)} · {formatDateTime(commit.committedAt)} · {commitSubject(commit)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {hasMore && (
+              <button className="ghostButton" type="button" disabled={loadingMore} onClick={() => void loadMoreCommits()}>
+                {loadingMore ? "加载中" : "加载更多"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {selectedCommit && (
+          <div className="mainGitCommitSummary">
+            <div>
+              <span className="mainGitSha">{shortSha(selectedCommit.commitSha)}</span>
+              {selectedCommit.commitSha === latestSha && <span className="diffSource backend">最新</span>}
+            </div>
+            <strong>{commitSubject(selectedCommit)}</strong>
+            <small>{formatDateTime(selectedCommit.committedAt)}</small>
+            {commitBody(selectedCommit) && <p>{commitBody(selectedCommit)}</p>}
+          </div>
+        )}
+
+        {newCommitNotice && <div className="diffSnapshotNotice">{newCommitNotice}</div>}
+        {commitError && <div className="diffSnapshotNotice error">提交历史加载失败：{commitError}</div>}
+      </section>
+
+      {loadingCommits && commits.length === 0 && <PanelEmpty icon={<LoadingOutlined />} text="正在加载 main 提交历史" />}
+      {!loadingCommits && commits.length === 0 && !commitError && (
+        <PanelEmpty icon={<BranchesOutlined />} text="main 暂无提交记录" />
+      )}
+
+      {selectedCommit && (
+        <section className="diffReviewOverview" aria-label="commit 文件变更">
+          <div className="mainGitFilesSummary">
+            <span>{selectedFiles.length} 个文件</span>
+            <span className="add">+{selectedTotals.additions}</span>
+            <span className="remove">-{selectedTotals.deletions}</span>
+          </div>
+
+          {selectedFilesLoading && <PanelEmpty icon={<LoadingOutlined />} text="正在加载文件列表" />}
+          {selectedFilesError && <div className="diffSnapshotNotice error">文件列表加载失败：{selectedFilesError}</div>}
+          {!selectedFilesLoading && !selectedFilesError && selectedFiles.length === 0 && (
+            <PanelEmpty icon={<FileOutlined />} text="该 commit 没有文件变更" />
+          )}
+
+          <div className="diffReviewFiles">
+            {selectedFiles.map((file) => {
+              const key = mainGitFileKey(selectedSha, file.path);
+              const expanded = expandedFiles.has(key);
+              const diff = fileDiffs[key];
+              const loading = Boolean(fileDiffLoading[key]);
+              const error = fileDiffErrors[key];
+              return (
+                <article className={`diffFileBlock ${expanded ? "expanded active" : ""}`} key={key}>
+                  <div className="diffReviewFile">
+                    <button
+                      className="diffFileToggle"
+                      type="button"
+                      title={expanded ? "收起文件 Diff" : "展开文件 Diff"}
+                      aria-label={expanded ? `收起 ${file.path}` : `展开 ${file.path}`}
+                      aria-expanded={expanded}
+                      onClick={() => toggleFile(file)}
+                    >
+                      {expanded ? <DownOutlined /> : <RightOutlined />}
+                    </button>
+                    <button className="diffReviewFileMain" type="button" onClick={() => toggleFile(file)}>
+                      <span>{file.path}</span>
+                      {file.oldPath && file.oldPath !== file.path && <small>{file.oldPath} → {file.path}</small>}
+                    </button>
+                    <div className="diffReviewFileSide">
+                      <span className="diffReviewFileStats">
+                        <span className="add">+{file.additions}</span>
+                        <span className="remove">-{file.deletions}</span>
+                      </span>
+                      <div className="diffReviewFileMeta">
+                        <span className={`changeType ${file.status}`}>{mainGitStatusLabel(file.status)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <MainGitFileDiffDetails diff={diff} loading={loading} error={error} expanded={expanded} />
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function MainGitFileDiffDetails({
+  diff,
+  loading,
+  error,
+  expanded,
+}: {
+  diff?: MainGitFileDiffResponse;
+  loading: boolean;
+  error?: string;
+  expanded: boolean;
+}) {
+  if (!expanded) return null;
+  return (
+    <section className="diffViewerCard expanded">
+      {loading && <PanelEmpty icon={<LoadingOutlined />} text="正在加载文件 Diff" />}
+      {error && <div className="diffSnapshotNotice error">文件 Diff 加载失败：{error}</div>}
+      {!loading && !error && diff?.baseFile.isBinary && !diff.patch?.trim() && (
+        <div className="diffSnapshotNotice">二进制文件没有可展示的文本 diff。</div>
+      )}
+      {!loading && !error && diff?.patch?.trim() && <UnifiedDiffLines lines={parseUnifiedPatch(diff.patch)} />}
+      {!loading && !error && diff && !diff.patch?.trim() && !diff.baseFile.isBinary && (
+        <div className="diffSnapshotNotice">下游未返回该文件的 patch。</div>
+      )}
+    </section>
+  );
+}
+
+function mergeCommits(primary: MainGitCommitDto[], secondary: MainGitCommitDto[]) {
+  const seen = new Set<string>();
+  const result: MainGitCommitDto[] = [];
+  for (const commit of [...primary, ...secondary]) {
+    if (seen.has(commit.commitSha)) continue;
+    seen.add(commit.commitSha);
+    result.push(commit);
+  }
+  return result;
+}
+
+function mainGitFileKey(commitSha: string, path: string) {
+  return `${commitSha}:${path}`;
+}
+
+function shortSha(value: string) {
+  return value.slice(0, 12);
+}
+
+function commitSubject(commit: MainGitCommitDto) {
+  return commit.comment.trim().split(/\r?\n/)[0]?.trim() || "无提交说明";
+}
+
+function commitBody(commit: MainGitCommitDto) {
+  const lines = commit.comment.trim().split(/\r?\n/).slice(1).join("\n").trim();
+  return lines ? clipText(lines, 220) : "";
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function mainGitStatusLabel(status: MainGitDiffFileSummary["status"]) {
+  if (status === "added") return "新增";
+  if (status === "deleted") return "删除";
+  if (status === "renamed") return "重命名";
+  return "修改";
+}
+
+function clipText(text: string, limit: number) {
+  return text.length <= limit ? text : `${text.slice(0, limit)}...`;
 }
 
 function DiffBranchContext({

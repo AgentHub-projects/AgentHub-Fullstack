@@ -5286,6 +5286,137 @@ div.agentChoice {
   text-underline-offset: 3px;
 }
 
+.mainGitDiffPanel {
+  background: #ffffff;
+}
+
+.mainGitReviewHeader {
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid #ececec;
+  background: #ffffff;
+  padding: 12px 18px;
+}
+
+.mainGitHeaderTop,
+.mainGitCommitPicker,
+.mainGitCommitSummary > div,
+.mainGitFilesSummary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.mainGitHeaderTop {
+  gap: 10px;
+}
+
+.mainGitHeaderTop > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.mainGitHeaderTop strong {
+  color: #1f1f1f;
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.mainGitHeaderTop small,
+.mainGitCommitSummary small,
+.mainGitCommitSummary p,
+.mainGitCommitPicker label > span {
+  color: #737373;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mainGitIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #f7f7f7;
+  color: #2d2d2d;
+}
+
+.mainGitCommitPicker {
+  gap: 8px;
+}
+
+.mainGitCommitPicker label {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.mainGitCommitPicker select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #242424;
+  padding: 0 10px;
+  font: inherit;
+}
+
+.mainGitCommitSummary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #ececec;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 10px;
+}
+
+.mainGitCommitSummary > div {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mainGitCommitSummary strong,
+.mainGitCommitSummary p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mainGitSha,
+.mainGitCommitSummary .diffSource {
+  border: 1px solid #d9e2ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #4a5568;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+
+.mainGitFilesSummary {
+  justify-content: flex-end;
+  gap: 9px;
+  color: #737373;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mainGitFilesSummary .add {
+  color: #008a3d;
+}
+
+.mainGitFilesSummary .remove {
+  color: #c21f1f;
+}
+
 .diffReviewFiles {
   display: grid;
   align-content: start;
@@ -5358,6 +5489,15 @@ div.agentChoice {
 .diffReviewFileMain > span:first-child {
   min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffReviewFileMain small {
+  min-width: 0;
+  overflow: hidden;
+  color: #7a7a7a;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5483,6 +5623,11 @@ div.agentChoice {
   padding: 8px 18px 8px 40px;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.diffSnapshotNotice.error {
+  background: #fff4f4;
+  color: #a11a1a;
 }
 
 .diffStats {
