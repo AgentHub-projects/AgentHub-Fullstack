@@ -371,7 +371,6 @@ export function MainGitDiffPanel({
           </span>
           <div>
             <strong>main 提交审查</strong>
-            <small>按 commit 查看真实 Git diff · Socket {socketStateLabel(socketState)}</small>
           </div>
           <button
             className="diffApplyInlineButton"
