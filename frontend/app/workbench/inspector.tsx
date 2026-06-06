@@ -28,9 +28,11 @@ import {
   InfoCircleOutlined,
   LinkOutlined,
   LoadingOutlined,
+  MoreOutlined,
   ReloadOutlined,
   RightOutlined,
   SaveOutlined,
+  SearchOutlined,
   SelectOutlined,
 } from "@ant-design/icons";
 import {
@@ -211,9 +213,12 @@ export function MainGitDiffPanel({
   const [socketState, setSocketState] = useState<SocketState>("disconnected");
   const [newCommitNotice, setNewCommitNotice] = useState("");
   const [filesByCommit, setFilesByCommit] = useState<Record<string, MainGitDiffFileSummary[]>>({});
+  const [parentsByCommit, setParentsByCommit] = useState<Record<string, string>>({});
   const [filesLoading, setFilesLoading] = useState<Record<string, boolean>>({});
   const [filesError, setFilesError] = useState<Record<string, string>>({});
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(() => new Set());
+  const [selectedFilePath, setSelectedFilePath] = useState("");
+  const [fileFilter, setFileFilter] = useState("");
+  const [fileListVisible, setFileListVisible] = useState(true);
   const [fileDiffs, setFileDiffs] = useState<Record<string, MainGitFileDiffResponse>>({});
   const [fileDiffLoading, setFileDiffLoading] = useState<Record<string, boolean>>({});
   const [fileDiffErrors, setFileDiffErrors] = useState<Record<string, string>>({});
@@ -224,8 +229,24 @@ export function MainGitDiffPanel({
   const latestSha = commits[0]?.commitSha ?? "";
   const selectedCommit = commits.find((commit) => commit.commitSha === selectedSha) ?? null;
   const selectedFiles = selectedSha ? (filesByCommit[selectedSha] ?? []) : [];
+  const normalizedFileFilter = fileFilter.trim().toLowerCase();
+  const filteredFiles = normalizedFileFilter
+    ? selectedFiles.filter((file) =>
+        [file.path, file.oldPath ?? ""].some((value) => value.toLowerCase().includes(normalizedFileFilter)),
+      )
+    : selectedFiles;
+  const filteredFileGroups = groupMainGitFiles(filteredFiles);
+  const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath) ?? null;
+  const selectedFileKey = selectedFile && selectedSha ? mainGitFileKey(selectedSha, selectedFile.path) : "";
+  const selectedFileDiff = selectedFileKey ? fileDiffs[selectedFileKey] : undefined;
+  const selectedFileDiffLoading = selectedFileKey ? Boolean(fileDiffLoading[selectedFileKey]) : false;
+  const selectedFileDiffError = selectedFileKey ? fileDiffErrors[selectedFileKey] : "";
   const selectedFilesLoading = selectedSha ? Boolean(filesLoading[selectedSha]) : false;
   const selectedFilesError = selectedSha ? filesError[selectedSha] : "";
+  const selectedParentSha = selectedSha ? (parentsByCommit[selectedSha] ?? "") : "";
+  const selectedFilesLoaded = Boolean(selectedSha && filesByCommit[selectedSha]);
+  const parentRefText = selectedParentSha ? shortSha(selectedParentSha) : selectedFilesLoaded ? "empty tree" : "加载中";
+  const parentRefTitle = selectedParentSha || (selectedFilesLoaded ? "empty tree" : "正在读取父 commit");
   const selectedTotals = selectedFiles.reduce(
     (total, file) => ({
       additions: total.additions + file.additions,
@@ -277,9 +298,24 @@ export function MainGitDiffPanel({
   }, [downstreamSessionId, onNotice]);
 
   useEffect(() => {
-    setExpandedFiles(new Set());
+    setSelectedFilePath("");
+    setFileFilter("");
     if (selectedSha) void loadCommitFiles(selectedSha);
   }, [selectedSha]);
+
+  useEffect(() => {
+    if (!selectedSha || selectedFiles.length === 0) {
+      setSelectedFilePath("");
+      return;
+    }
+    if (!selectedFiles.some((file) => file.path === selectedFilePath)) {
+      setSelectedFilePath(selectedFiles[0].path);
+    }
+  }, [selectedSha, selectedFiles, selectedFilePath]);
+
+  useEffect(() => {
+    if (selectedSha && selectedFilePath) void loadFileDiff(selectedSha, selectedFilePath);
+  }, [selectedSha, selectedFilePath]);
 
   async function refreshCommitList(options: { selectLatest?: boolean; silent?: boolean } = {}) {
     if (!downstreamSessionId) return;
@@ -326,6 +362,7 @@ export function MainGitDiffPanel({
       return;
     }
     setFilesByCommit((current) => ({ ...current, [commitSha]: result.data.files }));
+    setParentsByCommit((current) => ({ ...current, [commitSha]: result.data.parentCommitSha }));
   }
 
   async function loadFileDiff(commitSha: string, path: string) {
@@ -342,18 +379,10 @@ export function MainGitDiffPanel({
     setFileDiffs((current) => ({ ...current, [key]: result.data }));
   }
 
-  function toggleFile(file: MainGitDiffFileSummary) {
+  function selectFile(file: MainGitDiffFileSummary) {
     if (!selectedSha) return;
-    const key = mainGitFileKey(selectedSha, file.path);
-    setExpandedFiles((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else {
-        next.add(key);
-        void loadFileDiff(selectedSha, file.path);
-      }
-      return next;
-    });
+    setSelectedFilePath(file.path);
+    void loadFileDiff(selectedSha, file.path);
   }
 
   function handleRefreshClick() {
@@ -364,37 +393,52 @@ export function MainGitDiffPanel({
 
   return (
     <div className="panelScroll diffPanelLayout mainGitDiffPanel">
-      <section className="mainGitReviewHeader" aria-label="main 提交审查">
-        <div className="mainGitHeaderTop">
-          <span className="mainGitIcon" aria-hidden="true">
-            <BranchesOutlined />
-          </span>
-          <div>
-            <strong>main 提交审查</strong>
-          </div>
+      <header className="mainGitToolbar" aria-label="Diff 工具栏">
+        <div className="mainGitToolbarTitle">
+          <strong>分支</strong>
+          <DownOutlined />
+        </div>
+        <div className="mainGitToolbarActions">
+          <button type="button" title="更多操作" aria-label="更多操作">
+            <MoreOutlined />
+          </button>
           <button
-            className="diffApplyInlineButton"
             type="button"
+            title="刷新"
+            aria-label="刷新"
             disabled={loadingCommits}
             onClick={handleRefreshClick}
           >
             {loadingCommits ? <LoadingOutlined /> : <ReloadOutlined />}
-            <span>刷新</span>
+          </button>
+          <button
+            className={fileListVisible ? "active" : ""}
+            type="button"
+            title={fileListVisible ? "隐藏文件列表" : "显示文件列表"}
+            aria-label={fileListVisible ? "隐藏文件列表" : "显示文件列表"}
+            aria-pressed={fileListVisible}
+            onClick={() => setFileListVisible((value) => !value)}
+          >
+            <FolderOpenOutlined />
           </button>
         </div>
+      </header>
 
+      <section className="mainGitRevisionBar" aria-label="commit 对比">
+        <div className="mainGitRevisionRefs">
+          <span title={parentRefTitle}>{parentRefText}</span>
+          <span aria-hidden="true">→</span>
+          <span title={selectedSha || "未选择 commit"}>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
+        </div>
         {commits.length > 0 && (
-          <div className="mainGitCommitPicker">
-            <label>
-              <span>Commit</span>
-              <select value={selectedSha} onChange={(event) => setSelectedSha(event.target.value)}>
-                {commits.map((commit) => (
-                  <option key={commit.commitSha} value={commit.commitSha}>
-                    {shortSha(commit.commitSha)} · {formatDateTime(commit.committedAt)} · {commitSubject(commit)}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="mainGitRevisionControls">
+            <select aria-label="选择 commit" value={selectedSha} onChange={(event) => setSelectedSha(event.target.value)}>
+              {commits.map((commit) => (
+                <option key={commit.commitSha} value={commit.commitSha}>
+                  {shortSha(commit.commitSha)} · {formatDateTime(commit.committedAt)} · {commitSubject(commit)}
+                </option>
+              ))}
+            </select>
             {hasMore && (
               <button className="ghostButton" type="button" disabled={loadingMore} onClick={() => void loadMoreCommits()}>
                 {loadingMore ? "加载中" : "加载更多"}
@@ -402,83 +446,130 @@ export function MainGitDiffPanel({
             )}
           </div>
         )}
-
-        {selectedCommit && (
-          <div className="mainGitCommitSummary">
-            <div>
-              <span className="mainGitSha">{shortSha(selectedCommit.commitSha)}</span>
-              {selectedCommit.commitSha === latestSha && <span className="diffSource backend">最新</span>}
-            </div>
-            <strong>{commitSubject(selectedCommit)}</strong>
-            <small>{formatDateTime(selectedCommit.committedAt)}</small>
-            {commitBody(selectedCommit) && <p>{commitBody(selectedCommit)}</p>}
-          </div>
-        )}
-
-        {newCommitNotice && <div className="diffSnapshotNotice">{newCommitNotice}</div>}
-        {commitError && <div className="diffSnapshotNotice error">提交历史加载失败：{commitError}</div>}
       </section>
 
-      {loadingCommits && commits.length === 0 && <PanelEmpty icon={<LoadingOutlined />} text="正在加载 main 提交历史" />}
-      {!loadingCommits && commits.length === 0 && !commitError && (
-        <PanelEmpty icon={<BranchesOutlined />} text="main 暂无提交记录" />
-      )}
-
-      {selectedCommit && (
-        <section className="diffReviewOverview" aria-label="commit 文件变更">
-          <div className="mainGitFilesSummary">
-            <span>{selectedFiles.length} 个文件</span>
-            <span className="add">+{selectedTotals.additions}</span>
-            <span className="remove">-{selectedTotals.deletions}</span>
-          </div>
-
+      <section className={`mainGitDiffWorkspace ${fileListVisible ? "" : "fileListHidden"}`} aria-label="commit 文件变更">
+        <main className="mainGitDiffContent" aria-label="Diff 内容">
+          {loadingCommits && commits.length === 0 && <PanelEmpty icon={<LoadingOutlined />} text="正在加载 main 提交历史" />}
+          {!loadingCommits && commits.length === 0 && !commitError && (
+            <MainGitEmptyState title="尚无文件更改" text="此项目中的更改将显示在此处。" />
+          )}
+          {commitError && <div className="diffSnapshotNotice error">提交历史加载失败：{commitError}</div>}
+          {newCommitNotice && <div className="diffSnapshotNotice">{newCommitNotice}</div>}
           {selectedFilesLoading && <PanelEmpty icon={<LoadingOutlined />} text="正在加载文件列表" />}
           {selectedFilesError && <div className="diffSnapshotNotice error">文件列表加载失败：{selectedFilesError}</div>}
-          {!selectedFilesLoading && !selectedFilesError && selectedFiles.length === 0 && (
-            <PanelEmpty icon={<FileOutlined />} text="该 commit 没有文件变更" />
+          {selectedCommit && !selectedFilesLoading && !selectedFilesError && selectedFiles.length === 0 && (
+            <MainGitEmptyState title="尚无文件更改" text="此项目中的更改将显示在此处。" />
           )}
+          {selectedCommit && selectedFile && selectedFiles.length > 0 && (
+            <MainGitSelectedDiff
+              file={selectedFile}
+              diff={selectedFileDiff}
+              loading={selectedFileDiffLoading}
+              error={selectedFileDiffError}
+            />
+          )}
+          {selectedCommit && !selectedFile && selectedFiles.length > 0 && (
+            <MainGitEmptyState title="选择文件查看更改" text="右侧文件列表中的更改会显示在此处。" />
+          )}
+        </main>
 
-          <div className="diffReviewFiles">
-            {selectedFiles.map((file) => {
-              const key = mainGitFileKey(selectedSha, file.path);
-              const expanded = expandedFiles.has(key);
-              const diff = fileDiffs[key];
-              const loading = Boolean(fileDiffLoading[key]);
-              const error = fileDiffErrors[key];
-              return (
-                <article className={`diffFileBlock ${expanded ? "expanded active" : ""}`} key={key}>
-                  <div className="diffReviewFile">
-                    <button
-                      className="diffFileToggle"
-                      type="button"
-                      title={expanded ? "收起文件 Diff" : "展开文件 Diff"}
-                      aria-label={expanded ? `收起 ${file.path}` : `展开 ${file.path}`}
-                      aria-expanded={expanded}
-                      onClick={() => toggleFile(file)}
-                    >
-                      {expanded ? <DownOutlined /> : <RightOutlined />}
-                    </button>
-                    <button className="diffReviewFileMain" type="button" onClick={() => toggleFile(file)}>
-                      <span>{file.path}</span>
-                      {file.oldPath && file.oldPath !== file.path && <small>{file.oldPath} → {file.path}</small>}
-                    </button>
-                    <div className="diffReviewFileSide">
-                      <span className="diffReviewFileStats">
-                        <span className="add">+{file.additions}</span>
-                        <span className="remove">-{file.deletions}</span>
-                      </span>
-                      <div className="diffReviewFileMeta">
-                        <span className={`changeType ${file.status}`}>{mainGitStatusLabel(file.status)}</span>
-                      </div>
-                    </div>
+        {fileListVisible && (
+          <aside className="mainGitFilePanel" aria-label="变更文件">
+            <label className="mainGitFileSearch">
+              <SearchOutlined />
+              <input
+                value={fileFilter}
+                placeholder="筛选文件..."
+                onChange={(event) => setFileFilter(event.target.value)}
+              />
+            </label>
+            <div className="mainGitFilesSummary">
+              <span>{selectedFiles.length} 个文件</span>
+              <span className="add">+{selectedTotals.additions}</span>
+              <span className="remove">-{selectedTotals.deletions}</span>
+            </div>
+            {selectedFilesLoading && <span className="mainGitFilePanelNote">正在加载文件列表</span>}
+            {!selectedFilesLoading && selectedFiles.length > 0 && filteredFiles.length === 0 && (
+              <span className="mainGitFilePanelNote">没有匹配的文件</span>
+            )}
+            {!selectedFilesLoading && selectedFiles.length === 0 && (
+              <span className="mainGitFilePanelNote">没有匹配的文件</span>
+            )}
+            <div className="mainGitFileList">
+              {filteredFileGroups.map((group) => (
+                <div className="mainGitFileGroup" key={group.directory}>
+                  <div className="mainGitFileGroupHeader" title={group.directory}>
+                    <DownOutlined />
+                    <span>{group.directory}</span>
                   </div>
-                  <MainGitFileDiffDetails diff={diff} loading={loading} error={error} expanded={expanded} />
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                  {group.files.map((file) => (
+                    <button
+                      className={`mainGitFileNode ${file.path === selectedFilePath ? "active" : ""}`}
+                      key={file.path}
+                      type="button"
+                      title={`${mainGitStatusLabel(file.status)} · ${file.path} · +${file.additions} -${file.deletions}`}
+                      onClick={() => selectFile(file)}
+                    >
+                      <span className={`mainGitFileIcon ${mainGitFileIconClass(file.path)}`}>
+                        {mainGitFileIconLabel(file.path)}
+                      </span>
+                      <span className="mainGitFileName">{fileNameFromPath(file.path)}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MainGitSelectedDiff({
+  file,
+  diff,
+  loading,
+  error,
+}: {
+  file: MainGitDiffFileSummary;
+  diff?: MainGitFileDiffResponse;
+  loading: boolean;
+  error?: string;
+}) {
+  return (
+    <section className="mainGitSelectedDiff">
+      <header className="mainGitSelectedDiffHeader">
+        <button className="mainGitSelectedDiffToggle" type="button" aria-label="当前文件已展开" title="当前文件已展开">
+          <DownOutlined />
+        </button>
+        <div className="mainGitSelectedDiffTitle">
+          <strong title={file.path}>{fileNameFromPath(file.path)}</strong>
+          {file.oldPath && file.oldPath !== file.path && <small>{file.oldPath} → {file.path}</small>}
+        </div>
+        <div className="mainGitSelectedDiffMeta">
+          <span className="add">+{file.additions}</span>
+          <span className="remove">-{file.deletions}</span>
+          <button type="button" title="在文件列表中定位" aria-label="在文件列表中定位">
+            <ExpandOutlined />
+          </button>
+        </div>
+      </header>
+      <MainGitFileDiffDetails diff={diff} loading={loading} error={error} />
+    </section>
+  );
+}
+
+function MainGitEmptyState({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mainGitEmptyState">
+      <div className="mainGitEmptyIcon" aria-hidden="true">
+        <FileOutlined />
+        <span>+</span>
+      </div>
+      <strong>{title}</strong>
+      <p>{text}</p>
     </div>
   );
 }
@@ -487,14 +578,11 @@ function MainGitFileDiffDetails({
   diff,
   loading,
   error,
-  expanded,
 }: {
   diff?: MainGitFileDiffResponse;
   loading: boolean;
   error?: string;
-  expanded: boolean;
 }) {
-  if (!expanded) return null;
   return (
     <section className="diffViewerCard expanded">
       {loading && <PanelEmpty icon={<LoadingOutlined />} text="正在加载文件 Diff" />}
@@ -502,7 +590,12 @@ function MainGitFileDiffDetails({
       {!loading && !error && diff?.baseFile.isBinary && !diff.patch?.trim() && (
         <div className="diffSnapshotNotice">二进制文件没有可展示的文本 diff。</div>
       )}
-      {!loading && !error && diff?.patch?.trim() && <UnifiedDiffLines lines={parseUnifiedPatch(diff.patch)} />}
+      {!loading && !error && diff?.patch?.trim() && (
+        <UnifiedDiffLines
+          variant="git"
+          lines={parseUnifiedPatch(diff.patch).filter((line) => line.kind !== "meta" || line.text.startsWith("@@"))}
+        />
+      )}
       {!loading && !error && diff && !diff.patch?.trim() && !diff.baseFile.isBinary && (
         <div className="diffSnapshotNotice">下游未返回该文件的 patch。</div>
       )}
@@ -533,11 +626,6 @@ function commitSubject(commit: MainGitCommitDto) {
   return commit.comment.trim().split(/\r?\n/)[0]?.trim() || "无提交说明";
 }
 
-function commitBody(commit: MainGitCommitDto) {
-  const lines = commit.comment.trim().split(/\r?\n/).slice(1).join("\n").trim();
-  return lines ? clipText(lines, 220) : "";
-}
-
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -554,8 +642,44 @@ function mainGitStatusLabel(status: MainGitDiffFileSummary["status"]) {
   return "修改";
 }
 
-function clipText(text: string, limit: number) {
-  return text.length <= limit ? text : `${text.slice(0, limit)}...`;
+function groupMainGitFiles(files: MainGitDiffFileSummary[]) {
+  const groups = new Map<string, MainGitDiffFileSummary[]>();
+  for (const file of files) {
+    const directory = directoryFromPath(file.path);
+    groups.set(directory, [...(groups.get(directory) ?? []), file]);
+  }
+  return Array.from(groups, ([directory, groupFiles]) => ({ directory, files: groupFiles }));
+}
+
+function directoryFromPath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  parts.pop();
+  return parts.length > 0 ? parts.join("/") : ".";
+}
+
+function mainGitFileIconLabel(path: string) {
+  const ext = fileExtension(path);
+  if (ext === "tsx" || ext === "jsx") return "⚛";
+  if (ext === "css") return "CSS";
+  if (ext === "ts" || ext === "js") return "{}";
+  if (ext === "md" || ext === "mdx") return "MD";
+  return "";
+}
+
+function mainGitFileIconClass(path: string) {
+  const ext = fileExtension(path);
+  if (ext === "tsx" || ext === "jsx") return "react";
+  if (ext === "css") return "css";
+  if (ext === "ts" || ext === "js") return "code";
+  if (ext === "md" || ext === "mdx") return "markdown";
+  return "file";
+}
+
+function fileExtension(path: string) {
+  const name = fileNameFromPath(path);
+  const ext = name.includes(".") ? name.split(".").at(-1) : "";
+  return ext?.toLowerCase() ?? "";
 }
 
 function DiffBranchContext({
@@ -1405,7 +1529,7 @@ function UnifiedDiffView({ change }: { change: HubFileChangeDto }) {
   return <UnifiedDiffLines lines={lines} />;
 }
 
-function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
+function UnifiedDiffLines({ lines, variant = "review" }: { lines: DiffLine[]; variant?: "review" | "git" }) {
   const [collapsedHunks, setCollapsedHunks] = useState<Set<string>>(() => new Set());
   const items = groupDiffLines(lines);
 
@@ -1422,7 +1546,7 @@ function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
     <div className="unifiedDiff" role="table">
       {items.map((item) => {
         if (item.kind === "line") {
-          return renderDiffLine(item.line, item.index);
+          return renderDiffLine(item.line, item.index, variant);
         }
 
         const collapsed = collapsedHunks.has(item.id);
@@ -1440,9 +1564,9 @@ function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
               >
                 {collapsed ? <RightOutlined /> : <DownOutlined />}
               </button>
-              <code title={`${diffMetaLabel(item.meta.text)} · ${hunkContextTitle}`}>{diffMetaLabel(item.meta.text)}</code>
+              <code title={`${diffMetaLabel(item.meta.text)} · ${hunkContextTitle}`}>{item.foldLabel}</code>
             </div>
-            {!collapsed && item.lines.map(({ line, index }) => renderDiffLine(line, index))}
+            {!collapsed && item.lines.map(({ line, index }) => renderDiffLine(line, index, variant))}
           </div>
         );
       })}
@@ -1450,12 +1574,23 @@ function UnifiedDiffLines({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-function renderDiffLine(line: DiffLine, index: number) {
+function renderDiffLine(line: DiffLine, index: number, variant: "review" | "git" = "review") {
   if (line.kind === "meta") {
     return (
       <div className="diffLine meta fileMeta" key={`${index}-${line.text}`} role="row">
         <span className="diffHunkToggle spacer" aria-hidden="true" />
         <code>{diffMetaLabel(line.text)}</code>
+      </div>
+    );
+  }
+
+  if (variant === "git") {
+    const visibleLineNumber = line.kind === "remove" ? line.oldLine : (line.newLine ?? line.oldLine);
+    return (
+      <div className={`diffLine singleLineNumber ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
+        <span className="lineNo">{visibleLineNumber ?? ""}</span>
+        <span className="lineMarker">{diffMarker(line.kind)}</span>
+        <code>{line.text || " "}</code>
       </div>
     );
   }
@@ -1472,15 +1607,37 @@ function renderDiffLine(line: DiffLine, index: number) {
 
 type DiffRenderItem =
   | { kind: "line"; line: DiffLine; index: number }
-  | { kind: "hunk"; id: string; meta: DiffLine; lines: Array<{ line: DiffLine; index: number }> };
+  | {
+      kind: "hunk";
+      id: string;
+      meta: DiffLine;
+      foldLabel: string;
+      lines: Array<{ line: DiffLine; index: number }>;
+    };
 
 function groupDiffLines(lines: DiffLine[]): DiffRenderItem[] {
   const items: DiffRenderItem[] = [];
   let activeHunk: Extract<DiffRenderItem, { kind: "hunk" }> | null = null;
+  let previousOldEnd = 0;
+  let previousNewEnd = 0;
 
   lines.forEach((line, index) => {
     if (line.kind === "meta" && line.text.startsWith("@@")) {
-      activeHunk = { kind: "hunk", id: `${index}-${line.text}`, meta: line, lines: [] };
+      const range = parseHunkRange(line.text);
+      const unchangedBefore = range
+        ? Math.max(0, Math.max(range.oldStart - previousOldEnd - 1, range.newStart - previousNewEnd - 1))
+        : 0;
+      activeHunk = {
+        kind: "hunk",
+        id: `${index}-${line.text}`,
+        meta: line,
+        foldLabel: `${unchangedBefore} unmodified ${unchangedBefore === 1 ? "line" : "lines"}`,
+        lines: [],
+      };
+      if (range) {
+        previousOldEnd = range.oldStart + range.oldLines - 1;
+        previousNewEnd = range.newStart + range.newLines - 1;
+      }
       items.push(activeHunk);
       return;
     }
@@ -1496,9 +1653,20 @@ function groupDiffLines(lines: DiffLine[]): DiffRenderItem[] {
   return items;
 }
 
+function parseHunkRange(text: string) {
+  const match = text.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?/);
+  if (!match) return null;
+  return {
+    oldStart: Number(match[1]),
+    oldLines: match[2] === undefined ? 1 : Number(match[2]),
+    newStart: Number(match[3]),
+    newLines: match[4] === undefined ? 1 : Number(match[4]),
+  };
+}
+
 function diffHunkContextTitle(item: Extract<DiffRenderItem, { kind: "hunk" }>) {
   const unchanged = item.lines.filter(({ line }) => line.kind === "context").length;
-  return unchanged > 0 ? `${unchanged} 行未改动上下文` : "仅包含变更行";
+  return unchanged > 0 ? `${unchanged} 行上下文` : "仅包含变更行";
 }
 
 function diffMetaLabel(text: string) {
