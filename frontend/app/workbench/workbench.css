@@ -5393,7 +5393,7 @@ div.agentChoice {
   white-space: nowrap;
 }
 
-.mainGitRevisionRefButton,
+.mainGitCommitPicker.disabled,
 .mainGitCommitPicker summary {
   display: inline-flex;
   align-items: center;
@@ -5410,14 +5410,13 @@ div.agentChoice {
   font-variant-numeric: tabular-nums;
 }
 
-.mainGitRevisionRefButton:hover:not(:disabled),
 .mainGitCommitPicker summary:hover,
 .mainGitCommitPicker[open] summary {
   background: #f5f5f5;
   color: #242424;
 }
 
-.mainGitRevisionRefButton:disabled {
+.mainGitCommitPicker.disabled {
   cursor: default;
   opacity: 1;
 }

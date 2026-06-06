@@ -193,6 +193,31 @@ export function DiffPanel({
 
 const MAIN_GIT_COMMIT_LIMIT = 100;
 
+type MainGitDiffCacheState = {
+  commits: MainGitCommitDto[];
+  hasMore: boolean;
+  nextCursor: string;
+  selectedSha: string;
+  selectedBaseSha: string;
+  selectedFilePath: string;
+  fileFilter: string;
+  fileListVisible: boolean;
+  filesByCommit: Record<string, MainGitDiffFileSummary[]>;
+  parentsByCommit: Record<string, string>;
+  fileDiffs: Record<string, MainGitFileDiffResponse>;
+};
+
+const mainGitConnectionCache = new Map<string, string>();
+const mainGitDiffCache = new Map<string, MainGitDiffCacheState>();
+
+function mainGitCachedStateForSession(sessionId: string) {
+  const downstreamSessionId = sessionId ? (mainGitConnectionCache.get(sessionId) ?? "") : "";
+  return {
+    downstreamSessionId,
+    state: downstreamSessionId ? mainGitDiffCache.get(downstreamSessionId) : undefined,
+  };
+}
+
 export function MainGitDiffPanel({
   sessionId,
   refreshSignal,
@@ -202,30 +227,42 @@ export function MainGitDiffPanel({
   refreshSignal?: number;
   onNotice?: (message: string) => void;
 }) {
-  const [commits, setCommits] = useState<MainGitCommitDto[]>([]);
-  const [downstreamSessionId, setDownstreamSessionId] = useState("");
-  const [selectedSha, setSelectedSha] = useState("");
-  const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState("");
+  const initialCacheRef = useRef(mainGitCachedStateForSession(sessionId));
+  const initialCache = initialCacheRef.current.state;
+  const [commits, setCommits] = useState<MainGitCommitDto[]>(() => initialCache?.commits ?? []);
+  const [downstreamSessionId, setDownstreamSessionId] = useState(() => initialCacheRef.current.downstreamSessionId);
+  const [selectedSha, setSelectedSha] = useState(() => initialCache?.selectedSha ?? "");
+  const [selectedBaseSha, setSelectedBaseSha] = useState(() => initialCache?.selectedBaseSha ?? "");
+  const [hasMore, setHasMore] = useState(() => initialCache?.hasMore ?? false);
+  const [nextCursor, setNextCursor] = useState(() => initialCache?.nextCursor ?? "");
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [commitError, setCommitError] = useState("");
   const [socketState, setSocketState] = useState<SocketState>("disconnected");
   const [newCommitNotice, setNewCommitNotice] = useState("");
-  const [filesByCommit, setFilesByCommit] = useState<Record<string, MainGitDiffFileSummary[]>>({});
-  const [parentsByCommit, setParentsByCommit] = useState<Record<string, string>>({});
+  const [filesByCommit, setFilesByCommit] = useState<Record<string, MainGitDiffFileSummary[]>>(
+    () => initialCache?.filesByCommit ?? {},
+  );
+  const [parentsByCommit, setParentsByCommit] = useState<Record<string, string>>(
+    () => initialCache?.parentsByCommit ?? {},
+  );
   const [filesLoading, setFilesLoading] = useState<Record<string, boolean>>({});
   const [filesError, setFilesError] = useState<Record<string, string>>({});
-  const [selectedFilePath, setSelectedFilePath] = useState("");
-  const [fileFilter, setFileFilter] = useState("");
-  const [fileListVisible, setFileListVisible] = useState(true);
-  const [commitMenuOpen, setCommitMenuOpen] = useState(false);
-  const [fileDiffs, setFileDiffs] = useState<Record<string, MainGitFileDiffResponse>>({});
+  const [selectedFilePath, setSelectedFilePath] = useState(() => initialCache?.selectedFilePath ?? "");
+  const [fileFilter, setFileFilter] = useState(() => initialCache?.fileFilter ?? "");
+  const [fileListVisible, setFileListVisible] = useState(() => initialCache?.fileListVisible ?? true);
+  const [openCommitMenu, setOpenCommitMenu] = useState<"" | "parent" | "target">("");
+  const [fileDiffs, setFileDiffs] = useState<Record<string, MainGitFileDiffResponse>>(
+    () => initialCache?.fileDiffs ?? {},
+  );
   const [fileDiffLoading, setFileDiffLoading] = useState<Record<string, boolean>>({});
   const [fileDiffErrors, setFileDiffErrors] = useState<Record<string, string>>({});
   const selectedShaRef = useRef("");
   const latestShaRef = useRef("");
   const refreshSignalMountedRef = useRef(false);
+  const cacheReadyRef = useRef(Boolean(initialCacheRef.current.downstreamSessionId));
+  const skipNextCacheSaveRef = useRef("");
+  const preserveSelectionOnShaChangeRef = useRef(Boolean(initialCache));
 
   const latestSha = commits[0]?.commitSha ?? "";
   const selectedFiles = selectedSha ? (filesByCommit[selectedSha] ?? []) : [];
@@ -244,9 +281,10 @@ export function MainGitDiffPanel({
   const selectedFilesLoading = selectedSha ? Boolean(filesLoading[selectedSha]) : false;
   const selectedFilesError = selectedSha ? filesError[selectedSha] : "";
   const selectedParentSha = selectedSha ? (parentsByCommit[selectedSha] ?? "") : "";
+  const displayedBaseSha = selectedBaseSha || selectedParentSha;
   const selectedFilesLoaded = Boolean(selectedSha && filesByCommit[selectedSha]);
-  const parentRefText = selectedParentSha ? shortSha(selectedParentSha) : selectedFilesLoaded ? "empty tree" : "加载中";
-  const parentRefTitle = selectedParentSha || (selectedFilesLoaded ? "empty tree" : "正在读取父 commit");
+  const parentRefText = displayedBaseSha ? shortSha(displayedBaseSha) : selectedFilesLoaded ? "empty tree" : "加载中";
+  const parentRefTitle = displayedBaseSha || (selectedFilesLoaded ? "empty tree" : "正在读取父 commit");
   const selectedTotals = selectedFiles.reduce(
     (total, file) => ({
       additions: total.additions + file.additions,
@@ -264,16 +302,77 @@ export function MainGitDiffPanel({
   }, [latestSha]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      cacheReadyRef.current = false;
+      setDownstreamSessionId("");
+      restoreMainGitCacheState();
+      return;
+    }
+
+    const cachedDownstreamSessionId = mainGitConnectionCache.get(sessionId);
+    if (cachedDownstreamSessionId) {
+      setDownstreamSessionId(cachedDownstreamSessionId);
+      return;
+    }
+
+    cacheReadyRef.current = false;
+    setDownstreamSessionId("");
+    restoreMainGitCacheState();
+    let cancelled = false;
     void getSandboxFilesystemConnection(sessionId).then((result) => {
-      if (result.ok) setDownstreamSessionId(result.data.downstreamSessionId);
+      if (cancelled || !result.ok) return;
+      mainGitConnectionCache.set(sessionId, result.data.downstreamSessionId);
+      setDownstreamSessionId(result.data.downstreamSessionId);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId]);
 
   useEffect(() => {
     if (!downstreamSessionId) return;
-    void refreshCommitList({ selectLatest: true });
+    const cached = mainGitDiffCache.get(downstreamSessionId);
+    const viewingLatest = cached ? !cached.selectedSha || cached.selectedSha === cached.commits[0]?.commitSha : true;
+    skipNextCacheSaveRef.current = downstreamSessionId;
+    cacheReadyRef.current = true;
+    preserveSelectionOnShaChangeRef.current = Boolean(cached);
+    restoreMainGitCacheState(cached);
+    void refreshCommitList({ selectLatest: viewingLatest, silent: Boolean(cached) });
   }, [downstreamSessionId]);
+
+  useEffect(() => {
+    if (!downstreamSessionId || !cacheReadyRef.current) return;
+    if (skipNextCacheSaveRef.current === downstreamSessionId) {
+      skipNextCacheSaveRef.current = "";
+      return;
+    }
+    mainGitDiffCache.set(downstreamSessionId, {
+      commits,
+      hasMore,
+      nextCursor,
+      selectedSha,
+      selectedBaseSha,
+      selectedFilePath,
+      fileFilter,
+      fileListVisible,
+      filesByCommit,
+      parentsByCommit,
+      fileDiffs,
+    });
+  }, [
+    downstreamSessionId,
+    commits,
+    hasMore,
+    nextCursor,
+    selectedSha,
+    selectedBaseSha,
+    selectedFilePath,
+    fileFilter,
+    fileListVisible,
+    filesByCommit,
+    parentsByCommit,
+    fileDiffs,
+  ]);
 
   useEffect(() => {
     if (!refreshSignalMountedRef.current) {
@@ -298,9 +397,13 @@ export function MainGitDiffPanel({
   }, [downstreamSessionId, onNotice]);
 
   useEffect(() => {
-    setSelectedFilePath("");
-    setFileFilter("");
-    setCommitMenuOpen(false);
+    if (!preserveSelectionOnShaChangeRef.current) {
+      setSelectedBaseSha("");
+      setSelectedFilePath("");
+      setFileFilter("");
+    }
+    preserveSelectionOnShaChangeRef.current = false;
+    setOpenCommitMenu("");
     if (selectedSha) void loadCommitFiles(selectedSha);
   }, [selectedSha]);
 
@@ -354,6 +457,16 @@ export function MainGitDiffPanel({
 
   async function loadCommitFiles(commitSha: string) {
     if (filesByCommit[commitSha] || filesLoading[commitSha]) return;
+    const cached = downstreamSessionId ? mainGitDiffCache.get(downstreamSessionId) : undefined;
+    const cachedFiles = cached?.filesByCommit[commitSha];
+    if (cachedFiles) {
+      setFilesByCommit((current) => (current[commitSha] ? current : { ...current, [commitSha]: cachedFiles }));
+      const cachedParent = cached?.parentsByCommit[commitSha];
+      if (cachedParent !== undefined) {
+        setParentsByCommit((current) => ({ ...current, [commitSha]: cachedParent }));
+      }
+      return;
+    }
     setFilesLoading((current) => ({ ...current, [commitSha]: true }));
     setFilesError((current) => ({ ...current, [commitSha]: "" }));
     const result = await listMainGitCommitFiles(downstreamSessionId, commitSha);
@@ -369,6 +482,11 @@ export function MainGitDiffPanel({
   async function loadFileDiff(commitSha: string, path: string) {
     const key = mainGitFileKey(commitSha, path);
     if (fileDiffs[key] || fileDiffLoading[key]) return;
+    const cachedDiff = downstreamSessionId ? mainGitDiffCache.get(downstreamSessionId)?.fileDiffs[key] : undefined;
+    if (cachedDiff) {
+      setFileDiffs((current) => (current[key] ? current : { ...current, [key]: cachedDiff }));
+      return;
+    }
     setFileDiffLoading((current) => ({ ...current, [key]: true }));
     setFileDiffErrors((current) => ({ ...current, [key]: "" }));
     const result = await getMainGitFileDiff(downstreamSessionId, commitSha, path);
@@ -386,10 +504,49 @@ export function MainGitDiffPanel({
     void loadFileDiff(selectedSha, file.path);
   }
 
+  function selectTargetCommit(commitSha: string) {
+    setSelectedSha(commitSha);
+    setOpenCommitMenu("");
+  }
+
+  function selectBaseCommit(commitSha: string) {
+    setSelectedBaseSha(commitSha);
+    setOpenCommitMenu("");
+  }
+
   function handleRefreshClick() {
     const shouldSelectLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
     setNewCommitNotice("");
     void refreshCommitList({ selectLatest: shouldSelectLatest });
+  }
+
+  function handleCommitMenuOpenChange(menuId: "parent" | "target", open: boolean) {
+    setOpenCommitMenu((current) => (open ? menuId : current === menuId ? "" : current));
+  }
+
+  function restoreMainGitCacheState(cached?: MainGitDiffCacheState) {
+    setCommits(cached?.commits ?? []);
+    setSelectedSha(cached?.selectedSha ?? "");
+    setSelectedBaseSha(cached?.selectedBaseSha ?? "");
+    setHasMore(cached?.hasMore ?? false);
+    setNextCursor(cached?.nextCursor ?? "");
+    setLoadingCommits(false);
+    setLoadingMore(false);
+    setCommitError("");
+    setNewCommitNotice("");
+    setFilesByCommit(cached?.filesByCommit ?? {});
+    setParentsByCommit(cached?.parentsByCommit ?? {});
+    setFilesLoading({});
+    setFilesError({});
+    setSelectedFilePath(cached?.selectedFilePath ?? "");
+    setFileFilter(cached?.fileFilter ?? "");
+    setFileListVisible(cached?.fileListVisible ?? true);
+    setOpenCommitMenu("");
+    setFileDiffs(cached?.fileDiffs ?? {});
+    setFileDiffLoading({});
+    setFileDiffErrors({});
+    selectedShaRef.current = cached?.selectedSha ?? "";
+    latestShaRef.current = cached?.commits[0]?.commitSha ?? "";
   }
 
   return (
@@ -427,65 +584,35 @@ export function MainGitDiffPanel({
 
       <section className="mainGitRevisionBar" aria-label="commit 对比">
         <div className="mainGitRevisionRefs">
-          <button
-            className="mainGitRevisionRefButton"
-            type="button"
-            title={selectedParentSha ? `${parentRefTitle} · 查看父提交` : parentRefTitle}
-            disabled={!selectedParentSha}
-            onClick={() => {
-              if (selectedParentSha) setSelectedSha(selectedParentSha);
-            }}
-          >
-            {parentRefText}
-          </button>
+          <MainGitCommitPicker
+            activeSha={displayedBaseSha}
+            commits={commits}
+            disabled={commits.length === 0}
+            hasMore={hasMore}
+            label={parentRefText}
+            loadingMore={loadingMore}
+            menuId="parent"
+            onLoadMore={loadMoreCommits}
+            onOpenChange={(open) => handleCommitMenuOpenChange("parent", open)}
+            onSelect={selectBaseCommit}
+            open={openCommitMenu === "parent"}
+            title={parentRefTitle}
+          />
           <span aria-hidden="true">→</span>
-          {commits.length > 0 ? (
-            <details
-              className="mainGitCommitPicker"
-              open={commitMenuOpen}
-              onToggle={(event) => setCommitMenuOpen(event.currentTarget.open)}
-            >
-              <summary aria-label="选择 commit" title={selectedSha || "未选择 commit"}>
-                <span>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
-                <DownOutlined />
-              </summary>
-              <div className="mainGitCommitMenu" role="listbox" aria-label="commit 历史">
-                {commits.map((commit) => (
-                  <button
-                    className={commit.commitSha === selectedSha ? "active" : ""}
-                    key={commit.commitSha}
-                    type="button"
-                    role="option"
-                    aria-selected={commit.commitSha === selectedSha}
-                    title={`${commit.commitSha} · ${commitSubject(commit)}`}
-                    onClick={() => {
-                      setSelectedSha(commit.commitSha);
-                      setCommitMenuOpen(false);
-                    }}
-                  >
-                    <span className="mainGitCommitMenuSha">{shortSha(commit.commitSha)}</span>
-                    <span className="mainGitCommitMenuSubject">{commitSubject(commit)}</span>
-                    <span className="mainGitCommitMenuTime">{formatDateTime(commit.committedAt)}</span>
-                  </button>
-                ))}
-                {hasMore && (
-                  <button
-                    className="mainGitCommitMenuMore"
-                    type="button"
-                    disabled={loadingMore}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      void loadMoreCommits();
-                    }}
-                  >
-                    {loadingMore ? "加载中" : "加载更多"}
-                  </button>
-                )}
-              </div>
-            </details>
-          ) : (
-            <span title={selectedSha || "未选择 commit"}>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
-          )}
+          <MainGitCommitPicker
+            activeSha={selectedSha}
+            commits={commits}
+            disabled={commits.length === 0}
+            hasMore={hasMore}
+            label={selectedSha ? shortSha(selectedSha) : "未选择 commit"}
+            loadingMore={loadingMore}
+            menuId="target"
+            onLoadMore={loadMoreCommits}
+            onOpenChange={(open) => handleCommitMenuOpenChange("target", open)}
+            onSelect={selectTargetCommit}
+            open={openCommitMenu === "target"}
+            title={selectedSha || "未选择 commit"}
+          />
         </div>
       </section>
 
@@ -599,6 +726,85 @@ function MainGitSelectedDiff({
       </header>
       <MainGitFileDiffDetails diff={diff} loading={loading} error={error} />
     </section>
+  );
+}
+
+function MainGitCommitPicker({
+  activeSha,
+  commits,
+  disabled,
+  hasMore,
+  label,
+  loadingMore,
+  menuId,
+  onLoadMore,
+  onOpenChange,
+  onSelect,
+  open,
+  title,
+}: {
+  activeSha: string;
+  commits: MainGitCommitDto[];
+  disabled: boolean;
+  hasMore: boolean;
+  label: string;
+  loadingMore: boolean;
+  menuId: "parent" | "target";
+  onLoadMore: () => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (commitSha: string) => void;
+  open: boolean;
+  title: string;
+}) {
+  if (disabled) {
+    return (
+      <span className="mainGitCommitPicker disabled" title={title}>
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <details
+      className={`mainGitCommitPicker ${menuId}`}
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+    >
+      <summary aria-label="选择 commit" title={title}>
+        <span>{label}</span>
+        <DownOutlined />
+      </summary>
+      <div className="mainGitCommitMenu" role="listbox" aria-label="commit 历史">
+        {commits.map((commit) => (
+          <button
+            className={commit.commitSha === activeSha ? "active" : ""}
+            key={commit.commitSha}
+            type="button"
+            role="option"
+            aria-selected={commit.commitSha === activeSha}
+            title={`${commit.commitSha} · ${commitSubject(commit)}`}
+            onClick={() => onSelect(commit.commitSha)}
+          >
+            <span className="mainGitCommitMenuSha">{shortSha(commit.commitSha)}</span>
+            <span className="mainGitCommitMenuSubject">{commitSubject(commit)}</span>
+            <span className="mainGitCommitMenuTime">{formatDateTime(commit.committedAt)}</span>
+          </button>
+        ))}
+        {hasMore && (
+          <button
+            className="mainGitCommitMenuMore"
+            type="button"
+            disabled={loadingMore}
+            onClick={(event) => {
+              event.preventDefault();
+              void onLoadMore();
+            }}
+          >
+            {loadingMore ? "加载中" : "加载更多"}
+          </button>
+        )}
+      </div>
+    </details>
   );
 }
 

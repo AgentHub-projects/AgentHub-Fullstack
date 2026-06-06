@@ -1234,9 +1234,6 @@ export default function WorkbenchPage() {
                     </span>
                     <time>{formatTime(session.updatedAt)}</time>
                   </span>
-                  <span className="sessionItemBottom">
-                    {sessionBusy && <span className="sessionStateBadge">运行</span>}
-                  </span>
                 </button>
                 <div className="sessionItemActions">
                   <button
