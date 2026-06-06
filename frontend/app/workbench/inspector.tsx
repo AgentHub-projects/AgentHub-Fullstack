@@ -219,6 +219,7 @@ export function MainGitDiffPanel({
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [fileFilter, setFileFilter] = useState("");
   const [fileListVisible, setFileListVisible] = useState(true);
+  const [commitMenuOpen, setCommitMenuOpen] = useState(false);
   const [fileDiffs, setFileDiffs] = useState<Record<string, MainGitFileDiffResponse>>({});
   const [fileDiffLoading, setFileDiffLoading] = useState<Record<string, boolean>>({});
   const [fileDiffErrors, setFileDiffErrors] = useState<Record<string, string>>({});
@@ -227,7 +228,6 @@ export function MainGitDiffPanel({
   const refreshSignalMountedRef = useRef(false);
 
   const latestSha = commits[0]?.commitSha ?? "";
-  const selectedCommit = commits.find((commit) => commit.commitSha === selectedSha) ?? null;
   const selectedFiles = selectedSha ? (filesByCommit[selectedSha] ?? []) : [];
   const normalizedFileFilter = fileFilter.trim().toLowerCase();
   const filteredFiles = normalizedFileFilter
@@ -300,6 +300,7 @@ export function MainGitDiffPanel({
   useEffect(() => {
     setSelectedFilePath("");
     setFileFilter("");
+    setCommitMenuOpen(false);
     if (selectedSha) void loadCommitFiles(selectedSha);
   }, [selectedSha]);
 
@@ -426,26 +427,66 @@ export function MainGitDiffPanel({
 
       <section className="mainGitRevisionBar" aria-label="commit 对比">
         <div className="mainGitRevisionRefs">
-          <span title={parentRefTitle}>{parentRefText}</span>
+          <button
+            className="mainGitRevisionRefButton"
+            type="button"
+            title={selectedParentSha ? `${parentRefTitle} · 查看父提交` : parentRefTitle}
+            disabled={!selectedParentSha}
+            onClick={() => {
+              if (selectedParentSha) setSelectedSha(selectedParentSha);
+            }}
+          >
+            {parentRefText}
+          </button>
           <span aria-hidden="true">→</span>
-          <span title={selectedSha || "未选择 commit"}>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
+          {commits.length > 0 ? (
+            <details
+              className="mainGitCommitPicker"
+              open={commitMenuOpen}
+              onToggle={(event) => setCommitMenuOpen(event.currentTarget.open)}
+            >
+              <summary aria-label="选择 commit" title={selectedSha || "未选择 commit"}>
+                <span>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
+                <DownOutlined />
+              </summary>
+              <div className="mainGitCommitMenu" role="listbox" aria-label="commit 历史">
+                {commits.map((commit) => (
+                  <button
+                    className={commit.commitSha === selectedSha ? "active" : ""}
+                    key={commit.commitSha}
+                    type="button"
+                    role="option"
+                    aria-selected={commit.commitSha === selectedSha}
+                    title={`${commit.commitSha} · ${commitSubject(commit)}`}
+                    onClick={() => {
+                      setSelectedSha(commit.commitSha);
+                      setCommitMenuOpen(false);
+                    }}
+                  >
+                    <span className="mainGitCommitMenuSha">{shortSha(commit.commitSha)}</span>
+                    <span className="mainGitCommitMenuSubject">{commitSubject(commit)}</span>
+                    <span className="mainGitCommitMenuTime">{formatDateTime(commit.committedAt)}</span>
+                  </button>
+                ))}
+                {hasMore && (
+                  <button
+                    className="mainGitCommitMenuMore"
+                    type="button"
+                    disabled={loadingMore}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void loadMoreCommits();
+                    }}
+                  >
+                    {loadingMore ? "加载中" : "加载更多"}
+                  </button>
+                )}
+              </div>
+            </details>
+          ) : (
+            <span title={selectedSha || "未选择 commit"}>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
+          )}
         </div>
-        {commits.length > 0 && (
-          <div className="mainGitRevisionControls">
-            <select aria-label="选择 commit" value={selectedSha} onChange={(event) => setSelectedSha(event.target.value)}>
-              {commits.map((commit) => (
-                <option key={commit.commitSha} value={commit.commitSha}>
-                  {shortSha(commit.commitSha)} · {formatDateTime(commit.committedAt)} · {commitSubject(commit)}
-                </option>
-              ))}
-            </select>
-            {hasMore && (
-              <button className="ghostButton" type="button" disabled={loadingMore} onClick={() => void loadMoreCommits()}>
-                {loadingMore ? "加载中" : "加载更多"}
-              </button>
-            )}
-          </div>
-        )}
       </section>
 
       <section className={`mainGitDiffWorkspace ${fileListVisible ? "" : "fileListHidden"}`} aria-label="commit 文件变更">
@@ -458,10 +499,10 @@ export function MainGitDiffPanel({
           {newCommitNotice && <div className="diffSnapshotNotice">{newCommitNotice}</div>}
           {selectedFilesLoading && <PanelEmpty icon={<LoadingOutlined />} text="正在加载文件列表" />}
           {selectedFilesError && <div className="diffSnapshotNotice error">文件列表加载失败：{selectedFilesError}</div>}
-          {selectedCommit && !selectedFilesLoading && !selectedFilesError && selectedFiles.length === 0 && (
+          {selectedSha && !selectedFilesLoading && !selectedFilesError && selectedFiles.length === 0 && (
             <MainGitEmptyState title="尚无文件更改" text="此项目中的更改将显示在此处。" />
           )}
-          {selectedCommit && selectedFile && selectedFiles.length > 0 && (
+          {selectedSha && selectedFile && selectedFiles.length > 0 && (
             <MainGitSelectedDiff
               file={selectedFile}
               diff={selectedFileDiff}
@@ -469,7 +510,7 @@ export function MainGitDiffPanel({
               error={selectedFileDiffError}
             />
           )}
-          {selectedCommit && !selectedFile && selectedFiles.length > 0 && (
+          {selectedSha && !selectedFile && selectedFiles.length > 0 && (
             <MainGitEmptyState title="选择文件查看更改" text="右侧文件列表中的更改会显示在此处。" />
           )}
         </main>

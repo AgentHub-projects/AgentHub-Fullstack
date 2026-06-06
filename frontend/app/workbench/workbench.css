@@ -5370,7 +5370,7 @@ div.agentChoice {
 }
 
 .mainGitRevisionBar {
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   min-height: 46px;
   border-bottom: 1px solid #ececec;
@@ -5379,34 +5379,139 @@ div.agentChoice {
 }
 
 .mainGitRevisionRefs {
+  position: relative;
   gap: 11px;
   color: #8a8a8a;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
 
-.mainGitRevisionRefs span:not([aria-hidden]) {
+.mainGitRevisionRefs > span:not([aria-hidden]) {
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mainGitRevisionControls {
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 1;
+.mainGitRevisionRefButton,
+.mainGitCommitPicker summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  max-width: 160px;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a8a8a;
+  padding: 0 6px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
-.mainGitRevisionControls select {
-  width: min(380px, 100%);
-  min-height: 32px;
-  border: 1px solid #e4e4e4;
-  border-radius: 8px;
+.mainGitRevisionRefButton:hover:not(:disabled),
+.mainGitCommitPicker summary:hover,
+.mainGitCommitPicker[open] summary {
+  background: #f5f5f5;
+  color: #242424;
+}
+
+.mainGitRevisionRefButton:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.mainGitCommitPicker {
+  position: relative;
+  min-width: 0;
+}
+
+.mainGitCommitPicker summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.mainGitCommitPicker summary::-webkit-details-marker {
+  display: none;
+}
+
+.mainGitCommitPicker summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainGitCommitPicker summary .anticon {
+  color: #8a8a8a;
+  font-size: 10px;
+}
+
+.mainGitCommitMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  align-content: start;
+  width: min(520px, calc(100vw - 48px));
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
   background: #ffffff;
-  color: #4b4b4b;
-  padding: 0 9px;
-  font: inherit;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.13);
+  padding: 6px;
+}
+
+.mainGitCommitMenu button {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #242424;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.mainGitCommitMenu button:hover,
+.mainGitCommitMenu button.active {
+  background: #f1f1f1;
+}
+
+.mainGitCommitMenuSha {
+  color: #606060;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mainGitCommitMenuSubject {
+  min-width: 0;
+  overflow: hidden;
+  color: #242424;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainGitCommitMenuTime {
+  color: #858585;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mainGitCommitMenuMore {
+  grid-template-columns: minmax(0, 1fr) !important;
+  justify-content: center;
+  color: #4d4d4d !important;
+  text-align: center !important;
 }
 
 .mainGitDiffWorkspace {
