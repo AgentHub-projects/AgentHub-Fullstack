@@ -31,6 +31,20 @@ describe("HubRealtimeGateway subscriptions", () => {
     expect(gateway.hasSessionSubscribers("session-1")).toBe(false);
   });
 
+  it("emits subscription ack immediately and notifies internal listeners once per client subscription", () => {
+    const gateway = new HubRealtimeGateway();
+    const socket = client("client-1");
+    const handler = vi.fn();
+    gateway.onSessionSubscribed(handler);
+
+    gateway.subscribe(socket, { sessionId: "session-1" });
+    gateway.subscribe(socket, { sessionId: "session-1" });
+
+    expect(socket.emit).toHaveBeenCalledWith("session.subscribed", { sessionId: "session-1" });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith("session-1");
+  });
+
   it("counts legacy joinConversation subscriptions", () => {
     const gateway = new HubRealtimeGateway();
     const socket = client("legacy-client");

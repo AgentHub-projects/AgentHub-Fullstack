@@ -34,6 +34,8 @@ const ENABLE_FILE_APPLY_DIFF = "DOWNSTREAM_ENABLE_FILE_APPLY_DIFF";
 export class DownstreamOrchestratorService implements OnModuleDestroy {
   private readonly logger = new Logger(DownstreamOrchestratorService.name);
   private readonly connections = new Map<string, ConnectionRecord>();
+  private readonly connectionPreparations = new Map<string, Promise<ConnectionRecord>>();
+  private unregisterGatewaySubscription?: () => void;
 
   private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
     lazyConnect: true,
@@ -54,16 +56,19 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     private readonly sandboxRegistry?: DownstreamSandboxRegistryService,
   ) {
     this.redis.on("error", () => undefined);
+    this.unregisterGatewaySubscription = this.gateway.onSessionSubscribed((sessionId) => this.prepareSessionConnection(sessionId));
   }
 
   /** 模块销毁时断开所有下游 WebSocket 连接 */
   onModuleDestroy() {
+    this.unregisterGatewaySubscription?.();
     for (const record of this.connections.values()) {
       this.clearIdleTimer(record);
       record.closing = true;
       record.acp.close();
     }
     this.connections.clear();
+    this.connectionPreparations.clear();
     this.redis.disconnect();
   }
 
@@ -143,6 +148,26 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.connections.delete(sessionId);
   }
 
+  /** 前端订阅 session 时预热或恢复下游连接 */
+  async prepareSessionConnection(sessionId: string) {
+    const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
+    if (!downstreamUrl) return;
+
+    try {
+      const sessionDownstreamId = await this.readSessionDownstreamId(sessionId);
+      const record = await this.ensureConnection(sessionId, downstreamUrl, {
+        downstreamSessionId: sessionDownstreamId,
+      });
+      const downstreamSessionId = await record.downstreamReady;
+      if (downstreamSessionId && downstreamSessionId !== sessionDownstreamId) {
+        await this.persistSessionDownstreamId(sessionId, downstreamSessionId);
+        this.logger.log(`[订阅] 下游sessionId已保存: ${sessionDownstreamId ?? "空"} → ${downstreamSessionId}`);
+      }
+    } catch (error) {
+      this.logger.warn(`[订阅] 准备下游连接失败 sessionId=${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /** 发送 file/apply_diff ACP 消息应用文件变更 */
   async applyFileChanges(input: {
     sessionId: string;
@@ -186,14 +211,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const downstreamSessionId = run.downstreamSessionId ?? await this.readSessionDownstreamId(sessionId);
     if (!downstreamSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
 
-    const record = await this.ensureConnection(
-      sessionId,
-      downstreamUrl,
-      { id: run.orchestratorAgentId } as AgentInstanceDto,
-      {
-        downstreamSessionId,
-      },
-    );
+    const record = await this.ensureConnection(sessionId, downstreamUrl, {
+      downstreamSessionId,
+    });
     const loadedSessionId = await (record.downstreamReady ?? Promise.resolve(record.downstreamSessionId));
     if (!loadedSessionId) throw new Error("DOWNSTREAM_SESSION_NOT_FOUND");
     return record;
@@ -230,11 +250,10 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
   }
 
-  /** 建立或复用下游 Socket.IO 连接，完成 ACP initialize + session new/复用握手 */
+  /** 建立或复用下游 Socket.IO 连接，完成 ACP initialize + session load/new 握手 */
   private async ensureConnection(
     sessionId: string,
     downstreamUrl: string,
-    agent: AgentInstanceDto,
     options: {
       downstreamSessionId?: string | null;
       activeRunId?: string;
@@ -246,6 +265,28 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       return existing;
     }
 
+    const pending = this.connectionPreparations.get(sessionId);
+    if (pending) return pending;
+
+    const preparation = this.openConnection(sessionId, downstreamUrl, options);
+    this.connectionPreparations.set(sessionId, preparation);
+    try {
+      return await preparation;
+    } finally {
+      if (this.connectionPreparations.get(sessionId) === preparation) this.connectionPreparations.delete(sessionId);
+    }
+  }
+
+  private async openConnection(
+    sessionId: string,
+    downstreamUrl: string,
+    options: {
+      downstreamSessionId?: string | null;
+      activeRunId?: string;
+      activeOrchestratorAgentId?: AgentId;
+    },
+  ): Promise<ConnectionRecord> {
+    const existing = this.connections.get(sessionId);
     if (existing) {
       existing.closing = true;
       existing.acp.close();
@@ -302,6 +343,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           "downstream disconnected",
         );
       }
+      if (!record.closing && this.gateway.hasSessionSubscribers(sessionId)) {
+        void this.prepareSessionConnection(sessionId);
+      }
     });
 
     socket.on("connect_error", () => {
@@ -320,14 +364,18 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       this.logger.log(`[接收JSON] initialize响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: initResult })}`);
 
       if (record.downstreamSessionId) {
-        this.logger.log(`[握手] 复用下游sessionId=${record.downstreamSessionId}`);
+        const sessionParams = { sessionId: record.downstreamSessionId, mcpServers: [] };
+        this.logger.log(`[发送JSON] session/load: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/load", params: sessionParams })}`);
+        const loadResult = await acp.request("session/load", sessionParams);
+        this.logger.log(`[接收JSON] session/load响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: loadResult })}`);
+        record.needsBootstrap = false;
         record.resolveDownstreamReady?.(record.downstreamSessionId);
         this.markDownstreamActivity(record);
         this.scheduleIdleDisconnectCheck(record);
         return record;
       }
 
-      const sessionParams = { _meta: { agentId: String(agent.id), agenthubSessionId: sessionId }, mcpServers: [] };
+      const sessionParams = { mcpServers: [] };
       this.logger.log(`[发送JSON] session/new: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/new", params: sessionParams })}`);
       const result = await acp.request("session/new", sessionParams);
       const resultSessionId = stringValue(result.sessionId);
@@ -356,7 +404,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const sessionDownstreamId = await this.readSessionDownstreamId(input.sessionId);
     this.logger.log(`[startRun] session下游ID=${sessionDownstreamId ?? "空"} → ${sessionDownstreamId ? "复用已有下游session" : "将创建新下游session"}`);
 
-    const connection = await this.ensureConnection(input.sessionId, downstreamUrl, input.orchestrator, {
+    const connection = await this.ensureConnection(input.sessionId, downstreamUrl, {
       downstreamSessionId: sessionDownstreamId,
     });
     const downstreamSessionId = await connection.downstreamReady;

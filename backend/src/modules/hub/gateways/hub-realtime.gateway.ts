@@ -21,6 +21,8 @@ import type {
 } from "@agenthub/shared";
 import { AuthSessionService } from "../auth/auth-session.service";
 
+type SessionSubscriptionHandler = (sessionId: string) => void | Promise<void>;
+
 /** WebSocket 实时网关：管理客户端连接、会话订阅和实时事件推送 */
 @WebSocketGateway({
   cors: { origin: true, credentials: true },
@@ -31,10 +33,19 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   server!: Server;
   private readonly clientSessions = new Map<string, Set<string>>();
   private readonly sessionSubscriberCounts = new Map<string, number>();
+  private readonly sessionSubscriptionHandlers = new Set<SessionSubscriptionHandler>();
 
   constructor(@Optional() @Inject(AuthSessionService) private readonly authSessions?: AuthSessionService) {}
 
   private readonly logger = new Logger(HubRealtimeGateway.name);
+
+  /** 注册后端内部订阅监听；网关只发布订阅事实，不依赖具体下游服务 */
+  onSessionSubscribed(handler: SessionSubscriptionHandler) {
+    this.sessionSubscriptionHandlers.add(handler);
+    return () => {
+      this.sessionSubscriptionHandlers.delete(handler);
+    };
+  }
 
   /** 客户端连接时认证 Cookie，失败则发送 auth.required 并断开 */
   async handleConnection(client: Socket) {
@@ -64,9 +75,10 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   subscribe(@ConnectedSocket() client: Socket, @MessageBody() body: FrontendRealtimeSubscribe) {
     this.logger.log(`[订阅] clientId=${client.id} sessionId=${body?.sessionId}`);
     if (body?.sessionId) {
-      this.trackSubscription(client, body.sessionId);
+      const tracked = this.trackSubscription(client, body.sessionId);
       client.join(sessionRoom(body.sessionId));
       client.emit("session.subscribed", { sessionId: body.sessionId });
+      if (tracked) this.notifySessionSubscribed(body.sessionId);
     }
   }
 
@@ -84,8 +96,9 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
   @SubscribeMessage("joinConversation")
   joinConversation(@ConnectedSocket() client: Socket, @MessageBody() body: { conversationId?: string }) {
     if (body?.conversationId) {
-      this.trackSubscription(client, body.conversationId);
+      const tracked = this.trackSubscription(client, body.conversationId);
       client.join(sessionRoom(body.conversationId));
+      if (tracked) this.notifySessionSubscribed(body.conversationId);
     }
   }
 
@@ -173,9 +186,10 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
       sessions = new Set<string>();
       this.clientSessions.set(client.id, sessions);
     }
-    if (sessions.has(sessionId)) return;
+    if (sessions.has(sessionId)) return false;
     sessions.add(sessionId);
     this.sessionSubscriberCounts.set(sessionId, this.getSessionSubscriberCount(sessionId) + 1);
+    return true;
   }
 
   /** 清理客户端订阅追踪并递减计数 */
@@ -193,6 +207,19 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
       this.sessionSubscriberCounts.set(sessionId, next);
     } else {
       this.sessionSubscriberCounts.delete(sessionId);
+    }
+  }
+
+  /** 异步通知内部监听器，不阻塞前端订阅 ACK */
+  private notifySessionSubscribed(sessionId: string) {
+    for (const handler of this.sessionSubscriptionHandlers) {
+      try {
+        void Promise.resolve(handler(sessionId)).catch((error) => {
+          this.logger.warn(`[订阅] 内部监听失败 sessionId=${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      } catch (error) {
+        this.logger.warn(`[订阅] 内部监听失败 sessionId=${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 }

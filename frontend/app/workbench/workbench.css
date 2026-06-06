@@ -3471,6 +3471,110 @@ div.agentChoice {
   line-height: 1.6;
 }
 
+.archiveDialog {
+  width: min(460px, 100%);
+}
+
+.archiveDialogHeader {
+  align-items: center;
+}
+
+.archiveDialogHeader > div {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+
+.archiveDialogHeader > div strong,
+.archiveDialogHeader > div span,
+.archiveDialogSession strong,
+.archiveDialogSession small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archiveDialogHeader > .iconButton {
+  border-color: transparent;
+  background: transparent;
+}
+
+.archiveDialogIcon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.archiveDialogBody {
+  display: grid;
+  gap: 14px;
+  padding: 16px 14px;
+}
+
+.archiveDialogSession {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.archiveDialogSession .sessionAvatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  font-size: 12px;
+}
+
+.archiveDialogSession > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.archiveDialogSession small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.archiveDialogList {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.archiveDialogList li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.archiveDialogList .anticon {
+  margin-top: 2px;
+  color: var(--green);
+}
+
+.archiveDialogNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .searchableSelect {
   position: relative;
 }

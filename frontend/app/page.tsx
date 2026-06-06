@@ -22,6 +22,7 @@ import type {
 import {
   BranchesOutlined,
   CheckCircleOutlined,
+  CloseOutlined,
   DeleteOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -849,10 +850,14 @@ export default function WorkbenchPage() {
     setArchiveConfirmSession(session);
   }
 
+  function closeArchiveConfirmDialog() {
+    if (archiveConfirmSession && sessionActionId === archiveConfirmSession.id) return;
+    setArchiveConfirmSession(null);
+  }
+
   async function confirmArchiveSession() {
     const session = archiveConfirmSession;
-    if (!session) return;
-    setArchiveConfirmSession(null);
+    if (!session || sessionActionId) return;
     setSessionActionId(session.id);
     try {
       const result = await archiveSession(session.id);
@@ -860,6 +865,7 @@ export default function WorkbenchPage() {
         setNotice(`归档失败：${result.error}`);
         return;
       }
+      setArchiveConfirmSession(null);
       const nextSessions = sessions.filter((item) => item.id !== session.id).sort(sortSession);
       setSessions(nextSessions);
       if (activeSessionId === session.id) {
@@ -2454,15 +2460,74 @@ export default function WorkbenchPage() {
       )}
 
       {archiveConfirmSession && (
-        <div className="dialogLayer" role="presentation" onMouseDown={() => setArchiveConfirmSession(null)}>
-          <section className="agentDialog" role="dialog" aria-modal="true">
-            <header>
-              <strong>归档会话</strong>
+        <div className="dialogLayer" role="presentation" onMouseDown={closeArchiveConfirmDialog}>
+          <section
+            className="agentDialog archiveDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-session-title"
+            aria-describedby="archive-session-desc"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="archiveDialogHeader">
+              <span className="archiveDialogIcon" aria-hidden="true">
+                <InboxOutlined />
+              </span>
+              <div>
+                <strong id="archive-session-title">归档会话</strong>
+                <span>从当前会话列表移除，并保留历史数据</span>
+              </div>
+              <button
+                className="iconButton"
+                type="button"
+                aria-label="关闭归档确认"
+                title="关闭"
+                disabled={sessionActionId === archiveConfirmSession.id}
+                onClick={closeArchiveConfirmDialog}
+              >
+                <CloseOutlined />
+              </button>
             </header>
-            <p>确定要归档会话「{archiveConfirmSession.title}」吗？归档后不会删除数据，可随时恢复。</p>
+            <div className="archiveDialogBody" id="archive-session-desc">
+              <div className="archiveDialogSession">
+                <span className="sessionAvatar" style={{ background: agentColor(archiveConfirmSession.id) }}>
+                  {initials(archiveConfirmSession.title)}
+                </span>
+                <div>
+                  <strong>{archiveConfirmSession.title}</strong>
+                  <small>{sessionSubtitle(archiveConfirmSession)}</small>
+                </div>
+              </div>
+              <ul className="archiveDialogList">
+                <li>
+                  <CheckCircleOutlined />
+                  <span>历史消息、产物和文件记录会保留。</span>
+                </li>
+                <li>
+                  <CheckCircleOutlined />
+                  <span>归档后会话为只读，不能继续发送消息或编辑文件。</span>
+                </li>
+              </ul>
+              <p className="archiveDialogNote">需要继续协作时，请选择其他会话或新建对话。</p>
+            </div>
             <footer>
-              <button className="ghostButton" type="button" onClick={() => setArchiveConfirmSession(null)}>取消</button>
-              <button className="primaryButton" type="button" onClick={() => void confirmArchiveSession()}>确认归档</button>
+              <button
+                className="ghostButton"
+                type="button"
+                disabled={sessionActionId === archiveConfirmSession.id}
+                onClick={closeArchiveConfirmDialog}
+              >
+                取消
+              </button>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={sessionActionId === archiveConfirmSession.id}
+                onClick={() => void confirmArchiveSession()}
+              >
+                {sessionActionId === archiveConfirmSession.id ? <LoadingOutlined /> : <InboxOutlined />}
+                <span>{sessionActionId === archiveConfirmSession.id ? "归档中" : "归档会话"}</span>
+              </button>
             </footer>
           </section>
         </div>
