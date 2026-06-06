@@ -5339,6 +5339,24 @@ div.agentChoice {
   font-size: 11px;
 }
 
+.mainGitToolbarTotals {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 6px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.mainGitToolbarTotals .add {
+  color: #008a3d;
+}
+
+.mainGitToolbarTotals .remove {
+  color: #c21f1f;
+}
+
 .mainGitToolbarActions {
   justify-content: flex-end;
   gap: 6px;

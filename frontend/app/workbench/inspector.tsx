@@ -198,7 +198,6 @@ type MainGitDiffCacheState = {
   hasMore: boolean;
   nextCursor: string;
   selectedSha: string;
-  selectedBaseSha: string;
   selectedFilePath: string;
   fileFilter: string;
   fileListVisible: boolean;
@@ -232,7 +231,6 @@ export function MainGitDiffPanel({
   const [commits, setCommits] = useState<MainGitCommitDto[]>(() => initialCache?.commits ?? []);
   const [downstreamSessionId, setDownstreamSessionId] = useState(() => initialCacheRef.current.downstreamSessionId);
   const [selectedSha, setSelectedSha] = useState(() => initialCache?.selectedSha ?? "");
-  const [selectedBaseSha, setSelectedBaseSha] = useState(() => initialCache?.selectedBaseSha ?? "");
   const [hasMore, setHasMore] = useState(() => initialCache?.hasMore ?? false);
   const [nextCursor, setNextCursor] = useState(() => initialCache?.nextCursor ?? "");
   const [loadingCommits, setLoadingCommits] = useState(false);
@@ -281,10 +279,9 @@ export function MainGitDiffPanel({
   const selectedFilesLoading = selectedSha ? Boolean(filesLoading[selectedSha]) : false;
   const selectedFilesError = selectedSha ? filesError[selectedSha] : "";
   const selectedParentSha = selectedSha ? (parentsByCommit[selectedSha] ?? "") : "";
-  const displayedBaseSha = selectedBaseSha || selectedParentSha;
   const selectedFilesLoaded = Boolean(selectedSha && filesByCommit[selectedSha]);
-  const parentRefText = displayedBaseSha ? shortSha(displayedBaseSha) : selectedFilesLoaded ? "empty tree" : "加载中";
-  const parentRefTitle = displayedBaseSha || (selectedFilesLoaded ? "empty tree" : "正在读取父 commit");
+  const parentRefText = selectedParentSha ? shortSha(selectedParentSha) : selectedFilesLoaded ? "empty tree" : "加载中";
+  const parentRefTitle = selectedParentSha || (selectedFilesLoaded ? "empty tree" : "正在读取父 commit");
   const selectedTotals = selectedFiles.reduce(
     (total, file) => ({
       additions: total.additions + file.additions,
@@ -351,7 +348,6 @@ export function MainGitDiffPanel({
       hasMore,
       nextCursor,
       selectedSha,
-      selectedBaseSha,
       selectedFilePath,
       fileFilter,
       fileListVisible,
@@ -365,7 +361,6 @@ export function MainGitDiffPanel({
     hasMore,
     nextCursor,
     selectedSha,
-    selectedBaseSha,
     selectedFilePath,
     fileFilter,
     fileListVisible,
@@ -398,7 +393,6 @@ export function MainGitDiffPanel({
 
   useEffect(() => {
     if (!preserveSelectionOnShaChangeRef.current) {
-      setSelectedBaseSha("");
       setSelectedFilePath("");
       setFileFilter("");
     }
@@ -509,11 +503,6 @@ export function MainGitDiffPanel({
     setOpenCommitMenu("");
   }
 
-  function selectBaseCommit(commitSha: string) {
-    setSelectedBaseSha(commitSha);
-    setOpenCommitMenu("");
-  }
-
   function handleRefreshClick() {
     const shouldSelectLatest = !selectedShaRef.current || selectedShaRef.current === latestShaRef.current;
     setNewCommitNotice("");
@@ -527,7 +516,6 @@ export function MainGitDiffPanel({
   function restoreMainGitCacheState(cached?: MainGitDiffCacheState) {
     setCommits(cached?.commits ?? []);
     setSelectedSha(cached?.selectedSha ?? "");
-    setSelectedBaseSha(cached?.selectedBaseSha ?? "");
     setHasMore(cached?.hasMore ?? false);
     setNextCursor(cached?.nextCursor ?? "");
     setLoadingCommits(false);
@@ -553,8 +541,14 @@ export function MainGitDiffPanel({
     <div className="panelScroll diffPanelLayout mainGitDiffPanel">
       <header className="mainGitToolbar" aria-label="Diff 工具栏">
         <div className="mainGitToolbarTitle">
-          <strong>分支</strong>
+          <strong>提交</strong>
           <DownOutlined />
+          {selectedFilesLoaded && (
+            <span className="mainGitToolbarTotals" aria-label="本次总变更量">
+              <span className="add">+{formatCount(selectedTotals.additions)}</span>
+              <span className="remove">-{formatCount(selectedTotals.deletions)}</span>
+            </span>
+          )}
         </div>
         <div className="mainGitToolbarActions">
           <button type="button" title="更多操作" aria-label="更多操作">
@@ -585,21 +579,6 @@ export function MainGitDiffPanel({
       <section className="mainGitRevisionBar" aria-label="commit 对比">
         <div className="mainGitRevisionRefs">
           <MainGitCommitPicker
-            activeSha={displayedBaseSha}
-            commits={commits}
-            disabled={commits.length === 0}
-            hasMore={hasMore}
-            label={parentRefText}
-            loadingMore={loadingMore}
-            menuId="parent"
-            onLoadMore={loadMoreCommits}
-            onOpenChange={(open) => handleCommitMenuOpenChange("parent", open)}
-            onSelect={selectBaseCommit}
-            open={openCommitMenu === "parent"}
-            title={parentRefTitle}
-          />
-          <span aria-hidden="true">→</span>
-          <MainGitCommitPicker
             activeSha={selectedSha}
             commits={commits}
             disabled={commits.length === 0}
@@ -613,6 +592,10 @@ export function MainGitDiffPanel({
             open={openCommitMenu === "target"}
             title={selectedSha || "未选择 commit"}
           />
+          <span aria-hidden="true">→</span>
+          <span className="mainGitCommitPicker disabled" title={parentRefTitle}>
+            {parentRefText}
+          </span>
         </div>
       </section>
 
@@ -880,6 +863,10 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function mainGitStatusLabel(status: MainGitDiffFileSummary["status"]) {
