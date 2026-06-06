@@ -5598,14 +5598,6 @@ div.agentChoice {
   font-variant-numeric: tabular-nums;
 }
 
-.mainGitFilesSummary .add {
-  color: #008a3d;
-}
-
-.mainGitFilesSummary .remove {
-  color: #c21f1f;
-}
-
 .mainGitFilePanelNote {
   color: #888888;
   font-size: 14px;

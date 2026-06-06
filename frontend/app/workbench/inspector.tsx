@@ -637,8 +637,6 @@ export function MainGitDiffPanel({
             </label>
             <div className="mainGitFilesSummary">
               <span>{selectedFiles.length} 个文件</span>
-              <span className="add">+{selectedTotals.additions}</span>
-              <span className="remove">-{selectedTotals.deletions}</span>
             </div>
             {selectedFilesLoading && <span className="mainGitFilePanelNote">正在加载文件列表</span>}
             {!selectedFilesLoading && selectedFiles.length > 0 && filteredFiles.length === 0 && (
