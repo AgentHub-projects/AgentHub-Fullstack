@@ -431,19 +431,14 @@ export function MainGitDiffPanel({
           <span title={selectedSha || "未选择 commit"}>{selectedSha ? shortSha(selectedSha) : "未选择 commit"}</span>
         </div>
         {commits.length > 0 && (
-          <div className="mainGitCommitList">
-            {commits.map((commit) => (
-              <button
-                key={commit.commitSha}
-                className={`mainGitCommitItem ${commit.commitSha === selectedSha ? "active" : ""}`}
-                type="button"
-                onClick={() => setSelectedSha(commit.commitSha)}
-              >
-                <span className="mainGitCommitSha">{shortSha(commit.commitSha)}</span>
-                <span className="mainGitCommitMessage">{commitSubject(commit)}</span>
-                <span className="mainGitCommitTime">{formatDateTime(commit.committedAt)}</span>
-              </button>
-            ))}
+          <div className="mainGitRevisionControls">
+            <select aria-label="选择 commit" value={selectedSha} onChange={(event) => setSelectedSha(event.target.value)}>
+              {commits.map((commit) => (
+                <option key={commit.commitSha} value={commit.commitSha}>
+                  {shortSha(commit.commitSha)} · {formatDateTime(commit.committedAt)} · {commitSubject(commit)}
+                </option>
+              ))}
+            </select>
             {hasMore && (
               <button className="ghostButton" type="button" disabled={loadingMore} onClick={() => void loadMoreCommits()}>
                 {loadingMore ? "加载中" : "加载更多"}
