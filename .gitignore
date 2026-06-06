@@ -18,3 +18,4 @@ pnpm-debug.log*
 .playwright-cli/
 test-results/
 ..AgentHub-Fullstack-worktrees*/
+frontend-next.tar.gz
