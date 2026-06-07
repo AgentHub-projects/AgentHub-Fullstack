@@ -89,8 +89,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
     if (!downstreamUrl) {
-      await this.simulateRun(input);
-      return;
+      throw new Error("DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured");
     }
 
     try {
@@ -734,116 +733,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         record.acp.respondError(envelopeId, errorCode(msg), msg);
       }
     }
-  }
-
-  /** Mock 模式模拟运行：未配置下游时生成示例事件 */
-  private async simulateRun(input: {
-    sessionId: string;
-    runId: string;
-    promptText: string;
-    orchestrator: AgentInstanceDto;
-    mentionedAgents: AgentInstanceDto[];
-  }) {
-    const speakers = input.mentionedAgents.length > 0 ? input.mentionedAgents : [
-      // Default mock agents
-      { id: 2, name: "frontend-agent" } as AgentInstanceDto,
-      { id: 3, name: "backend-agent" } as AgentInstanceDto,
-      { id: 4, name: "review-agent" } as AgentInstanceDto,
-    ];
-
-    // Check if already cancelled before starting
-    if (await this.isRunCancelled(input.runId)) return;
-
-    await this.prisma.agentRun.update({
-      where: { id: input.runId },
-      data: { status: "running", startedAt: new Date(), downstreamSessionId: `mock-${input.sessionId}` },
-    });
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "run.status",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: { status: "running", mode: "mock", reason: "DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured" },
-    });
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "message.completed",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: {
-        text: `已收到任务，并将按 @Agent 分工推进：${speakers.map((agent) => agent.name).join("、") || "默认团队"}。`,
-      },
-    });
-
-    for (const agent of speakers.slice(0, 3)) {
-      await sleep(250);
-      if (await this.isRunCancelled(input.runId)) return;
-      await this.events.append({
-        sessionId: input.sessionId,
-        runId: input.runId,
-        eventType: "message.completed",
-        speakerAgentId: agent.id,
-        source: "mock_orchestrator",
-        payload: {
-          text: `${agent.name}：基于任务"${input.promptText.slice(0, 80)}"，我会输出可落库的事件、artifact 和文件变更快照。`,
-          speaker: agent.id,
-        },
-      });
-    }
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "file.change",
-      speakerAgentId: speakers[0]?.id ?? input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: {
-        speaker: speakers[0]?.id ?? input.orchestrator.id,
-        path: "src/app/page.tsx",
-        changeType: "modified",
-        language: "tsx",
-        before: { content: "export default function Page(){ return <div /> }", truncated: false },
-        after: { content: "export default function Page(){ return <main>AgentHub Workbench</main> }", truncated: false },
-        patch: "@@ -1 +1 @@\n-export default function Page(){ return <div /> }\n+export default function Page(){ return <main>AgentHub Workbench</main> }\n",
-      },
-    });
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "artifact.upsert",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: {
-        artifactKey: "run-summary",
-        kind: "markdown",
-        title: "执行摘要",
-        mimeType: "text/markdown; charset=utf-8",
-        content: `# 执行摘要\n\n- run: ${input.runId}\n- speakers: ${speakers.map((agent) => agent.name).join(", ")}\n- mock 模式已覆盖 message.completed、file.change、artifact.upsert、run.completed。`,
-        final: true,
-      },
-    });
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "message.completed",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: { text: "本轮 mock 执行完成。接入真实下游后，该链路会复用同一套持久化与前端实时展示。" },
-    });
-    await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
   /** 读取 Session 表的下游 session ID */

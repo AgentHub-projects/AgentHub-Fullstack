@@ -295,104 +295,42 @@ export class BuilderService {
     return ctx;
   }
 
-  /** 调用 OpenAI 兼容的 LLM API，失败时回退到 mockReply */
+  /** 调用 OpenAI 兼容的 LLM API */
   private async chatLLM(
-    buildId: string,
+    _buildId: string,
     systemPrompt: string,
     messages: Array<{ role: string; content: string }>,
   ): Promise<string> {
     if (!this.summaryApiKey || !this.summaryBaseUrl) {
-      // Fallback: simple mock
-      return this.mockReply(buildId, messages);
+      throw new Error("LLM API is not configured");
     }
 
-    try {
-      const response = await fetch(`${this.summaryBaseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.summaryApiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.summaryModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages,
-          ],
-          max_tokens: 1024,
-          temperature: 0.7,
-        }),
-      });
-
-      if (!response.ok) return this.mockReply(buildId, messages);
-      const payload = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const content = payload.choices?.[0]?.message?.content?.trim();
-      return content || this.mockReply(buildId, messages);
-    } catch {
-      return this.mockReply(buildId, messages);
-    }
-  }
-
-  /** Mock LLM 回复：根据对话轮数逐步引导收集模板信息 */
-  private mockReply(
-    _buildId: string,
-    messages: Array<{ role: string; content: string }>,
-  ): string {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    const userText = lastUser?.content ?? "";
-
-    if (messages.length <= 2) {
-      return JSON.stringify({
-        text: '好的，我来帮你创建 Agent 模板！请问这个 Agent 叫什么名字？比如 "Python 数据分析 Agent" 或 "前端 UI 审查 Agent"。',
-        options: ["Python 数据分析 Agent", "前端 UI 审查 Agent", "后端 API 开发 Agent", "DevOps 部署 Agent"],
-        draft: null,
-      });
-    }
-
-    if (messages.length <= 4) {
-      return JSON.stringify({
-        text: "明白了！请描述一下这个 Agent 的主要用途和能力，它会负责什么工作？",
-        options: ["编写和审查 Python 代码", "审查前端组件和样式", "管理后端 API 和数据模型", "处理 CI/CD 和部署流程"],
-        draft: null,
-      });
-    }
-
-    if (messages.length <= 6) {
-      return JSON.stringify({
-        text: "很好！请告诉我这个 Agent 的 System Prompt（行为提示词），定义它如何回答问题、有什么约束。",
-        options: [
-          "你是一个专业的技术专家，回答应该准确、详细。使用中文回复。",
-          "你是一个高效的代码助手，回答应该简洁、直接。优先给出可执行的代码。",
-          "你是一个架构顾问，帮助设计系统架构和最佳实践。用结构化方式回答。",
+    const response = await fetch(`${this.summaryBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.summaryApiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.summaryModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages,
         ],
-        draft: null,
-      });
-    }
-
-    if (messages.length <= 8) {
-      return JSON.stringify({
-        text: "这个 Agent 需要哪些工具？请选择或输入工具标识，多个工具可以用逗号分隔。",
-        options: ["shell, git, file-system", "browser, fetch, file-system", "deploy, git, shell", "none"],
-        draft: null,
-      });
-    }
-
-    if (messages.length <= 10) {
-      return JSON.stringify({
-        text: "最后，请选择底层 Provider：claude-code 或 open-code。你想用哪个？",
-        options: ["claude-code", "open-code"],
-        draft: null,
-      });
-    }
-
-    const draft = buildMockDraft(messages);
-    return JSON.stringify({
-      text: "以上是根据你的需求生成的模板草稿，确认后即可创建。",
-      options: [],
-      draft,
+        max_tokens: 1024,
+        temperature: 0.7,
+      }),
     });
+
+    if (!response.ok) {
+      throw new Error(`LLM API returned ${response.status}`);
+    }
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new Error("LLM API returned empty response");
+    return content;
   }
 }
 
@@ -491,26 +429,6 @@ function isDirectOptionReuse(value: string, userMessages: string[]) {
 
 function compactComparable(value: string) {
   return value.replace(/\s+/g, "").replace(/[。.!！?？,，;；:："'“”‘’]/g, "").toLowerCase();
-}
-
-function buildMockDraft(messages: Array<{ role: string; content: string }>): BuildTemplateDraft {
-  const userMessages = messages.filter((message) => message.role === "user").map((message) => message.content.trim());
-  const initialNeed = userMessages[0] || "自定义 Agent";
-  const selectedName = userMessages[1] || deriveMockName(initialNeed);
-  const selectedDescription = userMessages[2] || "协助完成用户指定的专业任务";
-  const selectedPromptDirection = userMessages[3] || "专业、准确、结构化地回答";
-  const selectedTools = parseToolList(userMessages[4] || "");
-  const providerChoice = [...userMessages].reverse().find((message) =>
-    message === "claude-code" || message === "open-code" || /claude|open.?code/i.test(message)
-  );
-
-  return {
-    name: deriveMockName(selectedName),
-    description: buildMockDescription(initialNeed, selectedDescription),
-    systemPrompt: buildMockSystemPrompt(selectedName, selectedDescription, selectedPromptDirection),
-    defaultProvider: providerChoice?.includes("open") ? "open-code" : "claude-code",
-    tools: selectedTools,
-  };
 }
 
 function parseToolList(value: string) {
