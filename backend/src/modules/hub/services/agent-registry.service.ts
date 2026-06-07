@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
@@ -8,23 +8,11 @@ import type {
 import { PrismaService } from "./prisma.service";
 import { asObject, mapAgent, mapTemplate } from "../mappers/hub.mappers";
 
-const IDS = {
-  orchestrator: 1,
-  frontend: 2,
-  backend: 3,
-  reviewer: 4,
-};
-
-/** Agent 注册中心：管理 Agent 和模板的 CRUD，启动时自动种子默认数据 */
+/** Agent 注册中心：管理 Agent 和模板的 CRUD */
 @Injectable()
-export class AgentRegistryService implements OnModuleInit {
+export class AgentRegistryService {
   private readonly logger = new Logger(AgentRegistryService.name);
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
-
-  /** 模块初始化时播种默认数据 */
-  async onModuleInit() {
-    await this.seedDefaults();
-  }
 
   /** 根据 provider 名称查找或创建 provider 记录，返回其 ID */
   async resolveProviderId(name: string): Promise<number> {
@@ -277,19 +265,12 @@ export class AgentRegistryService implements OnModuleInit {
     return candidate;
   }
 
-  /** 获取默认的 orchestrator agent，如果不存在则重新播种 */
+  /** 获取默认的 orchestrator agent */
   async getDefaultOrchestrator(): Promise<AgentInstanceDto> {
-    let agent = await this.prisma.agent.findFirst({
+    const agent = await this.prisma.agent.findFirst({
       where: { isDefaultOrchestrator: true },
       include: { template: true },
     });
-    if (!agent) {
-      await this.seedDefaults();
-      agent = await this.prisma.agent.findFirst({
-        where: { isDefaultOrchestrator: true },
-        include: { template: true },
-      });
-    }
     if (!agent) {
       throw new Error("Default orchestrator agent is not configured");
     }
@@ -297,123 +278,6 @@ export class AgentRegistryService implements OnModuleInit {
     return mapAgent(agent, providerNames);
   }
 
-  /** 播种 4 个默认模板和 4 个默认 Agent：orchestrator、frontend、backend、review */
-  private async seedDefaults() {
-    // Ensure provider records exist
-    const providerClaudeId = await this.resolveProviderId("claude-code");
-    const providerOpenId = await this.resolveProviderId("open-code");
-
-    // Seed templates by name (id is autoincrement)
-    const ensureTemplate = async (name: string, data: Record<string, any>) => {
-      const existing = await this.prisma.agentTemplate.findFirst({ where: { name } });
-      if (existing) return existing;
-      return this.prisma.agentTemplate.create({ data: { name, ...data } as any });
-    };
-
-    const tplOrchestrator = await ensureTemplate("主 Orchestrator 模板", {
-      description: "负责理解用户目标、协调被 @ 的 Agent，并按群聊方式回传产出。",
-      defaultProviderId: providerClaudeId,
-      systemPrompt: "你是 AgentHub 的主协调 Agent。你只需要调度下游 worker，并持续上报 speaker、artifact 与文件变更事件。",
-      defaultCapabilities: ["orchestrate", "stream", "file_change", "artifact"],
-      defaultModelConfig: { provider: "openai-compatible" },
-      status: "enabled",
-    });
-
-    const tplFrontend = await ensureTemplate("Frontend Agent 模板", {
-      description: "负责前端 UI、状态管理、实时渲染和用户体验。",
-      defaultProviderId: providerClaudeId,
-      systemPrompt: "你负责前端实现，输出需要携带 speaker=frontend agentId。",
-      defaultCapabilities: ["frontend", "react", "diff", "artifact"],
-      defaultModelConfig: { provider: "openai-compatible" },
-      status: "enabled",
-    });
-
-    const tplBackend = await ensureTemplate("Backend Agent 模板", {
-      description: "负责后端 API、数据库、WebSocket、OSS 与上下文维护。",
-      defaultProviderId: providerOpenId,
-      systemPrompt: "你负责后端实现，输出需要携带 speaker=backend agentId。",
-      defaultCapabilities: ["backend", "postgresql", "websocket", "oss"],
-      defaultModelConfig: { provider: "openai-compatible" },
-      status: "enabled",
-    });
-
-    const tplReviewer = await ensureTemplate("Review Agent 模板", {
-      description: "负责验收、回归风险、文档一致性和质量反馈。",
-      defaultProviderId: providerOpenId,
-      systemPrompt: "你负责审查实现是否满足 AgentHub 设计文档。",
-      defaultCapabilities: ["review", "test", "acceptance"],
-      defaultModelConfig: { provider: "openai-compatible" },
-      status: "enabled",
-    });
-
-    await this.prisma.agent.upsert({
-      where: { id: IDS.orchestrator },
-      create: {
-        id: IDS.orchestrator,
-        templateId: tplOrchestrator.id,
-        name: "main-orchestrator",
-        description: "会话级长连接入口。用户 @ 多个 Agent 时也先进入该 Agent。",
-        providerId: providerClaudeId,
-        isDefaultOrchestrator: true,
-        status: "offline",
-      },
-      update: {
-        isDefaultOrchestrator: true,
-      },
-    });
-
-    await this.prisma.agent.upsert({
-      where: { id: IDS.frontend },
-      create: {
-        id: IDS.frontend,
-        templateId: tplFrontend.id,
-        name: "frontend-agent",
-        description: "群聊成员：前端实现。",
-        providerId: providerClaudeId,
-        status: "enabled",
-      },
-      update: { status: "enabled" },
-    });
-
-    await this.prisma.agent.upsert({
-      where: { id: IDS.backend },
-      create: {
-        id: IDS.backend,
-        templateId: tplBackend.id,
-        name: "backend-agent",
-        description: "群聊成员：后端实现。",
-        providerId: providerOpenId,
-        status: "enabled",
-      },
-      update: { status: "enabled" },
-    });
-
-    await this.prisma.agent.upsert({
-      where: { id: IDS.reviewer },
-      create: {
-        id: IDS.reviewer,
-        templateId: tplReviewer.id,
-        name: "review-agent",
-        description: "群聊成员：验收与审查。",
-        providerId: providerOpenId,
-        status: "enabled",
-      },
-      update: { status: "enabled" },
-    });
-
-    await this.syncAgentIdSequence();
-  }
-
-  /** 同步 agents_id_seq 序列值，防止手动指定 ID 后冲突 */
-  private async syncAgentIdSequence() {
-    await this.prisma.$executeRawUnsafe(`
-      SELECT setval(
-        '"agents_id_seq"',
-        GREATEST((SELECT COALESCE(MAX(id), 1) FROM "agents"), 1),
-        true
-      )
-    `);
-  }
 }
 
 function normalizeAvatarUrl(value: string | null | undefined) {
