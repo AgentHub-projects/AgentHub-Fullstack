@@ -355,6 +355,23 @@ export class ArtifactStorageService {
     });
   }
 
+  /** 上传头像到 OSS，返回公开 URL */
+  async uploadAvatar(userId: string, data: Buffer, mimeType?: string): Promise<string | null> {
+    const bucket = process.env.ALIYUN_OSS_BUCKET;
+    const region = process.env.ALIYUN_OSS_REGION;
+    const accessKeyId = process.env.ALIYUN_OSS_ACCESS_KEY_ID;
+    const accessKeySecret = process.env.ALIYUN_OSS_ACCESS_KEY_SECRET;
+    if (!bucket || !region || !accessKeyId || !accessKeySecret) return null;
+
+    const ext = mimeType ? mimeType.split("/").pop() ?? "png" : "png";
+    const objectKey = `agenthub/avatars/${userId}-${Date.now()}.${ext}`;
+    const client = await this.createOssClient();
+    if (!client) return null;
+
+    await client.put(objectKey, data);
+    return `https://${bucket}.oss-${region}.aliyuncs.com/${objectKey}`;
+  }
+
   /** 在 artifact_versions 表中插入或更新版本记录 */
   private async recordVersion(artifact: {
     id: string;
