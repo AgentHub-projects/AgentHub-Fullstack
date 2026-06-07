@@ -4,13 +4,13 @@ import { io } from "socket.io-client";
 import Redis from "ioredis";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
-import { asObject, mapSession } from "../mappers/hub.mappers";
+import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubContextService } from "./context.service";
 import { DownstreamSandboxRegistryService } from "./downstream-sandbox-registry.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { AcpConnection } from "./acp-connection";
-import { numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
+import { asRecord, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
 type StartRunInput = {
   sessionId: string;
@@ -89,7 +89,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
     if (!downstreamUrl) {
-      throw new Error("DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured");
+      await this.simulateRun(input);
+      return;
     }
 
     try {
@@ -322,7 +323,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       activeOrchestratorAgentId: options.activeOrchestratorAgentId,
       idleTimer: null,
       lastActivityAt: Date.now(),
-      needsBootstrap: true,
+      needsBootstrap: !options.downstreamSessionId,
     };
     this.connections.set(sessionId, record);
 
@@ -352,7 +353,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     // Legacy event channels for downstream compatibility
-    socket.on("session/event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
     socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
     socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
 
@@ -367,6 +367,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         this.logger.log(`[发送JSON] session/load: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/load", params: sessionParams })}`);
         const loadResult = await acp.request("session/load", sessionParams);
         this.logger.log(`[接收JSON] session/load响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: loadResult })}`);
+        record.needsBootstrap = false;
         record.resolveDownstreamReady?.(record.downstreamSessionId);
         this.markDownstreamActivity(record);
         this.scheduleIdleDisconnectCheck(record);
@@ -568,7 +569,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   }
 
   /**
-   * 处理下游通知（session/update、session/event 及 legacy 事件）。
+   * 处理下游通知（session/update、JSON-RPC result/error 及 legacy message 事件）。
    * JSON-RPC 响应匹配已由 AcpConnection 内部处理，此处仅处理通知。
    */
   private async handleDownstreamEvent(sessionId: string, envelope: DownstreamEnvelope) {
@@ -577,19 +578,21 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
 
     const envelopeId = typeof envelope.id === "number" || typeof envelope.id === "string" ? envelope.id : undefined;
-    const params = asObject(envelope.params ?? envelope.payload ?? envelope);
+    const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
     this.logger.log(`[接收] sessionId=${sessionId} method=${envelope.method ?? "无"} type=${stringValue(params.type) ?? stringValue(params.eventType) ?? "无"} id=${envelopeId ?? "无"}`);
     this.logger.log(`[接收JSON] ${safeJson(envelope, 8000)}`);
 
-    // Handle session/update (agent message chunks from downstream)
+    // Handle session/update (agent message chunks, rich parts, and structured updates from downstream)
     if (envelope.method === "session/update") {
       try {
         const update = params.update;
-        const content = asObject(typeof update === "object" ? update : {});
-        const meta = asObject(params._meta ?? (content as any)._meta);
+        const content = asRecord(typeof update === "object" ? update : {});
+        const meta = asRecord(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
-        let runId = stringValue(meta.runId) ?? record.activeRunId;
+        const updateType = stringValue(content.type);
+        const parts = Array.isArray(content.parts) ? content.parts : [];
+        let runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? record.activeRunId;
         if (!runId) {
           // 从数据库查找该session最近的活跃run（running或已完成）
           const latestRun = await this.prisma.agentRun.findFirst({
@@ -603,30 +606,69 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             this.logger.log(`[session/update] 从数据库恢复runId=${runId} status=${latestRun.status}`);
           }
         }
-        this.logger.log(`[session/update] runId=${runId} hasText=${!!text} sessionUpdate=${sessionUpdate ?? "无"}`);
+        this.logger.log(`[session/update] runId=${runId} hasText=${!!text} parts=${parts.length} type=${updateType ?? "无"} sessionUpdate=${sessionUpdate ?? "无"}`);
         if (!runId) {
           this.logger.warn(`[session/update] 缺少runId，丢弃`);
           if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
           return;
         }
-        if (text && runId) {
-          const speaker = stringValue(meta.agentId) ?? "agent";
-          const speakerAgentId = agentIdValue(meta.agentId);
-          const isChunk = sessionUpdate === "agent_message_chunk";
-          const isStop = sessionUpdate === "agent_message_stop" || sessionUpdate === "stop";
-          // 每个chunk都发delta，前端增量渲染
-          if (isChunk) {
-            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length}`);
+        if (await this.isRunCancelled(runId)) {
+          if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ALREADY_CANCELLED", "RUN_ALREADY_CANCELLED");
+          return;
+        }
+
+        const speaker = stringValue(meta.agentId) ?? stringValue(content.speaker) ?? "agent";
+        const speakerAgentId = agentIdValue(meta.agentId) ?? agentIdValue(content.speaker);
+
+        if (updateType) {
+          if (updateType === "file.change") {
+            const payload = asRecord(content.payload ?? {});
+            this.logger.log(`[session/update] 结构化更新 type=${updateType} runId=${runId}`);
+            await this.events.append({
+              sessionId: record.sessionId,
+              runId,
+              eventType: updateType,
+              speakerAgentId,
+              payload,
+              source: "downstream_agent",
+              occurredAt: new Date(),
+            });
+          } else {
+            this.logger.warn(`[session/update] 未支持的结构化更新 type=${updateType}`);
           }
+          if (envelopeId !== undefined) record.acp.respond(envelopeId);
+          return;
+        }
+
+        if (parts.length > 0 && !text) {
+          this.logger.log(`[session/update] 富文本parts落库 runId=${runId} parts=${parts.length}`);
           await this.events.append({
             sessionId: record.sessionId,
             runId,
-            eventType: "message.delta",
+            eventType: "message.completed",
             speakerAgentId,
             source: "downstream_agent",
-            payload: { text, speaker, append: !isChunk },
+            payload: { parts, speaker },
           });
-          if (isChunk || isStop) {
+          if (envelopeId !== undefined) record.acp.respond(envelopeId);
+          return;
+        }
+
+        if (text && runId) {
+          const isChunk = sessionUpdate === "agent_message_chunk";
+          const isStop = sessionUpdate === "agent_message_stop" || sessionUpdate === "stop";
+          if (isChunk) {
+            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length}`);
+            await this.events.append({
+              sessionId: record.sessionId,
+              runId,
+              eventType: "message.delta",
+              speakerAgentId,
+              source: "downstream_agent",
+              payload: { text, speaker, append: false },
+            });
+          }
+          if (isStop) {
             this.logger.log(`[session/update] 消息完成 runId=${runId}`);
             await this.events.append({
               sessionId: record.sessionId,
@@ -634,7 +676,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
               eventType: "message.completed",
               speakerAgentId,
               source: "downstream_agent",
-              payload: { text, speaker },
+              payload: { text, speaker, ...(parts.length > 0 ? { parts } : {}) },
             });
             // 结束事件由downstream的stopReason result触发，不用自动完成
           }
@@ -662,77 +704,104 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     // Handle JSON-RPC result with stopReason (downstream task completion signal)
     if (envelope.result) {
       this.logger.log(`[result] 收到下游result ${JSON.stringify(envelope.result)}`);
-      await this.handlePromptResult(record, asObject(envelope.result));
+      await this.handlePromptResult(record, asRecord(envelope.result));
       return;
     }
 
-    // Handle structured session/event reports from downstream agents.
-    if (envelope.method && envelope.method !== "session/event") {
-      this.logger.warn(`[接收] 未知method=${envelope.method}，丢弃`);
-      return;
-    }
-    const meta = asObject(params._meta);
-    this.logger.log(`[session/event] params有runId=${!!params.runId} envelope有runId=${!!envelope.runId} activeRunId=${record.activeRunId}`);
-    const runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? stringValue(envelope.runId) ?? record.activeRunId;
-    if (!runId) {
-      this.logger.warn(`[session/event] 缺少runId，丢弃`);
-      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ID_REQUIRED", "RUN_ID_REQUIRED");
-      return;
-    }
+    this.logger.warn(`[接收] 未支持的下游通知 method=${envelope.method ?? "无"}，丢弃`);
+    if (envelopeId !== undefined) record.acp.respond(envelopeId);
+  }
 
-    // Drop events for runs that have been cancelled
-    if (await this.isRunCancelled(runId)) {
-      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "RUN_ALREADY_CANCELLED", "RUN_ALREADY_CANCELLED");
-      return;
-    }
+  /** Mock 模式模拟运行：未配置下游时生成示例事件 */
+  private async simulateRun(input: {
+    sessionId: string;
+    runId: string;
+    promptText: string;
+    orchestrator: AgentInstanceDto;
+    mentionedAgents: AgentInstanceDto[];
+  }) {
+    const speakers = input.mentionedAgents.length > 0 ? input.mentionedAgents : [
+      // Default mock agents
+      { id: 2, name: "frontend-agent" } as AgentInstanceDto,
+      { id: 3, name: "backend-agent" } as AgentInstanceDto,
+      { id: 4, name: "review-agent" } as AgentInstanceDto,
+    ];
 
-    const eventType = stringValue(params.type) ?? stringValue(params.eventType);
-    if (!eventType) {
-      if (envelopeId !== undefined) record.acp.respondError(envelopeId, "EVENT_TYPE_REQUIRED", "EVENT_TYPE_REQUIRED");
-      return;
-    }
-    const payload = asObject(params.payload ?? params);
+    // Check if already cancelled before starting
+    if (await this.isRunCancelled(input.runId)) return;
 
-    const speakerAgentId =
-      agentIdValue(meta.agentId) ??
-      agentIdValue(params.speaker) ??
-      agentIdValue(payload.speaker) ??
-      agentIdValue(envelope.speaker);
+    await this.prisma.agentRun.update({
+      where: { id: input.runId },
+      data: { status: "running", startedAt: new Date(), downstreamSessionId: `mock-${input.sessionId}` },
+    });
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "run.status",
+      speakerAgentId: input.orchestrator.id,
+      source: "mock_orchestrator",
+      payload: { status: "running", mode: "mock", reason: "DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured" },
+    });
 
-    try {
-      this.logger.log(`[session/event] 持久化 eventType=${eventType} runId=${runId} speaker=${speakerAgentId}`);
+    await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "message.completed",
+      speakerAgentId: input.orchestrator.id,
+      source: "mock_orchestrator",
+      payload: {
+        text: `已收到任务，并将按 @Agent 分工推进：${speakers.map((agent) => agent.name).join("、") || "默认团队"}。`,
+      },
+    });
+
+    for (const agent of speakers.slice(0, 3)) {
+      await sleep(250);
+      if (await this.isRunCancelled(input.runId)) return;
       await this.events.append({
-        sessionId: record.sessionId,
-        runId,
-        eventType,
-        speakerAgentId,
-        seq: numberValue(params.seq),
-        payload,
-        source: "downstream_agent",
-        occurredAt: new Date(),
+        sessionId: input.sessionId,
+        runId: input.runId,
+        eventType: "message.completed",
+        speakerAgentId: agent.id,
+        source: "mock_orchestrator",
+        payload: {
+          text: `${agent.name}：基于任务"${input.promptText.slice(0, 80)}"，我会输出可落库的消息和文件变更快照。`,
+          speaker: agent.id,
+        },
       });
-
-      if (eventType === "run.completed") {
-        this.logger.log(`[session/event] run完成 runId=${runId}`);
-        await this.markRunCompleted(record.sessionId, runId);
-      }
-      if (eventType === "run.failed") {
-        this.logger.log(`[session/event] run失败 runId=${runId}`);
-        await this.markRunFailed(
-          record.sessionId,
-          runId,
-          "DOWNSTREAM_RUN_FAILED",
-          stringValue(payload.message) ?? "run failed",
-        );
-      }
-      if (envelopeId !== undefined) record.acp.respond(envelopeId);
-    } catch (error) {
-      this.logger.error(`[session/event] 持久化失败 ${error instanceof Error ? error.message : String(error)}`);
-      if (envelopeId !== undefined) {
-        const msg = error instanceof Error ? error.message : String(error);
-        record.acp.respondError(envelopeId, errorCode(msg), msg);
-      }
     }
+
+    await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "file.change",
+      speakerAgentId: speakers[0]?.id ?? input.orchestrator.id,
+      source: "mock_orchestrator",
+      payload: {
+        speaker: speakers[0]?.id ?? input.orchestrator.id,
+        path: "src/app/page.tsx",
+        changeType: "modified",
+        language: "tsx",
+        before: { content: "export default function Page(){ return <div /> }", truncated: false },
+        after: { content: "export default function Page(){ return <main>AgentHub Workbench</main> }", truncated: false },
+        patch: "@@ -1 +1 @@\n-export default function Page(){ return <div /> }\n+export default function Page(){ return <main>AgentHub Workbench</main> }\n",
+      },
+    });
+
+    await sleep(250);
+    if (await this.isRunCancelled(input.runId)) return;
+    await this.events.append({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      eventType: "message.completed",
+      speakerAgentId: input.orchestrator.id,
+      source: "mock_orchestrator",
+      payload: { text: "本轮 mock 执行完成。接入真实下游后，该链路会复用同一套持久化与前端实时展示。" },
+    });
+    await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
   }
 
   /** 读取 Session 表的下游 session ID */
@@ -995,7 +1064,7 @@ function errorCode(message: string) {
 function briefPromptInput(promptInput: Record<string, unknown>) {
   const prompt = Array.isArray(promptInput.prompt)
     ? promptInput.prompt.map((part) => {
-      const record = asObject(part);
+      const record = asRecord(part);
       const text = stringValue(record.text);
       return text ? { ...record, text: `${text.slice(0, 200)}${text.length > 200 ? `...[${text.length}字符]` : ""}` } : record;
     })

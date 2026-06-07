@@ -376,6 +376,7 @@ export function ArtifactPart({
   const canOpenArtifact = Boolean(artifactId && onOpenArtifact);
   const canOpenPart = Boolean(!canOpenArtifact && onOpenPart);
   const canExpand = canOpenArtifact || canOpenPart;
+  const canOpenArtifactsPanel = Boolean(artifactId && onOpenArtifactsPanel);
   const openArtifact = () => {
     if (artifactId && onOpenArtifact) onOpenArtifact(artifactId);
   };
@@ -399,7 +400,7 @@ export function ArtifactPart({
           </small>
         </div>
         <div className="artifactMessageActions">
-          {onOpenArtifactsPanel && (
+          {canOpenArtifactsPanel && (
             <button className="partPanelButton" type="button" title="在右侧查看 Artifact" onClick={onOpenArtifactsPanel}>
               <FileDoneOutlined />
               <span>右侧查看</span>
@@ -427,7 +428,9 @@ export function ArtifactPart({
           )}
         </div>
       </div>
-      <small className="artifactMessageHint">产物已生成，详情与预览在右侧 Artifacts 面板查看。</small>
+      <small className="artifactMessageHint">
+        {artifactId ? "产物已生成，详情与预览在右侧 Artifacts 面板查看。" : "下游产物已生成，可打开 URL 或展开预览。"}
+      </small>
     </div>
   );
 }

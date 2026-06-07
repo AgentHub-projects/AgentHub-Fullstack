@@ -257,6 +257,8 @@ export default function WorkbenchPage() {
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = sessionTabs.activeId;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
   const openSessionIds = sessionTabs.openIds;
   const socketSessionIds = openSessionIds.filter((sessionId) => Boolean(workspaces[sessionId]?.detail));
   const socketSessionKey = socketSessionIds.join("|");
@@ -411,12 +413,13 @@ export default function WorkbenchPage() {
     return () => window.clearTimeout(timer);
   }, [authenticated, authChecked, sessionSearch]);
 
+  const hubSocketRef = useRef<ReturnType<typeof connectHubSocket>>(undefined);
   useEffect(() => {
-    if (!authenticated || socketSessionIds.length === 0) return;
-    const disconnect = connectHubSocket(socketSessionIds, {
+    if (!authenticated) return;
+    const disposable = connectHubSocket(socketSessionIds, {
       onState: () => undefined,
       onConnect: () => {
-        if (activeSessionId) void loadSession(activeSessionId);
+        if (activeSessionIdRef.current) void loadSession(activeSessionIdRef.current);
       },
       onEvent: (event) => {
         setWorkspaceDetail(event.sessionId, (current) =>
@@ -474,8 +477,10 @@ export default function WorkbenchPage() {
         setSessionTabs((current) => markSessionTabUpdated(current, fileChange.sessionId));
       },
     });
-    return disconnect;
-  }, [authenticated, activeSessionId, socketSessionKey]);
+    hubSocketRef.current = disposable;
+    return disposable;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated]);
 
   useEffect(() => {
     const preserve = preserveTimelineScrollRef.current;

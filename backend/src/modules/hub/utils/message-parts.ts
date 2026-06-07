@@ -54,9 +54,10 @@ export function messageJsonWithParts(
   const payloadParts = Array.isArray(base.parts)
     ? base.parts.map(normalizePayloadPart).filter((part): part is HubMessagePartDto => Boolean(part))
     : [];
+  const textParts = contentText ? parseMessageParts(contentText) : [];
   return {
     ...base,
-    parts: [...parseMessageParts(contentText), ...payloadParts, ...extraParts],
+    parts: [...textParts, ...payloadParts, ...extraParts],
   };
 }
 
@@ -67,7 +68,7 @@ function normalizePayloadPart(value: unknown, index: number): HubMessagePartDto 
   const type = typeof raw.type === "string" && raw.type.trim() ? raw.type.trim() : "";
   if (!type) return null;
   return {
-    id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : `payload_${index + 1}`,
+    id: `payload_${index + 1}`,
     type,
     ...(typeof raw.text === "string" ? { text: raw.text } : {}),
     ...(typeof raw.language === "string" ? { language: raw.language } : {}),

@@ -26,6 +26,11 @@ export function waitForSocket(socket: Socket): Promise<void> {
   });
 }
 
+/** 安全转换为 Record */
+export function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 /** 安全提取非空字符串 */
 export function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;

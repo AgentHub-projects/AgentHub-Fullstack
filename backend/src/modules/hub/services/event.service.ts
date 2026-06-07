@@ -6,7 +6,6 @@ import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage, mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { messageJsonWithParts } from "../utils/message-parts";
-import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 // In-memory buffer for streaming messages (dual-track: real-time push + buffer for persistence)
 type MessageBuffer = {
@@ -308,9 +307,11 @@ export class HubEventService {
     // Get buffered content or use event payload directly
     const runBuffers = this.messageBuffers.get(event.runId);
     const buffer = runBuffers?.get(speakerKey);
-    const fullText = buffer?.contentText || text;
+    const fullText = text || buffer?.contentText || "";
+    const bufferedParts = this.takeBufferedArtifactParts(event.runId, speakerKey);
+    const hasParts = hasPayloadParts(event.payload) || bufferedParts.length > 0;
 
-    if (!fullText.trim()) return;
+    if (!fullText.trim() && !hasParts) return;
 
     // Clean up buffer
     if (buffer) {
@@ -328,7 +329,7 @@ export class HubEventService {
         contentJson: messageJsonWithParts(
           event.payload ?? {},
           fullText,
-          this.takeBufferedArtifactParts(event.runId, speakerKey),
+          bufferedParts,
         ) as any,
         tokenCount: this.context.estimateTokens(fullText),
         status: "completed",
@@ -341,15 +342,18 @@ export class HubEventService {
       data: { assistantMessageId: message.id },
     });
 
-    await this.context.recordContextItem({
-      sessionId: event.sessionId,
-      sourceType: "message",
-      sourceId: message.id,
-      kind: "message",
-      text: fullText,
-      importance: 10,
-      metadata: { runId: event.runId, agentId: speakerAgentId },
-    });
+    const contextText = fullText.trim() || partContextText(event.payload, bufferedParts);
+    if (contextText) {
+      await this.context.recordContextItem({
+        sessionId: event.sessionId,
+        sourceType: "message",
+        sourceId: message.id,
+        kind: "message",
+        text: contextText,
+        importance: 10,
+        metadata: { runId: event.runId, agentId: speakerAgentId },
+      });
+    }
   }
 
   /** 将产物部件附加到最新的助手消息 */
@@ -497,6 +501,35 @@ export class HubEventService {
 function textFromPayload(payload: Record<string, unknown>): string {
   const text = payload.text ?? payload.content ?? payload.message ?? payload.delta;
   return typeof text === "string" ? text : "";
+}
+
+function payloadParts(payload: Record<string, unknown>) {
+  return Array.isArray(payload.parts)
+    ? payload.parts.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function hasPayloadParts(payload: Record<string, unknown>) {
+  return payloadParts(payload).length > 0;
+}
+
+function partContextText(payload: Record<string, unknown>, extraParts: HubMessagePartDto[]) {
+  const parts = [...payloadParts(payload), ...extraParts];
+  return parts
+    .map((part) =>
+      [
+        stringValue(part.title) ?? stringValue(part.type),
+        stringValue(part.url),
+        stringValue(part.text),
+      ].filter(Boolean).join("\n"),
+    )
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 8000);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function textField(value: unknown): string | undefined {
