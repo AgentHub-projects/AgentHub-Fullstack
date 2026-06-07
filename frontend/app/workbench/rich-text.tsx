@@ -1,4 +1,4 @@
-import React, { Fragment } from "react";
+import React, { Fragment, useState } from "react";
 import type { HubMessagePartDto } from "@agenthub/shared";
 import {
   CheckCircleOutlined,
@@ -343,7 +343,7 @@ function ImagePart({
         </div>
       </div>
       {part.url ? (
-        <img alt={part.title ?? "图片附件"} src={part.url} />
+        <ZoomableImage src={part.url} alt={part.title ?? "图片附件"} />
       ) : (
         <small>{part.text ?? "图片已上传"}</small>
       )}
@@ -590,6 +590,28 @@ function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactN
   );
 }
 
+function ZoomableImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [zoomed, setZoomed] = useState(false);
+  return (
+    <>
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        onClick={() => setZoomed(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter") setZoomed(true); }}
+      />
+      {zoomed && (
+        <div className="imageZoomOverlay" onClick={() => setZoomed(false)}>
+          <img alt={alt} src={src} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
+    </>
+  );
+}
+
 function InlineText({ text }: { text: string }) {
   const segments = parseInlineMarkdown(text);
   return (
@@ -599,7 +621,7 @@ function InlineText({ text }: { text: string }) {
         if (seg.kind === "italic") return <em key={i}>{seg.text}</em>;
         if (seg.kind === "code") return <code key={i} className="inlineCode">{seg.text}</code>;
         if (seg.kind === "link") return <a key={i} href={seg.url} target="_blank" rel="noreferrer">{seg.text}</a>;
-        if (seg.kind === "image") return <img key={i} src={seg.url} alt={seg.alt} className="inlineImage" />;
+        if (seg.kind === "image") return <ZoomableImage key={i} src={seg.url} alt={seg.alt} className="inlineImage" />;
         if (seg.kind === "strikethrough") return <del key={i}>{seg.text}</del>;
         return <>{seg.text}</>;
       })}
