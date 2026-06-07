@@ -501,3 +501,19 @@ model LongTermSummary {
   @@index([sessionId, seq], map: "idx_long_term_summaries_session_seq")
   @@map("long_term_summaries")
 }
+
+model SessionMemory {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @unique @map("session_id") @db.Uuid
+  title     String?
+  status    String?
+  files     Json     @default("[]")
+  errors    Json     @default("[]")
+  lessons   String?
+  workLog   Json     @default("[]") @map("work_log")
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("session_memories")
+}

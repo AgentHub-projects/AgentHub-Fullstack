@@ -6,6 +6,10 @@ import type {
   HubContextSnapshotDto,
   HubContextItemKind,
   LongTermSummaryDto,
+  SessionMemoryDto,
+  SessionMemoryFileEntry,
+  SessionMemoryErrorEntry,
+  SessionMemoryWorkLogEntry,
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { mapContextSnapshot, mapLongTermSummary } from "../mappers/hub.mappers";
@@ -174,7 +178,7 @@ export class HubContextService {
     });
 
     const retrievedRows = await this.recallByPgvector(input.sessionId, input.promptText, this.retrievalLimit);
-    const longTermSummaries = await this.loadSummaryChain(input.sessionId);
+    const memorySummary = await this.loadSessionMemorySummary(input.sessionId);
 
     const selectedIds = new Set<string>();
     let total = 0;
@@ -213,13 +217,11 @@ export class HubContextService {
       (count) => { total += count; },
     );
 
-    const summaryText = longTermSummaries.map((s) => s.content).join("\n");
-
     const payload: ContextSnapshotPayload = {
       pins,
       recent,
       retrieved,
-      summary: summaryText || "",
+      summary: memorySummary || "",
       mentionedAgents: input.mentionedAgents.map((agent) => ({ id: agent.id, name: agent.name })),
     };
 
@@ -229,7 +231,7 @@ export class HubContextService {
         sessionId: input.sessionId,
         runId: input.runId,
         tokenBudget: this.tokenBudget,
-        tokenCount: total + this.estimateTokens(summaryText),
+        tokenCount: total + this.estimateTokens(memorySummary || ""),
         selectedItemIds: [...selectedIds],
         snapshotJson: payload as any,
         promptText,
@@ -242,6 +244,15 @@ export class HubContextService {
     });
 
     return mapContextSnapshot(snapshot);
+  }
+
+  // ---- Session Memory ----
+
+  /** 加载 Session Memory 并渲染为纯文本摘要 */
+  async loadSessionMemorySummary(sessionId: string): Promise<string> {
+    const memory = await this.prisma.sessionMemory.findUnique({ where: { sessionId } });
+    if (!memory) return "";
+    return renderMemorySummary(memory as unknown as SessionMemoryDto);
   }
 
   // ---- Incremental Summary Chain ----
@@ -267,25 +278,50 @@ export class HubContextService {
     buffer.tokenCount += this.estimateTokens(text);
 
     if (buffer.events.length >= SHORT_TERM_EVENT_LIMIT || buffer.tokenCount >= SHORT_TERM_TOKEN_LIMIT) {
-      await this.compressShortTerm(sessionId, buffer);
+      await this.buildSessionMemory(sessionId, buffer);
     }
   }
 
-  /** 压缩短期缓冲：调用 LLM 生成摘要并存储到长期摘要链 */
-  private async compressShortTerm(
+  /** 构建 Session Memory：调用 LLM 结构化提取，upsert 合并到 sessionMemory 表 */
+  private async buildSessionMemory(
     sessionId: string,
     buffer: { events: string[]; tokenCount: number },
   ) {
     const text = buffer.events.join("\n");
-    const summary = await this.invokeSummaryLLM(text);
+    const structured = await this.invokeStructuredMemoryLLM(text);
 
-    const lastSeq = await this.getNextSeq(sessionId);
-    await this.prisma.longTermSummary.create({
-      data: {
+    // Read existing record
+    const existing = await this.prisma.sessionMemory.findUnique({ where: { sessionId } });
+
+    // Merge: title/status/lessons overwrite; files/errors/workLog merge with dedup
+    const existingFiles: SessionMemoryFileEntry[] = (existing?.files as unknown as SessionMemoryFileEntry[]) ?? [];
+    const existingErrors: SessionMemoryErrorEntry[] = (existing?.errors as unknown as SessionMemoryErrorEntry[]) ?? [];
+    const existingWorkLog: SessionMemoryWorkLogEntry[] = (existing?.workLog as unknown as SessionMemoryWorkLogEntry[]) ?? [];
+
+    const mergedFiles = mergeByPath(existingFiles, structured.files ?? []);
+    const mergedErrors = mergeByMessage(existingErrors, structured.errors ?? []);
+    const mergedWorkLog = [...(structured.workLog ?? []), ...existingWorkLog].slice(0, 20);
+
+    await this.prisma.sessionMemory.upsert({
+      where: { sessionId },
+      create: {
         sessionId,
-        seq: lastSeq,
-        content: summary,
-        tokenCount: this.estimateTokens(summary),
+        title: structured.title ?? existing?.title ?? null,
+        status: structured.status ?? existing?.status ?? null,
+        files: mergedFiles as any,
+        errors: mergedErrors as any,
+        lessons: structured.lessons ?? existing?.lessons ?? null,
+        workLog: mergedWorkLog as any,
+        version: (existing?.version ?? 0) + 1,
+      },
+      update: {
+        title: structured.title ?? existing?.title ?? null,
+        status: structured.status ?? existing?.status ?? null,
+        files: mergedFiles as any,
+        errors: mergedErrors as any,
+        lessons: structured.lessons ?? existing?.lessons ?? null,
+        workLog: mergedWorkLog as any,
+        version: (existing?.version ?? 0) + 1,
       },
     });
 
@@ -294,11 +330,18 @@ export class HubContextService {
     buffer.tokenCount = 0;
   }
 
-  /** 调用摘要 LLM 生成中文摘要，失败时回退到截断 */
-  private async invokeSummaryLLM(text: string): Promise<string> {
+  /** 调用 LLM 从短期缓冲提取结构化 Session Memory */
+  private async invokeStructuredMemoryLLM(text: string): Promise<{
+    title?: string;
+    status?: string;
+    files?: SessionMemoryFileEntry[];
+    errors?: SessionMemoryErrorEntry[];
+    lessons?: string | null;
+    workLog?: SessionMemoryWorkLogEntry[];
+  }> {
     if (!this.summaryApiKey || !this.summaryBaseUrl) {
-      // Fallback: simple truncation
-      return text.slice(0, 4000);
+      // Fallback: return minimal structure
+      return { title: text.slice(0, 200) };
     }
 
     try {
@@ -313,22 +356,43 @@ export class HubContextService {
           messages: [
             {
               role: "system",
-              content: "请用中文将以下 Agent 群聊记录压缩为简洁摘要（200字以内），保留关键任务、决策、产出和未解决问题。",
+              content: [
+                "根据以下 Agent 工作记录，更新结构化工作笔记。输出 JSON（不要 markdown 代码块包裹）：",
+                '{',
+                '  "title": "一句话任务标题",',
+                '  "status": "当前进度状态",',
+                '  "files": [{"path": "文件路径", "description": "变更说明", "changeType": "modified"}],',
+                '  "errors": [{"message": "错误描述", "solution": "解决方式", "resolved": false}],',
+                '  "lessons": "经验教训（无新内容则为 null）",',
+                '  "workLog": [{"timestamp": "ISO时间", "summary": "本轮工作摘要"}]',
+                '}',
+                "注意：files/errors 只需本次新出现的项；title/status 有变化才更新。",
+              ].join("\n"),
             },
             { role: "user", content: text.slice(0, 8000) },
           ],
-          max_tokens: 400,
+          max_tokens: 800,
           temperature: 0.3,
         }),
       });
 
-      if (!response.ok) return text.slice(0, 4000);
+      if (!response.ok) return { title: text.slice(0, 200) };
       const payload = (await response.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      return payload.choices?.[0]?.message?.content ?? text.slice(0, 4000);
+      const raw = payload.choices?.[0]?.message?.content;
+      if (!raw) return { title: text.slice(0, 200) };
+
+      // Extract JSON from potential markdown wrapping
+      const jsonStr = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      try {
+        return JSON.parse(jsonStr);
+      } catch {
+        // If JSON parsing fails, treat output as plain title
+        return { title: raw.slice(0, 200) };
+      }
     } catch {
-      return text.slice(0, 4000);
+      return { title: text.slice(0, 200) };
     }
   }
 
@@ -580,4 +644,72 @@ function contextLine(label: string, value: unknown) {
 
 function contextBlock(label: string, value: unknown) {
   return typeof value === "string" && value.trim() ? `${label}:\n${value}` : "";
+}
+
+/** 将 SessionMemory 渲染为纯文本摘要（供 context snapshot 使用） */
+function renderMemorySummary(memory: SessionMemoryDto): string {
+  const lines: string[] = [];
+
+  if (memory.title) lines.push(`任务：${memory.title}`);
+  if (memory.status) lines.push(`状态：${memory.status}`);
+
+  const files = memory.files as SessionMemoryFileEntry[];
+  if (files.length > 0) {
+    lines.push("涉及文件：");
+    for (const f of files) {
+      const change = f.changeType ? ` (${f.changeType})` : "";
+      const desc = f.description ? ` — ${f.description}` : "";
+      lines.push(`  - ${f.path}${change}${desc}`);
+    }
+  }
+
+  const errors = memory.errors as SessionMemoryErrorEntry[];
+  if (errors.length > 0) {
+    const unsolved = errors.filter((e) => !e.resolved);
+    const solved = errors.filter((e) => e.resolved);
+    if (unsolved.length > 0) {
+      lines.push("未解决的错误：");
+      for (const e of unsolved) {
+        lines.push(`  - ${e.message}${e.solution ? ` → ${e.solution}` : ""}`);
+      }
+    }
+    if (solved.length > 0) {
+      lines.push("已解决的错误：");
+      for (const e of solved) {
+        lines.push(`  - ${e.message}${e.solution ? ` → ${e.solution}` : ""}`);
+      }
+    }
+  }
+
+  if (memory.lessons) lines.push(`经验：${memory.lessons}`);
+
+  const workLog = memory.workLog as SessionMemoryWorkLogEntry[];
+  if (workLog.length > 0) {
+    lines.push("最近工作：");
+    for (const w of workLog.slice(0, 5)) {
+      lines.push(`  - ${w.summary}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function mergeByPath<T extends { path: string }>(
+  existing: T[],
+  incoming: T[],
+): T[] {
+  const map = new Map<string, T>();
+  for (const item of existing) map.set(item.path, item);
+  for (const item of incoming) map.set(item.path, item);
+  return [...map.values()];
+}
+
+function mergeByMessage<T extends { message: string }>(
+  existing: T[],
+  incoming: T[],
+): T[] {
+  const map = new Map<string, T>();
+  for (const item of existing) map.set(item.message, item);
+  for (const item of incoming) map.set(item.message, item);
+  return [...map.values()];
 }

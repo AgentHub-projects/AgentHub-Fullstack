@@ -363,6 +363,37 @@ export interface LongTermSummaryDto {
   createdAt: ISODateString;
 }
 
+export interface SessionMemoryFileEntry {
+  path: string;
+  description?: string;
+  changeType?: string;
+}
+
+export interface SessionMemoryErrorEntry {
+  message: string;
+  solution?: string;
+  resolved: boolean;
+}
+
+export interface SessionMemoryWorkLogEntry {
+  timestamp: ISODateString;
+  summary: string;
+}
+
+export interface SessionMemoryDto {
+  id: string;
+  sessionId: string;
+  title: string | null;
+  status: string | null;
+  files: SessionMemoryFileEntry[];
+  errors: SessionMemoryErrorEntry[];
+  lessons: string | null;
+  workLog: SessionMemoryWorkLogEntry[];
+  version: number;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
 export interface CursorPageInfo {
   hasMore: boolean;
   nextCursor?: string | null;
