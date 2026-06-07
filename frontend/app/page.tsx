@@ -323,7 +323,7 @@ export default function WorkbenchPage() {
   const currentUserName = currentUserDisplayName(currentUser);
   const pinnedMessages = useMemo(
     () =>
-      [...(detail?.pinnedMessages ?? detail?.messages ?? [])]
+      [...(detail?.pinnedMessages?.length ? detail.pinnedMessages : (detail?.messages ?? []))]
         .filter(hasPinnedMessageContent)
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)),
     [detail?.messages, detail?.pinnedMessages],

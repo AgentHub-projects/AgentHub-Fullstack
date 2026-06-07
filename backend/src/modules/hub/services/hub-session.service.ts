@@ -295,13 +295,16 @@ export class HubSessionService {
 
   async listPinnedMessages(sessionId: string, input: { limit?: number } = {}) {
     const limit = normalizeLimit(input.limit, 20, 50);
-    const messages = await this.prisma.message.findMany({
-      where: { sessionId, isPinned: true },
-      include: { agent: true },
-      orderBy: { updatedAt: "desc" },
-      take: limit,
+    const messages = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT m.* FROM messages m WHERE m.session_id = $1 AND (m.is_pinned = true OR (m.content_json->>'pinnedPartIds')::jsonb <> '[]'::jsonb) ORDER BY m.updated_at DESC LIMIT $2`,
+      sessionId,
+      limit,
+    );
+    const agents = await this.prisma.agent.findMany({
+      where: { id: { in: messages.filter((m) => m.agent_id != null).map((m) => m.agent_id as number) } },
     });
-    return { items: messages.map(mapMessage) };
+    const agentMap = new Map(agents.map((a) => [a.id, a]));
+    return { items: messages.map((row: any) => mapMessage({ ...row, agent: row.agent_id ? agentMap.get(row.agent_id) ?? null : null })) };
   }
 
   /** 获取会话 Diff 审查范围说明 */
