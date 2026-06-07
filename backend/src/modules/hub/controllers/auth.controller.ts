@@ -17,12 +17,14 @@ export class AuthController {
   /** 获取当前登录用户信息 */
   @Get("me")
   async me(@Req() request: Request) {
-    const user = await this.authSessions.currentUser(request.headers.cookie);
-    return {
-      authenticated: Boolean(user),
-      configured: true,
-      user,
-    };
+    return devTimed("auth/me", async () => {
+      const user = await this.authSessions.authenticateCookie(request.headers.cookie);
+      return {
+        authenticated: Boolean(user),
+        configured: true,
+        user,
+      };
+    });
   }
 
   /** 登录：验证凭据后设置 httpOnly Cookie */
@@ -57,5 +59,16 @@ export class AuthController {
     await this.authSessions.logout(request.headers.cookie);
     response.clearCookie(AUTH_COOKIE_NAME, { path: "/" });
     return { authenticated: false };
+  }
+}
+
+async function devTimed<T>(label: string, task: () => T | Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await task();
+  } finally {
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[perf] ${label} ${Date.now() - started}ms`);
+    }
   }
 }

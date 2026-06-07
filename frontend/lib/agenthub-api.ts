@@ -24,6 +24,7 @@ import type {
   HubMessageDto,
   HubRunDto,
   HubSessionDto,
+  ListSessionsResponse,
   ListBuildSessionsResponse,
   PinHubMessageRequest,
   DeploymentPreflightResponse,
@@ -35,6 +36,7 @@ import type {
   SendHubMessageResponse,
   SessionDetailDto,
   SessionDiffContextDto,
+  SessionTimelinePageDto,
   StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
@@ -207,12 +209,16 @@ export function logoutAuthSession() {
   });
 }
 
-export function listSessions(options: { query?: string; includeArchived?: boolean } = {}) {
+export function listSessions(
+  options: { query?: string; includeArchived?: boolean; limit?: number; cursor?: string | null } = {},
+) {
   const params = new URLSearchParams();
   if (options.query?.trim()) params.set("q", options.query.trim());
   if (options.includeArchived) params.set("includeArchived", "true");
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.cursor?.trim()) params.set("cursor", options.cursor.trim());
   const suffix = params.size ? `?${params.toString()}` : "";
-  return requestJson<{ items: HubSessionDto[] }>(`/sessions${suffix}`);
+  return requestJson<ListSessionsResponse>(`/sessions${suffix}`);
 }
 
 export function createSession(body: CreateHubSessionRequest) {
@@ -222,8 +228,34 @@ export function createSession(body: CreateHubSessionRequest) {
   });
 }
 
-export function getSessionDetail(sessionId: string) {
-  return requestJson<SessionDetailDto>(`/sessions/${encodeURIComponent(sessionId)}`);
+export function getSessionDetail(sessionId: string, options: { messageLimit?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.messageLimit) params.set("messageLimit", String(options.messageLimit));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return requestJson<SessionDetailDto>(`/sessions/${encodeURIComponent(sessionId)}${suffix}`);
+}
+
+export function listSessionTimeline(sessionId: string, options: { limit?: number; before?: string | null } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.before?.trim()) params.set("before", options.before.trim());
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return requestJson<SessionTimelinePageDto>(`/sessions/${encodeURIComponent(sessionId)}/timeline${suffix}`);
+}
+
+export function listPinnedMessages(sessionId: string, options: { limit?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return requestJson<{ items: HubMessageDto[] }>(`/sessions/${encodeURIComponent(sessionId)}/pinned-messages${suffix}`);
+}
+
+export function listSessionArtifacts(sessionId: string) {
+  return requestJson<{ items: HubArtifactDto[] }>(`/sessions/${encodeURIComponent(sessionId)}/artifacts`);
+}
+
+export function listSessionFileChanges(sessionId: string) {
+  return requestJson<{ items: HubFileChangeDto[] }>(`/sessions/${encodeURIComponent(sessionId)}/file-changes`);
 }
 
 export function getSessionDiffContext(sessionId: string) {

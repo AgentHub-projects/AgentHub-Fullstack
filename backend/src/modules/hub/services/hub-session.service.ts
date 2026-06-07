@@ -1,14 +1,17 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type {
   AddParticipantRequest,
   AgentInstanceDto,
   CreateHubSessionRequest,
   HubMessagePartDto,
+  ListSessionsResponse,
   PinHubMessageRequest,
   SendHubMessageRequest,
   SendHubMessageResponse,
   SessionDetailDto,
   SessionDiffContextDto,
+  SessionTimelinePageDto,
   UpdateHubSessionRequest,
 } from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
@@ -18,7 +21,6 @@ import { HubEventService } from "./event.service";
 import { DeploymentService } from "./deployment.service";
 import {
   mapArtifact,
-  mapContextSnapshot,
   mapEvent,
   mapFileChange,
   mapMessage,
@@ -50,20 +52,73 @@ export class HubSessionService {
   ) {}
 
   /** 列出会话，支持搜索和归档过滤，置顶优先排序 */
-  async listSessions(input: { query?: string; includeArchived?: boolean } = {}) {
+  async listSessions(input: { query?: string; includeArchived?: boolean; limit?: number; cursor?: string } = {}): Promise<ListSessionsResponse> {
     const query = input.query?.trim().toLowerCase() ?? "";
-    const sessions = await this.prisma.session.findMany({
-      where: input.includeArchived ? { status: { not: "deleted" } } : { status: "active" },
-      include: {
-        runs: { orderBy: { createdAt: "desc" }, take: 1 },
-        messages: { orderBy: { createdAt: "desc" }, take: 5, select: { contentText: true } },
-        participants: { where: { participantRole: { not: "deleted" } }, include: { agent: true } },
-      },
-      orderBy: { updatedAt: "desc" },
+    const limit = normalizeLimit(input.limit, 10, 50);
+    const cursor = decodeSessionCursor(input.cursor);
+    const statusWhere = input.includeArchived
+      ? Prisma.sql`s.status <> 'deleted'::session_status`
+      : Prisma.sql`s.status = 'active'::session_status`;
+    const queryWhere = query
+      ? Prisma.sql`AND (
+          lower(s.title) LIKE ${`%${query}%`}
+          OR EXISTS (
+            SELECT 1
+            FROM "session_agents" sa
+            JOIN "agents" a ON a.id = sa.agent_id
+            WHERE sa.session_id = s.id
+              AND sa.participant_role <> 'deleted'
+              AND lower(a.name) LIKE ${`%${query}%`}
+          )
+        )`
+      : Prisma.empty;
+    const cursorWhere = cursor
+      ? Prisma.sql`AND (
+          CASE WHEN s.metadata->>'isPinned' = 'true' THEN 1 ELSE 0 END < ${cursor.pinned ? 1 : 0}
+          OR (
+            CASE WHEN s.metadata->>'isPinned' = 'true' THEN 1 ELSE 0 END = ${cursor.pinned ? 1 : 0}
+            AND (
+              s.updated_at < ${cursor.updatedAt}::timestamptz
+              OR (s.updated_at = ${cursor.updatedAt}::timestamptz AND s.id < ${cursor.id}::uuid)
+            )
+          )
+        )`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; updatedAt: Date; isPinned: boolean }>>`
+      SELECT
+        s.id::text AS id,
+        s.updated_at AS "updatedAt",
+        (s.metadata->>'isPinned' = 'true') AS "isPinned"
+      FROM "sessions" s
+      WHERE ${statusWhere}
+      ${queryWhere}
+      ${cursorWhere}
+      ORDER BY
+        CASE WHEN s.metadata->>'isPinned' = 'true' THEN 1 ELSE 0 END DESC,
+        s.updated_at DESC,
+        s.id DESC
+      LIMIT ${limit + 1}
+    `;
+    const pageRows = rows.slice(0, limit);
+    const sessions = pageRows.length
+      ? await this.prisma.session.findMany({
+          where: { id: { in: pageRows.map((row) => row.id) } },
+          include: {
+            runs: { orderBy: { createdAt: "desc" }, take: 1 },
+          },
+        })
+      : [];
+    const byId = new Map(sessions.map((session) => [session.id, session]));
+    const ordered = pageRows.flatMap((row) => {
+      const session = byId.get(row.id);
+      return session ? [session] : [];
     });
-    const filtered = query ? sessions.filter((session) => sessionMatchesQuery(session, query)) : sessions;
-    filtered.sort(compareSessionsForList);
-    return { items: filtered.map(mapSession) };
+    const last = pageRows.at(-1);
+    return {
+      items: ordered.map(mapSession),
+      hasMore: rows.length > limit,
+      nextCursor: rows.length > limit && last ? encodeSessionCursor(last) : null,
+    };
   }
 
   /** 创建会话：支持 direct 单聊和 group 群聊模式，自动创建对应的 Agent */
@@ -139,8 +194,8 @@ export class HubSessionService {
     return dto;
   }
 
-  /** 获取会话完整详情：含消息、运行、事件、产物、文件变更和上下文快照 */
-  async getDetail(sessionId: string): Promise<SessionDetailDto> {
+  /** 获取会话首屏详情：只返回最近消息及其 run/event，重数据按需加载 */
+  async getDetail(sessionId: string, input: { messageLimit?: number } = {}): Promise<SessionDetailDto> {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
       include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
@@ -148,44 +203,105 @@ export class HubSessionService {
     if (!session || session.status === "deleted") {
       throw new NotFoundException("SESSION_NOT_FOUND");
     }
-    const [messages, runs, events, artifacts, fileChanges, contextSnapshot] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { sessionId },
-        include: { agent: true },
-        orderBy: { createdAt: "asc" },
-      }),
-      this.prisma.agentRun.findMany({
-        where: { sessionId },
-        orderBy: { createdAt: "asc" },
-      }),
-      this.prisma.agentEvent.findMany({
-        where: { sessionId },
-        orderBy: [{ persistedAt: "asc" }, { seq: "asc" }],
-        take: 1000,
-      }),
-      this.prisma.artifact.findMany({
-        where: { sessionId },
-        orderBy: { updatedAt: "desc" },
-      }),
-      this.prisma.fileChange.findMany({
-        where: { sessionId },
-        orderBy: { createdAt: "desc" },
-      }),
-      this.prisma.contextSnapshot.findFirst({
-        where: { sessionId },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+    const timelinePage = await this.listTimeline(sessionId, { limit: input.messageLimit, skipSessionCheck: true });
 
     return {
       session: mapSession(session),
+      messages: timelinePage.messages,
+      runs: timelinePage.runs,
+      events: timelinePage.events,
+      artifacts: [],
+      fileChanges: [],
+      context: null,
+      timelinePage: { hasMore: timelinePage.hasMore, nextCursor: timelinePage.nextCursor },
+    };
+  }
+
+  /** 按消息时间向前分页加载会话时间线 */
+  async listTimeline(
+    sessionId: string,
+    input: { limit?: number; before?: string; skipSessionCheck?: boolean; includeOutputs?: boolean } = {},
+  ): Promise<SessionTimelinePageDto> {
+    if (!input.skipSessionCheck) {
+      const session = await this.prisma.session.findUnique({ where: { id: sessionId }, select: { status: true } });
+      if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
+    }
+    const limit = normalizeLimit(input.limit, 10, 50);
+    const before = decodeMessageCursor(input.before);
+    const messageWhere = before
+      ? {
+          sessionId,
+          OR: [
+            { createdAt: { lt: before.createdAt } },
+            { createdAt: before.createdAt, id: { lt: before.id } },
+          ],
+        }
+      : { sessionId };
+    const messagesDesc = await this.prisma.message.findMany({
+      where: messageWhere,
+      include: { agent: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+    });
+    const pageMessagesDesc = messagesDesc.slice(0, limit);
+    const messages = [...pageMessagesDesc].reverse();
+    const messageIds = messages.map((message) => message.id);
+    const directRunIds = messages
+      .map((message) => message.runId)
+      .filter((runId): runId is string => Boolean(runId));
+    const runs = messageIds.length || directRunIds.length
+      ? await this.prisma.agentRun.findMany({
+          where: {
+            sessionId,
+            OR: [
+              { id: { in: directRunIds } },
+              { userMessageId: { in: messageIds } },
+              { assistantMessageId: { in: messageIds } },
+            ],
+          },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+    const runIds = runs.map((run) => run.id);
+    const events = runIds.length
+      ? await this.prisma.agentEvent.findMany({
+          where: { sessionId, runId: { in: runIds } },
+          orderBy: [{ persistedAt: "asc" }, { seq: "asc" }],
+        })
+      : [];
+    const [artifacts, fileChanges] = runIds.length && input.includeOutputs
+      ? await Promise.all([
+          this.prisma.artifact.findMany({
+            where: { sessionId, runId: { in: runIds } },
+            orderBy: { updatedAt: "desc" },
+          }),
+          this.prisma.fileChange.findMany({
+            where: { sessionId, runId: { in: runIds } },
+            orderBy: { createdAt: "desc" },
+          }),
+        ])
+      : [[], []] as const;
+    const oldest = pageMessagesDesc.at(-1);
+    return {
       messages: messages.map(mapMessage),
       runs: runs.map(mapRun),
       events: events.map(mapEvent),
       artifacts: artifacts.map(mapArtifact),
       fileChanges: fileChanges.map(mapFileChange),
-      context: contextSnapshot ? mapContextSnapshot(contextSnapshot) : null,
+      hasMore: messagesDesc.length > limit,
+      nextCursor: messagesDesc.length > limit && oldest ? encodeMessageCursor(oldest) : null,
     };
+  }
+
+  async listPinnedMessages(sessionId: string, input: { limit?: number } = {}) {
+    const limit = normalizeLimit(input.limit, 20, 50);
+    const messages = await this.prisma.message.findMany({
+      where: { sessionId, isPinned: true },
+      include: { agent: true },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+    });
+    return { items: messages.map(mapMessage) };
   }
 
   /** 获取会话 Diff 审查范围说明 */
@@ -793,14 +909,59 @@ function mergeMetadata(value: unknown, patch: Record<string, unknown>) {
   };
 }
 
-function compareSessionsForList(a: { metadata: unknown; updatedAt: Date }, b: { metadata: unknown; updatedAt: Date }) {
-  const pinnedDiff = Number(sessionPinned(b)) - Number(sessionPinned(a));
-  if (pinnedDiff !== 0) return pinnedDiff;
-  return b.updatedAt.getTime() - a.updatedAt.getTime();
+function normalizeLimit(value: number | undefined, fallback: number, max: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(1, Math.min(max, Math.floor(number)));
 }
 
-function sessionPinned(session: { metadata: unknown }) {
-  return mergeMetadata(session.metadata, {}).isPinned === true;
+function encodeSessionCursor(row: { id: string; updatedAt: Date | string; isPinned: boolean }) {
+  return encodeCursor({
+    id: row.id,
+    updatedAt: new Date(row.updatedAt).toISOString(),
+    pinned: Boolean(row.isPinned),
+  });
+}
+
+function decodeSessionCursor(value: string | undefined) {
+  const decoded = decodeCursor(value);
+  if (!decoded) return null;
+  if (typeof decoded.id !== "string" || typeof decoded.updatedAt !== "string") return null;
+  return {
+    id: decoded.id,
+    updatedAt: decoded.updatedAt,
+    pinned: decoded.pinned === true,
+  };
+}
+
+function encodeMessageCursor(row: { id: string; createdAt: Date | string }) {
+  return encodeCursor({
+    id: row.id,
+    createdAt: new Date(row.createdAt).toISOString(),
+  });
+}
+
+function decodeMessageCursor(value: string | undefined) {
+  const decoded = decodeCursor(value);
+  if (!decoded) return null;
+  if (typeof decoded.id !== "string" || typeof decoded.createdAt !== "string") return null;
+  const createdAt = new Date(decoded.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return null;
+  return { id: decoded.id, createdAt };
+}
+
+function encodeCursor(value: Record<string, unknown>) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeCursor(value: string | undefined): Record<string, unknown> | null {
+  if (!value?.trim()) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 function numberMetadataValue(value: unknown) {
@@ -883,15 +1044,3 @@ function summarizePartForReference(part: Record<string, unknown>) {
   return messagePartContextText(part) || null;
 }
 
-function sessionMatchesQuery(
-  session: {
-    title: string;
-    messages?: Array<{ contentText: string }>;
-    participants?: Array<{ agent?: { name?: string | null } | null }>;
-  },
-  query: string,
-) {
-  if (session.title.toLowerCase().includes(query)) return true;
-  if (session.messages?.some((message) => message.contentText.toLowerCase().includes(query))) return true;
-  return Boolean(session.participants?.some((item) => item.agent?.name?.toLowerCase().includes(query)));
-}

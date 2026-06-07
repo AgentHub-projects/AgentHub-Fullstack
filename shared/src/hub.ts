@@ -363,6 +363,23 @@ export interface LongTermSummaryDto {
   createdAt: ISODateString;
 }
 
+export interface CursorPageInfo {
+  hasMore: boolean;
+  nextCursor?: string | null;
+}
+
+export interface ListSessionsResponse extends CursorPageInfo {
+  items: HubSessionDto[];
+}
+
+export interface SessionTimelinePageDto extends CursorPageInfo {
+  messages: HubMessageDto[];
+  runs: HubRunDto[];
+  events: HubEventDto[];
+  artifacts: HubArtifactDto[];
+  fileChanges: HubFileChangeDto[];
+}
+
 export interface SessionDetailDto {
   session: HubSessionDto;
   messages: HubMessageDto[];
@@ -371,6 +388,8 @@ export interface SessionDetailDto {
   artifacts: HubArtifactDto[];
   fileChanges: HubFileChangeDto[];
   context?: HubContextSnapshotDto | null;
+  timelinePage?: CursorPageInfo;
+  pinnedMessages?: HubMessageDto[];
 }
 
 export interface SessionDiffContextDto {

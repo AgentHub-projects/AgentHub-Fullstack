@@ -41,11 +41,20 @@ export class HubSessionController {
 
   /** 列出会话 */
   @Get()
-  listSessions(@Query("q") query?: string, @Query("includeArchived") includeArchived?: string) {
-    return this.sessions.listSessions({
-      query,
-      includeArchived: includeArchived === "true",
-    });
+  listSessions(
+    @Query("q") query?: string,
+    @Query("includeArchived") includeArchived?: string,
+    @Query("limit") limit?: string,
+    @Query("cursor") cursor?: string,
+  ) {
+    return devTimed("sessions list", () =>
+      this.sessions.listSessions({
+        query,
+        includeArchived: includeArchived === "true",
+        limit: Number(limit),
+        cursor,
+      }),
+    );
   }
 
   /** 创建会话 */
@@ -56,8 +65,24 @@ export class HubSessionController {
 
   /** 获取会话详情 */
   @Get(":sessionId")
-  getSession(@Param("sessionId") sessionId: string) {
-    return this.sessions.getDetail(sessionId);
+  getSession(@Param("sessionId") sessionId: string, @Query("messageLimit") messageLimit?: string) {
+    return devTimed("session detail", () => this.sessions.getDetail(sessionId, { messageLimit: Number(messageLimit) }));
+  }
+
+  /** 分页加载会话时间线 */
+  @Get(":sessionId/timeline")
+  listTimeline(
+    @Param("sessionId") sessionId: string,
+    @Query("limit") limit?: string,
+    @Query("before") before?: string,
+  ) {
+    return devTimed("timeline", () => this.sessions.listTimeline(sessionId, { limit: Number(limit), before }));
+  }
+
+  /** 按需加载关键消息 */
+  @Get(":sessionId/pinned-messages")
+  listPinnedMessages(@Param("sessionId") sessionId: string, @Query("limit") limit?: string) {
+    return this.sessions.listPinnedMessages(sessionId, { limit: Number(limit) });
   }
 
   /** 获取 Diff 审查范围说明 */
@@ -154,21 +179,25 @@ export class HubSessionController {
   /** 列出会话产物 */
   @Get(":sessionId/artifacts")
   async listArtifacts(@Param("sessionId") sessionId: string) {
-    const items = await this.prisma.artifact.findMany({
-      where: { sessionId },
-      orderBy: { updatedAt: "desc" },
+    return devTimed("session artifacts", async () => {
+      const items = await this.prisma.artifact.findMany({
+        where: { sessionId },
+        orderBy: { updatedAt: "desc" },
+      });
+      return { items: items.map(mapArtifact) };
     });
-    return { items: items.map(mapArtifact) };
   }
 
   /** 列出文件变更 */
   @Get(":sessionId/file-changes")
   async listFileChanges(@Param("sessionId") sessionId: string) {
-    const items = await this.prisma.fileChange.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "desc" },
+    return devTimed("session file-changes", async () => {
+      const items = await this.prisma.fileChange.findMany({
+        where: { sessionId },
+        orderBy: { createdAt: "desc" },
+      });
+      return { items: items.map(mapFileChange) };
     });
-    return { items: items.map(mapFileChange) };
   }
 
   /** 应用文件变更 */
@@ -180,7 +209,7 @@ export class HubSessionController {
   /** 部署预检 */
   @Get(":sessionId/deployments/preflight")
   preflightDeployment(@Param("sessionId") sessionId: string) {
-    return this.deployments.preflight(sessionId);
+    return devTimed("preflight", () => this.deployments.preflight(sessionId));
   }
 
   /** 启动部署 */
@@ -188,5 +217,16 @@ export class HubSessionController {
   async startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
     await assertSessionWritable(this.prisma, sessionId);
     return this.deployments.start(sessionId, body ?? {});
+  }
+}
+
+async function devTimed<T>(label: string, task: () => T | Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await task();
+  } finally {
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[perf] ${label} ${Date.now() - started}ms`);
+    }
   }
 }

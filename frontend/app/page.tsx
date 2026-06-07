@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction, type UIEvent } from "react";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
@@ -14,6 +14,7 @@ import type {
   HubSessionDto,
   ProjectDto,
   SessionDetailDto,
+  SessionTimelinePageDto,
   UpdateAgentRequest,
   UploadedAttachmentDto,
 } from "@agenthub/shared";
@@ -53,8 +54,12 @@ import {
   getSessionDetail,
   listAgents,
   listAgentTemplates,
+  listPinnedMessages,
   listProjects,
   listSessions,
+  listSessionArtifacts,
+  listSessionFileChanges,
+  listSessionTimeline,
   loginWithCredentials,
   pinSessionMessage,
   regenerateSessionMessage,
@@ -123,6 +128,9 @@ type SessionWorkspace = {
   attachments: UploadedAttachmentDto[];
   replyTargets: ReplyTarget[];
   inspectorTab: InspectorTab;
+  timelineHasMore: boolean;
+  timelineCursor: string | null;
+  timelineLoadingOlder: boolean;
 };
 
 const EMPTY_WORKSPACE: SessionWorkspace = {
@@ -131,8 +139,12 @@ const EMPTY_WORKSPACE: SessionWorkspace = {
   attachments: [],
   replyTargets: [],
   inspectorTab: "diff",
+  timelineHasMore: false,
+  timelineCursor: null,
+  timelineLoadingOlder: false,
 };
 
+const PAGE_SIZE = 10;
 const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const AVATAR_TYPES = new Set(AVATAR_ACCEPT.split(","));
 
@@ -145,6 +157,10 @@ export default function WorkbenchPage() {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [sessions, setSessions] = useState<HubSessionDto[]>([]);
+  const [sessionsHasMore, setSessionsHasMore] = useState(false);
+  const [sessionsNextCursor, setSessionsNextCursor] = useState<string | null>(null);
+  const [sessionsLoadingInitial, setSessionsLoadingInitial] = useState(false);
+  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
   const [projects, setProjects] = useState<ProjectDto[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
@@ -205,7 +221,6 @@ export default function WorkbenchPage() {
     displayName: "",
     avatarUrl: null,
   });
-  const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: number; provider: string; name: string }>>([]);
@@ -219,10 +234,31 @@ export default function WorkbenchPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const agentAvatarInputRef = useRef<HTMLInputElement>(null);
+  const profileUpdateSeqRef = useRef(0);
+  const agentUpdateSeqRef = useRef<Record<number, number>>({});
+  const sessionListRequestSeqRef = useRef(0);
+  const loadedSessionQueryRef = useRef("");
+  const firstDetailMarkedRef = useRef(false);
+  const firstRenderMarkedRef = useRef(false);
+  const agentsLoadedRef = useRef(false);
+  const templatesLoadedRef = useRef(false);
+  const projectsLoadedRef = useRef(false);
+  const agentsRequestRef = useRef<Promise<void> | null>(null);
+  const templatesRequestRef = useRef<Promise<void> | null>(null);
+  const projectsRequestRef = useRef<Promise<void> | null>(null);
+  const pinnedRequestRef = useRef<Record<string, Promise<void> | undefined>>({});
+  const pinnedLoadedRef = useRef<Record<string, boolean>>({});
+  const outputsRequestRef = useRef<Record<string, Promise<void> | undefined>>({});
+  const outputsLoadedRef = useRef<Record<string, boolean>>({});
+  const deploymentPreflightRequestRef = useRef<Record<string, Promise<DeploymentPreflightResponse | null> | undefined>>({});
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const preserveTimelineScrollRef = useRef<{ height: number; top: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = sessionTabs.activeId;
   const openSessionIds = sessionTabs.openIds;
+  const socketSessionIds = openSessionIds.filter((sessionId) => Boolean(workspaces[sessionId]?.detail));
+  const socketSessionKey = socketSessionIds.join("|");
   const activeWorkspace = activeSessionId ? workspaces[activeSessionId] : null;
   const detail = activeWorkspace?.detail ?? null;
   const composer = activeWorkspace?.composer ?? "";
@@ -286,10 +322,10 @@ export default function WorkbenchPage() {
   const currentUserName = currentUserDisplayName(currentUser);
   const pinnedMessages = useMemo(
     () =>
-      [...(detail?.messages ?? [])]
+      [...(detail?.pinnedMessages ?? detail?.messages ?? [])]
         .filter(hasPinnedMessageContent)
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)),
-    [detail?.messages],
+    [detail?.messages, detail?.pinnedMessages],
   );
 
   function ensureWorkspace(sessionId: string, patch: Partial<SessionWorkspace> = {}) {
@@ -366,18 +402,19 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     if (!authenticated || !authChecked) return;
+    const nextQuery = sessionSearch.trim();
+    if (nextQuery === loadedSessionQueryRef.current) return;
     const timer = window.setTimeout(() => {
-      void refreshSessions(sessionSearch);
+      void refreshSessions(nextQuery);
     }, 250);
     return () => window.clearTimeout(timer);
   }, [authenticated, authChecked, sessionSearch]);
 
   useEffect(() => {
-    if (!authenticated || openSessionIds.length === 0) return;
-    const disconnect = connectHubSocket(openSessionIds, {
+    if (!authenticated || socketSessionIds.length === 0) return;
+    const disconnect = connectHubSocket(socketSessionIds, {
       onState: () => undefined,
       onEvent: (event) => {
-        console.log("[frontend] onEvent", event.eventType, event.sessionId, event.runId, event.id);
         setWorkspaceDetail(event.sessionId, (current) =>
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,
         );
@@ -405,11 +442,18 @@ export default function WorkbenchPage() {
             : current,
         );
         setSessionTabs((current) => markSessionTabUpdated(current, session.id));
-        void refreshDeploymentPreflight(session.id);
       },
       onMessage: (message) => {
         setWorkspaceDetail(message.sessionId, (current) =>
-          current ? { ...current, messages: upsertById(current.messages, message).sort(sortMessage) } : current,
+          current
+            ? {
+                ...current,
+                messages: upsertById(current.messages, message).sort(sortMessage),
+                pinnedMessages: message.isPinned
+                  ? upsertById(current.pinnedMessages ?? [], message).sort(sortMessage)
+                  : (current.pinnedMessages ?? []).filter((item) => item.id !== message.id),
+              }
+            : current,
         );
         setSessionTabs((current) => markSessionTabUpdated(current, message.sessionId));
       },
@@ -427,9 +471,18 @@ export default function WorkbenchPage() {
       },
     });
     return disconnect;
-  }, [authenticated, activeSessionId, openSessionIds.join("|")]);
+  }, [authenticated, activeSessionId, socketSessionKey]);
 
   useEffect(() => {
+    const preserve = preserveTimelineScrollRef.current;
+    const timeline = timelineRef.current;
+    if (preserve && timeline) {
+      window.requestAnimationFrame(() => {
+        timeline.scrollTop = timeline.scrollHeight - preserve.height + preserve.top;
+        preserveTimelineScrollRef.current = null;
+      });
+      return;
+    }
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [conversationItems.length, detail?.events.length]);
 
@@ -456,16 +509,20 @@ export default function WorkbenchPage() {
   }, [inspectorTab, inspectorCollapsed, sandboxEditorDisabledReason]);
 
   useEffect(() => {
-    if (!authenticated || !activeSessionId) return;
-    void refreshDeploymentPreflight(activeSessionId);
-  }, [authenticated, activeSessionId, activeSession?.projectId, activeSession?.metadata.latestSuccessfulPushCommitSha]);
+    if (!authenticated || firstRenderMarkedRef.current || !detail) return;
+    firstRenderMarkedRef.current = true;
+    window.requestAnimationFrame(() => markFrontendPerf("agenthub:first-render:done"));
+  }, [authenticated, detail]);
 
   async function checkAuth() {
     const result = await getAuthState();
+    markFrontendPerf("agenthub:auth:done");
     if (result.ok && result.data.authenticated) {
       setCurrentUser(result.data.user ?? null);
       setAuthenticated(true);
-      await bootstrap();
+      setAuthChecked(true);
+      void bootstrap();
+      return;
     } else {
       setCurrentUser(null);
       setAuthenticated(false);
@@ -491,22 +548,24 @@ export default function WorkbenchPage() {
       setCurrentUser(result.data.user);
       setAuthenticated(true);
       setAuthPassword("");
-      await bootstrap();
+      void bootstrap();
     } finally {
       setAuthSubmitting(false);
     }
   }
 
   async function bootstrap() {
-    const [agentRes, templateRes, sessionRes, projectRes] = await Promise.all([
-      listAgents(),
-      listAgentTemplates(),
-      listSessions({ query: sessionSearch }),
-      listProjects(),
-    ]);
-    if (agentRes.ok) setAgents(agentRes.data.items);
-    if (templateRes.ok) setTemplates(templateRes.data);
-    if (projectRes.ok) setProjects(projectRes.data.items);
+    const requestSeq = ++sessionListRequestSeqRef.current;
+    const query = sessionSearch.trim();
+    setSessionsLoadingInitial(true);
+    const sessionRes = await listSessions({ query, limit: PAGE_SIZE });
+    if (requestSeq !== sessionListRequestSeqRef.current) {
+      setSessionsLoadingInitial(false);
+      return;
+    }
+    setSessionsLoadingInitial(false);
+    loadedSessionQueryRef.current = query;
+    markFrontendPerf("agenthub:sessions:list:done");
 
     if (!sessionRes.ok) {
       setNotice(`后端不可用：${sessionRes.error}`);
@@ -515,9 +574,11 @@ export default function WorkbenchPage() {
 
     const items = sessionRes.data.items;
     setSessions(items);
+    setSessionsHasMore(sessionRes.data.hasMore);
+    setSessionsNextCursor(sessionRes.data.nextCursor ?? null);
     const selected = items[0]?.id ?? null;
     if (selected) {
-      await loadSession(selected);
+      void loadSession(selected, { markFirstDetail: true });
     } else {
       setSessionTabs(EMPTY_SESSION_TABS);
       setWorkspaces({});
@@ -525,12 +586,97 @@ export default function WorkbenchPage() {
   }
 
   async function refreshSessions(query = sessionSearch) {
-    const result = await listSessions({ query });
+    const requestSeq = ++sessionListRequestSeqRef.current;
+    const normalizedQuery = query.trim();
+    const result = await listSessions({ query: normalizedQuery, limit: PAGE_SIZE });
+    if (requestSeq !== sessionListRequestSeqRef.current) return;
     if (!result.ok) {
       setNotice(`会话列表加载失败：${result.error}`);
       return;
     }
+    loadedSessionQueryRef.current = normalizedQuery;
     setSessions(result.data.items);
+    setSessionsHasMore(result.data.hasMore);
+    setSessionsNextCursor(result.data.nextCursor ?? null);
+  }
+
+  async function ensureAgentsLoaded(options: { force?: boolean } = {}) {
+    if (agentsLoadedRef.current && !options.force) return;
+    if (agentsRequestRef.current && !options.force) return agentsRequestRef.current;
+    const request = (async () => {
+      const result = await listAgents();
+      if (!result.ok) {
+        setNotice(`Agent 列表加载失败：${result.error}`);
+        return;
+      }
+      agentsLoadedRef.current = true;
+      setAgents(result.data.items);
+    })().finally(() => {
+      agentsRequestRef.current = null;
+    });
+    agentsRequestRef.current = request;
+    return request;
+  }
+
+  async function ensureTemplatesLoaded(options: { force?: boolean } = {}) {
+    if (templatesLoadedRef.current && !options.force) return;
+    if (templatesRequestRef.current && !options.force) return templatesRequestRef.current;
+    const request = (async () => {
+      const result = await listAgentTemplates();
+      if (!result.ok) {
+        setNotice(`Agent 模板加载失败：${result.error}`);
+        return;
+      }
+      templatesLoadedRef.current = true;
+      setTemplates(result.data);
+    })().finally(() => {
+      templatesRequestRef.current = null;
+    });
+    templatesRequestRef.current = request;
+    return request;
+  }
+
+  async function ensureProjectsLoaded(options: { force?: boolean } = {}) {
+    if (projectsLoadedRef.current && !options.force) return;
+    if (projectsRequestRef.current && !options.force) return projectsRequestRef.current;
+    const request = (async () => {
+      const result = await listProjects();
+      if (!result.ok) {
+        setNotice(`项目列表加载失败：${result.error}`);
+        return;
+      }
+      projectsLoadedRef.current = true;
+      setProjects(result.data.items);
+    })().finally(() => {
+      projectsRequestRef.current = null;
+    });
+    projectsRequestRef.current = request;
+    return request;
+  }
+
+  async function loadMoreSessions() {
+    if (sessionsLoadingMore || !sessionsHasMore || !sessionsNextCursor) return;
+    setSessionsLoadingMore(true);
+    const requestSeq = sessionListRequestSeqRef.current;
+    try {
+      const result = await listSessions({ query: sessionSearch, limit: PAGE_SIZE, cursor: sessionsNextCursor });
+      if (requestSeq !== sessionListRequestSeqRef.current) return;
+      if (!result.ok) {
+        setNotice(`更多会话加载失败：${result.error}`);
+        return;
+      }
+      setSessions((current) => mergeById(current, result.data.items).sort(sortSession));
+      setSessionsHasMore(result.data.hasMore);
+      setSessionsNextCursor(result.data.nextCursor ?? null);
+    } finally {
+      setSessionsLoadingMore(false);
+    }
+  }
+
+  function handleSessionListScroll(event: UIEvent<HTMLElement>) {
+    const element = event.currentTarget;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight > 80) return;
+    void loadMoreSessions();
   }
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
@@ -564,30 +710,159 @@ export default function WorkbenchPage() {
     }
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setDetail((current) => (current?.session.id === result.data.id ? { ...current, session: result.data } : current));
-    await refreshDeploymentPreflight(activeSessionId);
+    setDeploymentPreflights((current) => {
+      const next = { ...current };
+      delete next[activeSessionId];
+      return next;
+    });
   }
 
-  async function refreshDeploymentPreflight(sessionId: string) {
-    const result = await getDeploymentPreflight(sessionId);
-    if (result.ok) {
+  async function refreshDeploymentPreflight(sessionId: string, options: { silent?: boolean } = {}) {
+    const existing = deploymentPreflightRequestRef.current[sessionId];
+    if (existing) return existing;
+    const request = (async () => {
+      const result = await getDeploymentPreflight(sessionId);
+      if (!result.ok) {
+        if (!options.silent) setNotice(`部署预检失败：${result.error}`);
+        return null;
+      }
       setDeploymentPreflights((current) => ({ ...current, [sessionId]: result.data }));
-    }
+      return result.data;
+    })().finally(() => {
+      delete deploymentPreflightRequestRef.current[sessionId];
+    });
+    deploymentPreflightRequestRef.current[sessionId] = request;
+    return request;
   }
 
-  async function loadSession(sessionId: string) {
+  async function loadSession(sessionId: string, options: { markFirstDetail?: boolean } = {}) {
     setRenamingSession(false);
     setSessionRailCollapsed(false);
     setOpenedFilePath(null);
     setSessionTabs((current) => activateSessionTab(openSessionTab(current, sessionId), sessionId));
     ensureWorkspace(sessionId);
-    const result = await getSessionDetail(sessionId);
+    if (workspaces[sessionId]?.detail) {
+      void ensureAgentsLoaded();
+      schedulePinnedMessagesLoad(sessionId);
+      closeMentionMenu();
+      return;
+    }
+    const result = await getSessionDetail(sessionId, { messageLimit: PAGE_SIZE });
     if (!result.ok) {
       setNotice(`会话加载失败：${result.error}`);
       return;
     }
-    updateWorkspace(sessionId, (current) => ({ ...current, detail: result.data }));
-    void refreshDeploymentPreflight(sessionId);
+    if (options.markFirstDetail || !firstDetailMarkedRef.current) {
+      firstDetailMarkedRef.current = true;
+      markFrontendPerf("agenthub:first-detail:done");
+    }
+    updateWorkspace(sessionId, (current) => ({
+      ...current,
+      detail: result.data,
+      timelineHasMore: Boolean(result.data.timelinePage?.hasMore),
+      timelineCursor: result.data.timelinePage?.nextCursor ?? null,
+      timelineLoadingOlder: false,
+    }));
+    void ensureAgentsLoaded();
+    schedulePinnedMessagesLoad(sessionId);
     closeMentionMenu();
+  }
+
+  async function loadOlderTimeline() {
+    if (!activeSessionId || !activeWorkspace?.detail || activeWorkspace.timelineLoadingOlder) return;
+    if (!activeWorkspace.timelineHasMore || !activeWorkspace.timelineCursor) return;
+    const element = timelineRef.current;
+    preserveTimelineScrollRef.current = element
+      ? { height: element.scrollHeight, top: element.scrollTop }
+      : null;
+    updateWorkspace(activeSessionId, (current) => ({ ...current, timelineLoadingOlder: true }));
+    const result = await listSessionTimeline(activeSessionId, {
+      limit: PAGE_SIZE,
+      before: activeWorkspace.timelineCursor,
+    });
+    if (!result.ok) {
+      setNotice(`更早消息加载失败：${result.error}`);
+      updateWorkspace(activeSessionId, (current) => ({ ...current, timelineLoadingOlder: false }));
+      preserveTimelineScrollRef.current = null;
+      return;
+    }
+    updateWorkspace(activeSessionId, (current) => ({
+      ...current,
+      detail: current.detail ? mergeTimelinePage(current.detail, result.data) : current.detail,
+      timelineHasMore: result.data.hasMore,
+      timelineCursor: result.data.nextCursor ?? null,
+      timelineLoadingOlder: false,
+    }));
+  }
+
+  function schedulePinnedMessagesLoad(sessionId: string) {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    };
+    if (idleWindow.requestIdleCallback) {
+      idleWindow.requestIdleCallback(() => void loadPinnedMessages(sessionId), { timeout: 2000 });
+      return;
+    }
+    window.setTimeout(() => void loadPinnedMessages(sessionId), 300);
+  }
+
+  async function loadPinnedMessages(sessionId: string) {
+    if (pinnedLoadedRef.current[sessionId]) return;
+    const existing = pinnedRequestRef.current[sessionId];
+    if (existing) return existing;
+    const request = (async () => {
+      const result = await listPinnedMessages(sessionId, { limit: 20 });
+      if (!result.ok) return;
+      pinnedLoadedRef.current[sessionId] = true;
+      updateWorkspace(sessionId, (current) => ({
+        ...current,
+        detail: current.detail ? { ...current.detail, pinnedMessages: result.data.items } : current.detail,
+      }));
+    })().finally(() => {
+      delete pinnedRequestRef.current[sessionId];
+    });
+    pinnedRequestRef.current[sessionId] = request;
+    return request;
+  }
+
+  async function ensureSessionOutputsLoaded(sessionId: string) {
+    if (outputsLoadedRef.current[sessionId]) return;
+    const existing = outputsRequestRef.current[sessionId];
+    if (existing) return existing;
+    const request = (async () => {
+      const [artifactRes, fileChangeRes] = await Promise.all([
+        listSessionArtifacts(sessionId),
+        listSessionFileChanges(sessionId),
+      ]);
+      if (!artifactRes.ok) {
+        setNotice(`会话产物加载失败：${artifactRes.error}`);
+        return;
+      }
+      if (!fileChangeRes.ok) {
+        setNotice(`会话产物加载失败：${fileChangeRes.error}`);
+        return;
+      }
+      outputsLoadedRef.current[sessionId] = true;
+      updateWorkspace(sessionId, (current) => ({
+        ...current,
+        detail: current.detail
+          ? {
+              ...current.detail,
+              artifacts: mergeById(current.detail.artifacts, artifactRes.data.items).sort(sortArtifact),
+              fileChanges: mergeById(current.detail.fileChanges, fileChangeRes.data.items).sort(sortFileChange),
+            }
+          : current.detail,
+      }));
+    })().finally(() => {
+      delete outputsRequestRef.current[sessionId];
+    });
+    outputsRequestRef.current[sessionId] = request;
+    return request;
+  }
+
+  function handleTimelineScroll(event: UIEvent<HTMLDivElement>) {
+    if (event.currentTarget.scrollTop > 80) return;
+    void loadOlderTimeline();
   }
 
   async function handleToggleSessionPin(session: HubSessionDto) {
@@ -666,6 +941,7 @@ export default function WorkbenchPage() {
   }
 
   function openCreateGroupDialog() {
+    void ensureTemplatesLoaded();
     setCreateMode("direct");
     setDirectTemplateId(0);
     setDirectName("");
@@ -705,8 +981,7 @@ export default function WorkbenchPage() {
     setSessions((current) => upsertById(current, result.data).sort(sortSession));
     setSessionTabs((current) => activateSessionTab(openSessionTab(current, result.data.id), result.data.id));
     updateWorkspace(result.data.id, (current) => ({ ...current, detail: { session: result.data, ...EMPTY_DETAIL } }));
-    const agentRes = await listAgents();
-    if (agentRes.ok) setAgents(agentRes.data.items);
+    await ensureAgentsLoaded({ force: true });
     closeMentionMenu();
     closeGroupDialog();
   }
@@ -758,7 +1033,15 @@ export default function WorkbenchPage() {
 
   function updateMessageInDetail(message: HubMessageDto) {
     setDetail((current) =>
-      current ? { ...current, messages: upsertById(current.messages, message).sort(sortMessage) } : current,
+      current
+        ? {
+            ...current,
+            messages: upsertById(current.messages, message).sort(sortMessage),
+            pinnedMessages: message.isPinned
+              ? upsertById(current.pinnedMessages ?? [], message).sort(sortMessage)
+              : (current.pinnedMessages ?? []).filter((item) => item.id !== message.id),
+          }
+        : current,
     );
   }
 
@@ -794,17 +1077,37 @@ export default function WorkbenchPage() {
     }
   }
 
-  async function handleEditAgent(body: UpdateAgentRequest) {
+  function handleEditAgent(body: UpdateAgentRequest) {
     if (!editTarget || memberMutationLocked) return;
-    const result = await updateAgent(editTarget.id, body);
-    if (!result.ok) {
-      setNotice(`编辑失败：${result.error}`);
-      return;
-    }
-    setAgents((current) => upsertById(current, result.data));
+    const previousAgent = editTarget;
+    const optimisticAgent: AgentInstanceDto = {
+      ...previousAgent,
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.description !== undefined ? { description: body.description } : {}),
+      ...(body.provider !== undefined ? { provider: body.provider } : {}),
+      ...(body.avatarUrl !== undefined ? { avatarUrl: body.avatarUrl } : {}),
+    };
+    const updateSeq = (agentUpdateSeqRef.current[previousAgent.id] ?? 0) + 1;
+    agentUpdateSeqRef.current[previousAgent.id] = updateSeq;
+    setAgents((current) => upsertById(current, optimisticAgent));
     setEditDialogOpen(false);
     setEditTarget(null);
-    setNotice(`Agent "${result.data.name}" 已更新`);
+    setNotice(`Agent "${optimisticAgent.name}" 已更新`);
+    void updateAgent(previousAgent.id, body)
+      .then((result) => {
+        if (agentUpdateSeqRef.current[previousAgent.id] !== updateSeq) return;
+        if (!result.ok) {
+          setAgents((current) => upsertById(current, previousAgent));
+          setNotice(`Agent 保存失败：${result.error}`);
+          return;
+        }
+        setAgents((current) => upsertById(current, result.data));
+      })
+      .catch((error: unknown) => {
+        if (agentUpdateSeqRef.current[previousAgent.id] !== updateSeq) return;
+        setAgents((current) => upsertById(current, previousAgent));
+        setNotice(`Agent 保存失败：${error instanceof Error ? error.message : "网络异常"}`);
+      });
   }
 
   function openProfileDialog() {
@@ -816,26 +1119,39 @@ export default function WorkbenchPage() {
     setProfileDialogOpen(true);
   }
 
-  async function handleSaveProfile() {
+  function handleSaveProfile() {
     const displayName = profileDraft.displayName.trim();
-    if (!displayName || profileSaving) return;
-    setProfileSaving(true);
+    if (!displayName || !currentUser) return;
+    const previousUser = currentUser;
+    const optimisticUser: AuthUserDto = {
+      ...previousUser,
+      displayName,
+      avatarUrl: profileDraft.avatarUrl,
+    };
+    const updateSeq = profileUpdateSeqRef.current + 1;
+    profileUpdateSeqRef.current = updateSeq;
     setProfileError("");
-    try {
-      const result = await updateCurrentUser({
-        displayName,
-        avatarUrl: profileDraft.avatarUrl,
+    setCurrentUser(optimisticUser);
+    setProfileDialogOpen(false);
+    setNotice("个人信息已更新");
+    void updateCurrentUser({
+      displayName,
+      avatarUrl: profileDraft.avatarUrl,
+    })
+      .then((result) => {
+        if (profileUpdateSeqRef.current !== updateSeq) return;
+        if (!result.ok) {
+          setCurrentUser(previousUser);
+          setNotice(`个人信息保存失败：${result.error}`);
+          return;
+        }
+        setCurrentUser(result.data);
+      })
+      .catch((error: unknown) => {
+        if (profileUpdateSeqRef.current !== updateSeq) return;
+        setCurrentUser(previousUser);
+        setNotice(`个人信息保存失败：${error instanceof Error ? error.message : "网络异常"}`);
       });
-      if (!result.ok) {
-        setProfileError(`保存失败：${result.error}`);
-        return;
-      }
-      setCurrentUser(result.data);
-      setProfileDialogOpen(false);
-      setNotice("个人信息已更新");
-    } finally {
-      setProfileSaving(false);
-    }
   }
 
   function handleProfileAvatarFiles(files: FileList | null) {
@@ -975,8 +1291,9 @@ export default function WorkbenchPage() {
 
   async function handleStartDeployment() {
     if (!activeSessionId || runActionLocked || deployingSessionId) return;
-    if (!canDeploy(deploymentPreflight)) {
-      setNotice(deploymentPreflightText(deploymentPreflight));
+    const preflight = deploymentPreflight ?? await refreshDeploymentPreflight(activeSessionId);
+    if (!canDeploy(preflight)) {
+      setNotice(deploymentPreflightText(preflight));
       return;
     }
     setDeployingSessionId(activeSessionId);
@@ -1039,10 +1356,13 @@ export default function WorkbenchPage() {
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
-  function openArtifactViewer(artifactId: string) {
+  async function openArtifactViewer(artifactId: string) {
     if (!detail?.artifacts.some((artifact) => artifact.id === artifactId)) {
-      setNotice("产物还没有同步到本地列表，请稍后再展开");
-      return;
+      if (!activeSessionId) {
+        setNotice("产物还没有同步到本地列表，请稍后再展开");
+        return;
+      }
+      await ensureSessionOutputsLoaded(activeSessionId);
     }
     focusArtifactsPanel();
     setActiveArtifactViewerId(artifactId);
@@ -1060,10 +1380,12 @@ export default function WorkbenchPage() {
     setInspectorTab("artifacts");
     setSessionRailCollapsed(false);
     setOpenedFilePath(null);
+    if (activeSessionId) void ensureSessionOutputsLoaded(activeSessionId);
   }
 
   function selectInspectorTab(tab: InspectorTab) {
     setInspectorTab(tab);
+    if (tab === "artifacts" && activeSessionId) void ensureSessionOutputsLoaded(activeSessionId);
     if (tab !== "files") {
       setSessionRailCollapsed(false);
       setOpenedFilePath(null);
@@ -1255,7 +1577,7 @@ export default function WorkbenchPage() {
                     key={agent.id}
                     className="memberRow"
                     onContextMenu={(e) => {
-                      if (memberMutationLocked || mode !== "group" || agent.id === orchestrator?.id) return;
+                      if (memberMutationLocked || mode !== "group") return;
                       e.preventDefault();
                       setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
                     }}
@@ -1278,6 +1600,7 @@ export default function WorkbenchPage() {
                     title={activeRunInProgress ? "运行中不能修改成员" : "添加成员"}
                     onClick={() => {
                       if (memberMutationLocked) return;
+                      void ensureTemplatesLoaded();
                       setInviteSelection([]);
                       setInviteQuery("");
                       setInviteDialogOpen(true);
@@ -1292,8 +1615,9 @@ export default function WorkbenchPage() {
           </section>
         </div>
 
-        <nav className="sessionList" aria-label="会话">
-          {sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
+        <nav className="sessionList" aria-label="会话" onScroll={handleSessionListScroll}>
+          {sessionsLoadingInitial && sessions.length === 0 && <p className="emptySessionList">加载最近会话...</p>}
+          {!sessionsLoadingInitial && sessions.length === 0 && <p className="emptySessionList">没有匹配的会话</p>}
           {sessions.map((session) => {
             const sessionBusy = isRunning(session.lastRun?.status ?? "");
             const actionBusy = sessionActionId === session.id;
@@ -1337,6 +1661,7 @@ export default function WorkbenchPage() {
               </div>
             );
           })}
+          {sessionsLoadingMore && <p className="emptySessionList">加载更多会话...</p>}
         </nav>
       </aside>
       {shouldCollapseSessionRail && inspectorCollapsed && (
@@ -1403,7 +1728,8 @@ export default function WorkbenchPage() {
           onOpenPart={setActivePartViewer}
         />
 
-        <div className="timeline">
+        <div className="timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
+          {activeWorkspace?.timelineLoadingOlder && <p className="emptySessionList">加载更早消息...</p>}
           {conversationItems.map((item) =>
             item.kind === "message" ? (
               <TimelineMessage
@@ -1967,21 +2293,23 @@ export default function WorkbenchPage() {
             >
               <EditOutlined /> 编辑
             </button>
-            <button
-              className="contextMenuItem danger"
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const agent = agents.find((a) => a.id === contextMenu.agentId);
-                if (agent) {
-                  setDeleteTarget(agent);
-                  setDeleteConfirmOpen(true);
-                }
-                setContextMenu(null);
-              }}
-            >
-              <DeleteOutlined /> 从群聊中删除
-            </button>
+            {contextMenu.agentId !== orchestrator?.id && (
+              <button
+                className="contextMenuItem danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const agent = agents.find((a) => a.id === contextMenu.agentId);
+                  if (agent) {
+                    setDeleteTarget(agent);
+                    setDeleteConfirmOpen(true);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <DeleteOutlined /> 从群聊中删除
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2041,16 +2369,15 @@ export default function WorkbenchPage() {
               {profileError && <p className="dialogHint error">{profileError}</p>}
             </div>
             <footer>
-              <button className="ghostButton" type="button" disabled={profileSaving} onClick={() => setProfileDialogOpen(false)}>
+              <button className="ghostButton" type="button" onClick={() => setProfileDialogOpen(false)}>
                 取消
               </button>
               <button
                 className="primaryButton"
                 type="button"
-                disabled={profileSaving || !profileDraft.displayName.trim()}
-                onClick={() => void handleSaveProfile()}
+                disabled={!profileDraft.displayName.trim()}
+                onClick={handleSaveProfile}
               >
-                {profileSaving ? <LoadingOutlined /> : null}
                 <span>保存</span>
               </button>
             </footer>
@@ -2344,11 +2671,11 @@ export default function WorkbenchPage() {
   );
 }
 
-function canDeploy(preflight: DeploymentPreflightResponse | undefined) {
+function canDeploy(preflight: DeploymentPreflightResponse | null | undefined) {
   return Boolean(preflight?.canDeploy);
 }
 
-function deploymentPreflightText(preflight: DeploymentPreflightResponse | undefined) {
+function deploymentPreflightText(preflight: DeploymentPreflightResponse | null | undefined) {
   if (!preflight) return "正在检查 Vercel 部署条件";
   if (preflight.canDeploy) {
     const commit = preflight.latestSuccessfulPushCommitSha?.slice(0, 12);
@@ -2358,6 +2685,12 @@ function deploymentPreflightText(preflight: DeploymentPreflightResponse | undefi
   if (!preflight.latestSuccessfulPushCommitSha) return "等待下游上报 push commit";
   if (!preflight.vercelConfigured) return "后端未配置 VERCEL_TOKEN";
   return "仅支持公开 GitHub 仓库";
+}
+
+function markFrontendPerf(label: string) {
+  if (process.env.NODE_ENV === "production" || typeof performance === "undefined") return;
+  performance.mark(label);
+  console.info(`[perf] ${label} ${Math.round(performance.now())}ms`);
 }
 
 function clipForPrompt(text: string, limit: number) {
@@ -2499,6 +2832,26 @@ function clipInline(text: string, limit: number) {
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function mergeTimelinePage(detail: SessionDetailDto, page: SessionTimelinePageDto): SessionDetailDto {
+  return {
+    ...detail,
+    messages: mergeById(detail.messages, page.messages).sort(sortMessage),
+    runs: mergeById(detail.runs, page.runs).sort(sortRun),
+    events: mergeById(detail.events, page.events).sort(sortEvent),
+    artifacts: mergeById(detail.artifacts, page.artifacts).sort(sortArtifact),
+    fileChanges: mergeById(detail.fileChanges, page.fileChanges).sort(sortFileChange),
+    timelinePage: { hasMore: page.hasMore, nextCursor: page.nextCursor ?? null },
+  };
+}
+
+function mergeById<T extends { id: string | number }>(current: T[], incoming: T[]) {
+  let next = current;
+  for (const item of incoming) {
+    next = upsertById(next, item);
+  }
+  return next;
 }
 
 function currentUserDisplayName(user: AuthUserDto | null) {

@@ -209,6 +209,7 @@ model Session {
   deployments      Deployment[]
 
   @@index([updatedAt(sort: Desc)], map: "idx_sessions_updated_at")
+  @@index([status, updatedAt(sort: Desc), id(sort: Desc)], map: "idx_sessions_status_updated_id")
   @@index([projectId], map: "idx_sessions_project_id")
   @@map("sessions")
 }
@@ -284,6 +285,7 @@ model Message {
   agent           Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
   @@index([sessionId, createdAt], map: "idx_messages_session_created")
+  @@index([sessionId, createdAt(sort: Desc), id(sort: Desc)], map: "idx_messages_session_created_desc_id")
   @@index([sessionId, isPinned], map: "idx_messages_pinned")
   @@index([sessionId, status], map: "idx_messages_status")
   @@map("messages")
