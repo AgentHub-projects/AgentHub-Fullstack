@@ -30,12 +30,12 @@ import {
   runStageLabel,
 } from "../../lib/workbench/timeline";
 import {
-  agentColor,
   formatElapsed,
   formatTime,
-  initials,
   isRunning,
 } from "../../lib/workbench/format";
+import type { AuthUserDto } from "@agenthub/shared";
+import { AvatarFace } from "./avatar";
 import { MessageParts, RichText } from "./rich-text";
 
 export function TimelineMessage({
@@ -50,6 +50,7 @@ export function TimelineMessage({
   onOpenDiffPanel,
   onOpenArtifactsPanel,
   agents,
+  currentUser,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
@@ -62,6 +63,7 @@ export function TimelineMessage({
   onOpenDiffPanel?: () => void;
   onOpenArtifactsPanel?: () => void;
   agents: AgentInstanceDto[];
+  currentUser?: AuthUserDto | null;
 }) {
   if (message.role === "user") {
     return (
@@ -76,6 +78,7 @@ export function TimelineMessage({
         onOpenPart={onOpenPart}
         onOpenDiffPanel={onOpenDiffPanel}
         onOpenArtifactsPanel={onOpenArtifactsPanel}
+        currentUser={currentUser}
       />
     );
   }
@@ -102,6 +105,7 @@ export function RunThread({
   artifacts,
   messages,
   agents,
+  currentUser,
   onPinPart,
   onReply,
   onReferencePart,
@@ -117,6 +121,7 @@ export function RunThread({
   artifacts: HubArtifactDto[];
   messages: HubMessageDto[];
   agents: AgentInstanceDto[];
+  currentUser?: AuthUserDto | null;
   onPinPart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
   onReply?: (message: HubMessageDto) => void;
   onReferencePart?: (message: HubMessageDto, part: HubMessagePartDto) => void;
@@ -221,6 +226,7 @@ function UserMessage({
   onOpenPart,
   onOpenDiffPanel,
   onOpenArtifactsPanel,
+  currentUser,
 }: {
   message: HubMessageDto;
   onPin: (message: HubMessageDto) => void;
@@ -232,7 +238,9 @@ function UserMessage({
   onOpenPart?: (part: HubMessagePartDto) => void;
   onOpenDiffPanel?: () => void;
   onOpenArtifactsPanel?: () => void;
+  currentUser?: AuthUserDto | null;
 }) {
+  const userName = currentUser?.displayName?.trim() || currentUser?.username || "我";
   return (
     <article className="timelineRow userRow">
       <div className="bubble userBubble">
@@ -267,7 +275,12 @@ function UserMessage({
           onOpenArtifactsPanel={onOpenArtifactsPanel}
         />
       </div>
-      <span className="avatar userAvatar">我</span>
+      <AvatarFace
+        className="userAvatar"
+        name={userName}
+        avatarUrl={currentUser?.avatarUrl}
+        colorKey={currentUser?.userId ?? userName}
+      />
     </article>
   );
 }
@@ -296,9 +309,13 @@ function AgentReplyBlock({
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
   return (
     <article className="agentReply">
-      <span className="avatar" style={{ background: agentColor(block.speakerId ?? block.name) }}>
-        {streaming ? <LoadingOutlined /> : initials(block.name)}
-      </span>
+      {streaming ? (
+        <AvatarFace name={block.name} avatarUrl={block.avatarUrl} colorKey={block.speakerId ?? block.name}>
+          <LoadingOutlined />
+        </AvatarFace>
+      ) : (
+        <AvatarFace name={block.name} avatarUrl={block.avatarUrl} colorKey={block.speakerId ?? block.name} />
+      )}
       <div className="agentReplyBody">
         <div className="bubbleMeta">
           <span>{block.name} · {formatTime(block.timestamp)}</span>

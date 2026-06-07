@@ -2,6 +2,7 @@ import type {
   AgentInstanceDto,
   AgentTemplateDto,
   ApplyFileChangeResponse,
+  AuthUserDto,
   BuildMessageDto,
   BuildSessionDto,
   ConfirmBuildRequest,
@@ -38,6 +39,7 @@ import type {
   StartBuildRequest,
   StartBuildResponse,
   UpdateHubSessionRequest,
+  UpdateCurrentUserRequest,
   UpdateAgentRequest,
   UpdateAgentTemplateRequest,
   CreateProjectRequest,
@@ -181,15 +183,20 @@ export function listArtifactVersions(artifactId: string) {
 }
 
 export function getAuthState() {
-  return requestJson<{ authenticated: boolean; configured: boolean; user?: { userId: string; username: string } | null }>(
-    "/auth/me",
-  );
+  return requestJson<{ authenticated: boolean; configured: boolean; user?: AuthUserDto | null }>("/auth/me");
 }
 
 export function loginWithCredentials(username: string, password: string) {
-  return requestJson<{ authenticated: boolean; user: { userId: string; username: string } }>("/auth/login", {
+  return requestJson<{ authenticated: boolean; user: AuthUserDto }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
+  });
+}
+
+export function updateCurrentUser(body: UpdateCurrentUserRequest) {
+  return requestJson<AuthUserDto>("/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(body),
   });
 }
 

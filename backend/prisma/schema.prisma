@@ -110,6 +110,8 @@ model Provider {
 model User {
   id           String    @id @default(uuid()) @db.Uuid
   username     String    @unique
+  displayName  String?   @map("display_name")
+  avatarUrl    String?   @map("avatar_url")
   passwordHash String    @map("password_hash")
   status       String    @default("active")
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
@@ -165,6 +167,7 @@ model Agent {
   id                    Int           @id @default(autoincrement())
   templateId            Int           @map("template_id")
   name                  String        @unique
+  avatarUrl             String?       @map("avatar_url")
   description           String        @default("")
   providerId            Int           @map("provider_id")
   isDefaultOrchestrator Boolean       @default(false) @map("is_default_orchestrator")

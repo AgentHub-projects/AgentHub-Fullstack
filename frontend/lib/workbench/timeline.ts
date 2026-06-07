@@ -116,6 +116,7 @@ export function buildAgentReplyBlocks(events: HubEventDto[], agents: AgentInstan
       id: event.id,
       speakerId: speaker.speakerId,
       name: speaker.name,
+      avatarUrl: speaker.avatarUrl,
       text,
       timestamp: event.occurredAt ?? event.persistedAt,
     });
@@ -130,7 +131,8 @@ export function resolveSpeaker(event: HubEventDto, agents: AgentInstanceDto[]) {
   const agent = typeof speakerId === "number" ? agents.find((item) => item.id === speakerId) : undefined;
   return {
     speakerId,
-    name: event.speakerName ?? agent?.name ?? "Orchestrator",
+    name: agent?.name ?? event.speakerName ?? "Orchestrator",
+    avatarUrl: agent?.avatarUrl ?? null,
   };
 }
 
@@ -166,7 +168,8 @@ export function messageToReplyBlock(message: HubMessageDto, agents: AgentInstanc
     id: message.id,
     messageId: message.id,
     speakerId: message.agentId,
-    name: message.agentName ?? agent?.name ?? "Agent",
+    name: agent?.name ?? message.agentName ?? "Agent",
+    avatarUrl: agent?.avatarUrl ?? null,
     text: message.contentText,
     parts: message.parts,
     timestamp: message.createdAt,

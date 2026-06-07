@@ -48,6 +48,18 @@ export interface AgentTemplateDto {
   updatedAt: ISODateString;
 }
 
+export interface AuthUserDto {
+  userId: string;
+  username: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}
+
+export interface UpdateCurrentUserRequest {
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}
+
 export interface CreateAgentTemplateRequest {
   name: string;
   description: string;
@@ -68,6 +80,7 @@ export interface AgentInstanceDto {
   id: AgentId;
   templateId: number;
   name: string;
+  avatarUrl?: string | null;
   description: string;
   provider: string; // "claude-code" | "open-code"
   isDefaultOrchestrator: boolean;
@@ -488,6 +501,7 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   provider?: string;
+  avatarUrl?: string | null;
 }
 
 export interface AgentDetailResponse {

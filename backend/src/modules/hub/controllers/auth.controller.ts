@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Inject, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Patch, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import type { Request, Response } from "express";
+import type { UpdateCurrentUserRequest } from "@agenthub/shared";
 import { PublicRoute } from "../auth/public.decorator";
 import {
   AUTH_COOKIE_NAME,
@@ -16,7 +17,7 @@ export class AuthController {
   /** 获取当前登录用户信息 */
   @Get("me")
   async me(@Req() request: Request) {
-    const user = await this.authSessions.authenticateCookie(request.headers.cookie);
+    const user = await this.authSessions.currentUser(request.headers.cookie);
     return {
       authenticated: Boolean(user),
       configured: true,
@@ -42,6 +43,12 @@ export class AuthController {
       path: "/",
     });
     return { authenticated: true, user: result.user };
+  }
+
+  /** 更新当前用户展示资料 */
+  @Patch("me")
+  async updateMe(@Req() request: Request, @Body() body: UpdateCurrentUserRequest) {
+    return this.authSessions.updateCurrentUser(request.headers.cookie, body ?? {});
   }
 
   /** 登出：清除 Redis 会话和 Cookie */

@@ -159,7 +159,7 @@ export class AgentRegistryService implements OnModuleInit {
     });
   }
 
-  /** 更新 Agent 的名称、描述或 provider */
+  /** 更新 Agent 的名称、描述、头像或 provider */
   async updateAgent(id: number, input: UpdateAgentRequest): Promise<AgentInstanceDto> {
     const agent = await this.prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new Error("Agent not found");
@@ -174,6 +174,7 @@ export class AgentRegistryService implements OnModuleInit {
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.avatarUrl !== undefined ? { avatarUrl: normalizeAvatarUrl(input.avatarUrl) } : {}),
         ...(providerId !== undefined ? { providerId } : {}),
       },
       include: { template: true },
@@ -413,4 +414,13 @@ export class AgentRegistryService implements OnModuleInit {
       )
     `);
   }
+}
+
+function normalizeAvatarUrl(value: string | null | undefined) {
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith("data:image/")) return null;
+  return trimmed;
 }

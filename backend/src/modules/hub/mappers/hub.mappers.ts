@@ -64,6 +64,7 @@ export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentIn
     id: row.id,
     templateId: row.templateId,
     name: row.name,
+    avatarUrl: row.avatarUrl ?? null,
     description: row.description ?? "",
     provider: providerNames?.get(row.providerId) ?? "claude-code",
     isDefaultOrchestrator: Boolean(row.isDefaultOrchestrator),

@@ -43,6 +43,7 @@ export interface AgentReplyBlockModel {
   messageId?: string;
   speakerId?: string | number | null;
   name: string;
+  avatarUrl?: string | null;
   text: string;
   parts?: HubMessagePartDto[];
   timestamp: string;

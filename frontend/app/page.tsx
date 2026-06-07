@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateActi
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
+  AuthUserDto,
   CreateSessionAgentRequest,
   DeploymentPreflightResponse,
   HubArtifactDto,
@@ -36,6 +37,7 @@ import {
   RocketOutlined,
   SendOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import {
   archiveSession,
@@ -59,10 +61,12 @@ import {
   sendSessionMessage,
   startDeployment,
   uploadSessionAttachment,
+  updateCurrentUser,
   updateSession,
   updateAgent,
   upsertById,
 } from "../lib/agenthub-api";
+import { AvatarFace } from "./workbench/avatar";
 import { ArtifactPanel, ArtifactViewerLayer, FilePanel, MainGitDiffPanel } from "./workbench/inspector";
 import { MessagePartViewerLayer } from "./workbench/rich-text";
 import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
@@ -129,9 +133,13 @@ const EMPTY_WORKSPACE: SessionWorkspace = {
   inspectorTab: "diff",
 };
 
+const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+const AVATAR_TYPES = new Set(AVATAR_ACCEPT.split(","));
+
 export default function WorkbenchPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUserDto | null>(null);
   const [authUsername, setAuthUsername] = useState("admin");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -192,6 +200,13 @@ export default function WorkbenchPage() {
   const [contextMenu, setContextMenu] = useState<{ agentId: number; x: number; y: number } | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AgentInstanceDto | null>(null);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<{ displayName: string; avatarUrl: string | null }>({
+    displayName: "",
+    avatarUrl: null,
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteSelection, setInviteSelection] = useState<Array<{ templateId: number; provider: string; name: string }>>([]);
   const [inviteQuery, setInviteQuery] = useState("");
@@ -202,6 +217,8 @@ export default function WorkbenchPage() {
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
+  const agentAvatarInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = sessionTabs.activeId;
@@ -266,6 +283,7 @@ export default function WorkbenchPage() {
   );
   const parsedMentionIds = useMemo(() => parseMentionedAgentIds(composer, composerAgents), [composer, composerAgents]);
   const conversationItems = useMemo(() => buildConversationItems(detail), [detail]);
+  const currentUserName = currentUserDisplayName(currentUser);
   const pinnedMessages = useMemo(
     () =>
       [...(detail?.messages ?? [])]
@@ -445,9 +463,11 @@ export default function WorkbenchPage() {
   async function checkAuth() {
     const result = await getAuthState();
     if (result.ok && result.data.authenticated) {
+      setCurrentUser(result.data.user ?? null);
       setAuthenticated(true);
       await bootstrap();
     } else {
+      setCurrentUser(null);
       setAuthenticated(false);
       if (result.ok && !result.data.configured) {
         setAuthError("后端未完成用户初始化");
@@ -468,6 +488,7 @@ export default function WorkbenchPage() {
         setAuthError("账号或密码无效");
         return;
       }
+      setCurrentUser(result.data.user);
       setAuthenticated(true);
       setAuthPassword("");
       await bootstrap();
@@ -786,6 +807,63 @@ export default function WorkbenchPage() {
     setNotice(`Agent "${result.data.name}" 已更新`);
   }
 
+  function openProfileDialog() {
+    setProfileDraft({
+      displayName: currentUserName,
+      avatarUrl: currentUser?.avatarUrl ?? null,
+    });
+    setProfileError("");
+    setProfileDialogOpen(true);
+  }
+
+  async function handleSaveProfile() {
+    const displayName = profileDraft.displayName.trim();
+    if (!displayName || profileSaving) return;
+    setProfileSaving(true);
+    setProfileError("");
+    try {
+      const result = await updateCurrentUser({
+        displayName,
+        avatarUrl: profileDraft.avatarUrl,
+      });
+      if (!result.ok) {
+        setProfileError(`保存失败：${result.error}`);
+        return;
+      }
+      setCurrentUser(result.data);
+      setProfileDialogOpen(false);
+      setNotice("个人信息已更新");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function handleProfileAvatarFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    readAvatarFile(
+      file,
+      (avatarUrl) => {
+        setProfileError("");
+        setProfileDraft((current) => ({ ...current, avatarUrl }));
+      },
+      setProfileError,
+    );
+  }
+
+  function handleAgentAvatarFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || !editTarget) return;
+    readAvatarFile(
+      file,
+      (avatarUrl) => {
+        setNotice("");
+        setEditTarget((current) => (current ? { ...current, avatarUrl } : current));
+      },
+      setNotice,
+    );
+  }
+
   async function handleDeleteAgent() {
     if (!deleteTarget || memberMutationLocked) return;
     const result = await deleteAgent(deleteTarget.id);
@@ -838,7 +916,7 @@ export default function WorkbenchPage() {
     }
     setInviteDialogOpen(false);
     setInviteQuery("");
-    setNotice(errorCount > 0 ? `${selected.length - errorCount} 个 Agent 已加入，${errorCount} 个失败` : `${selected.length} 个 Agent 已加入`);
+    setNotice(errorCount > 0 ? "部分成员加入失败" : "成员已加入");
   }
 
   function closeMentionMenu() {
@@ -1146,6 +1224,15 @@ export default function WorkbenchPage() {
             <RobotOutlined />
             <span>Agent 模板</span>
           </button>
+          <button className="railProfileButton" type="button" onClick={openProfileDialog}>
+            <AvatarFace
+              className="railProfileAvatar"
+              name={currentUserName}
+              avatarUrl={currentUser?.avatarUrl}
+              colorKey={currentUser?.userId ?? currentUserName}
+            />
+            <span>编辑个人信息</span>
+          </button>
         </div>
 
         <div className="statusStack">
@@ -1153,16 +1240,10 @@ export default function WorkbenchPage() {
             <button
               className="groupSummaryHeader"
               type="button"
+              aria-expanded={groupMembersExpanded}
               onClick={() => setGroupMembersExpanded((v) => !v)}
             >
               <strong>{mode === "direct" ? "单聊 Agent" : "群聊成员"}</strong>
-              <span>
-                {mode === "direct"
-                  ? directAgent?.name ?? "未选择 Agent"
-                  : composerAgents.length
-                    ? `${composerAgents.length} 个 Agent`
-                    : "未选择成员"}
-              </span>
             </button>
             {groupMembersExpanded && (
               <div className="memberList">
@@ -1179,9 +1260,7 @@ export default function WorkbenchPage() {
                       setContextMenu({ agentId: agent.id, x: e.clientX, y: e.clientY });
                     }}
                   >
-                    <span className="avatar" style={{ background: agentColor(agent.id) }}>
-                      {initials(agent.name)}
-                    </span>
+                    <AvatarFace name={agent.name} avatarUrl={agent.avatarUrl} colorKey={agent.id} />
                     <span className="memberMeta">
                       <span>
                         <span className="memberName">{agent.name}</span>
@@ -1340,6 +1419,7 @@ export default function WorkbenchPage() {
                 onOpenDiffPanel={focusDiffPanel}
                 onOpenArtifactsPanel={focusArtifactsPanel}
                 agents={agents}
+                currentUser={currentUser}
               />
             ) : (
               <RunThread
@@ -1350,6 +1430,7 @@ export default function WorkbenchPage() {
                 artifacts={item.artifacts}
                 messages={item.messages}
                 agents={agents}
+                currentUser={currentUser}
                 onPinPart={handlePinPart}
                 onReply={!chatActionLocked ? addReplyTarget : undefined}
                 onReferencePart={!chatActionLocked ? addReplyPartTarget : undefined}
@@ -1393,9 +1474,7 @@ export default function WorkbenchPage() {
                         insertMention(agent);
                       }}
                     >
-                      <span className="avatar" style={{ background: agentColor(agent.id) }}>
-                        {initials(agent.name)}
-                      </span>
+                      <AvatarFace name={agent.name} avatarUrl={agent.avatarUrl} colorKey={agent.id} />
                       <span>
                         <strong>@{agent.name}</strong>
                         <small>{agent.template?.name ?? "worker"}</small>
@@ -1474,10 +1553,8 @@ export default function WorkbenchPage() {
                   ? `单聊：${directAgent.name}`
                   : "请选择单聊 Agent"
                 : parsedMentionIds.length
-                ? `将发送给 ${parsedMentionIds.length} 个 Agent`
-                : composerAgents.length
-                  ? `群聊成员 ${composerAgents.length} 个 Agent`
-                  : "默认由主 Orchestrator 协调"}
+                ? "将发送给已 @ 成员"
+                : "默认由主 Orchestrator 协调"}
             </span>
             <input
               ref={fileInputRef}
@@ -1614,7 +1691,6 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="create-project-title">新建项目</strong>
-                <span>绑定 GitHub 仓库后才能开始会话协作</span>
               </div>
             </header>
             <form className="projectForm" onSubmit={(event) => void handleCreateProject(event)}>
@@ -1671,7 +1747,6 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="create-group-title">新建对话</strong>
-                <span>单聊会创建 Agent 实例；群聊会创建协作会话</span>
               </div>
             </header>
             <div className="modeSwitch" role="tablist" aria-label="对话模式">
@@ -1805,9 +1880,7 @@ export default function WorkbenchPage() {
                         )
                       }
                     >
-                      <span className="avatar" style={{ background: agentColor(tpl.id) }}>
-                        {initials(tpl.name)}
-                      </span>
+                      <AvatarFace name={tpl.name} colorKey={tpl.id} />
                       <span>
                         <strong>{tpl.name}</strong>
                         <small>{tpl.description.slice(0, 40)}</small>
@@ -1913,6 +1986,78 @@ export default function WorkbenchPage() {
         </div>
       )}
 
+      {profileDialogOpen && (
+        <div className="dialogLayer" role="presentation" onMouseDown={() => setProfileDialogOpen(false)}>
+          <section
+            className="agentDialog profileDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-profile-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong id="edit-profile-title">编辑个人信息</strong>
+              </div>
+            </header>
+            <div className="buildForm">
+              <div className="avatarEditor">
+                <AvatarFace
+                  className="avatarPreview"
+                  name={profileDraft.displayName || currentUserName}
+                  avatarUrl={profileDraft.avatarUrl}
+                  colorKey={currentUser?.userId ?? currentUserName}
+                />
+                <div className="avatarEditorActions">
+                  <input
+                    ref={profileAvatarInputRef}
+                    className="hiddenFileInput"
+                    type="file"
+                    accept={AVATAR_ACCEPT}
+                    onChange={(event) => handleProfileAvatarFiles(event.target.files)}
+                  />
+                  <button className="ghostButton" type="button" onClick={() => profileAvatarInputRef.current?.click()}>
+                    <UploadOutlined />
+                    <span>选择头像</span>
+                  </button>
+                  {profileDraft.avatarUrl && (
+                    <button
+                      className="ghostButton"
+                      type="button"
+                      onClick={() => setProfileDraft((current) => ({ ...current, avatarUrl: null }))}
+                    >
+                      移除头像
+                    </button>
+                  )}
+                </div>
+              </div>
+              <label>名称
+                <input
+                  value={profileDraft.displayName}
+                  onChange={(event) => setProfileDraft((current) => ({ ...current, displayName: event.target.value }))}
+                  autoFocus
+                />
+              </label>
+              {profileError && <p className="dialogHint error">{profileError}</p>}
+            </div>
+            <footer>
+              <button className="ghostButton" type="button" disabled={profileSaving} onClick={() => setProfileDialogOpen(false)}>
+                取消
+              </button>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={profileSaving || !profileDraft.displayName.trim()}
+                onClick={() => void handleSaveProfile()}
+              >
+                {profileSaving ? <LoadingOutlined /> : null}
+                <span>保存</span>
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
       {editDialogOpen && editTarget && (
         <div className="dialogLayer" role="presentation" onMouseDown={() => { setEditDialogOpen(false); setEditTarget(null); }}>
           <section
@@ -1925,31 +2070,44 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="edit-agent-title">编辑 Agent</strong>
-                <span>修改 {editTarget.name} 的配置</span>
               </div>
             </header>
             <div className="buildForm">
+              <div className="avatarEditor">
+                <AvatarFace
+                  className="avatarPreview"
+                  name={editTarget.name}
+                  avatarUrl={editTarget.avatarUrl}
+                  colorKey={editTarget.id}
+                />
+                <div className="avatarEditorActions">
+                  <input
+                    ref={agentAvatarInputRef}
+                    className="hiddenFileInput"
+                    type="file"
+                    accept={AVATAR_ACCEPT}
+                    onChange={(event) => handleAgentAvatarFiles(event.target.files)}
+                  />
+                  <button className="ghostButton" type="button" onClick={() => agentAvatarInputRef.current?.click()}>
+                    <UploadOutlined />
+                    <span>选择头像</span>
+                  </button>
+                  {editTarget.avatarUrl && (
+                    <button
+                      className="ghostButton"
+                      type="button"
+                      onClick={() => setEditTarget({ ...editTarget, avatarUrl: null })}
+                    >
+                      移除头像
+                    </button>
+                  )}
+                </div>
+              </div>
               <label>名称
                 <input
                   value={editTarget.name}
                   onChange={(e) => setEditTarget({ ...editTarget, name: e.target.value })}
                 />
-              </label>
-              <label>描述
-                <textarea
-                  value={editTarget.description}
-                  onChange={(e) => setEditTarget({ ...editTarget, description: e.target.value })}
-                  rows={2}
-                />
-              </label>
-              <label>Provider
-                <select
-                  value={editTarget.provider}
-                  onChange={(e) => setEditTarget({ ...editTarget, provider: e.target.value })}
-                >
-                  <option value="claude-code">claude-code</option>
-                  <option value="open-code">open-code</option>
-                </select>
               </label>
             </div>
             <footer>
@@ -1962,9 +2120,8 @@ export default function WorkbenchPage() {
                 disabled={memberMutationLocked || !editTarget.name.trim()}
                 title={activeRunInProgress ? "运行中不能修改成员" : "保存"}
                 onClick={() => handleEditAgent({
-                  name: editTarget.name,
-                  description: editTarget.description,
-                  provider: editTarget.provider,
+                  name: editTarget.name.trim(),
+                  avatarUrl: editTarget.avatarUrl ?? null,
                 })}
               >
                 保存
@@ -1986,7 +2143,6 @@ export default function WorkbenchPage() {
             <header>
               <div>
                 <strong id="invite-agent-title">邀请 Agent 加入群聊</strong>
-                <span>选择模板并设置名称和 Provider</span>
               </div>
             </header>
             <div className="inviteSearchBar">
@@ -2022,9 +2178,7 @@ export default function WorkbenchPage() {
                         )
                       }
                     >
-                      <span className="avatar" style={{ background: agentColor(tpl.id) }}>
-                        {initials(tpl.name)}
-                      </span>
+                      <AvatarFace name={tpl.name} colorKey={tpl.id} />
                       <span>
                         <strong>{tpl.name}</strong>
                         <small>{tpl.description.slice(0, 40)}</small>
@@ -2130,7 +2284,6 @@ export default function WorkbenchPage() {
               </span>
               <div>
                 <strong id="archive-session-title">归档会话</strong>
-                <span>从当前会话列表移除，并保留历史数据</span>
               </div>
               <button
                 className="iconButton"
@@ -2346,6 +2499,27 @@ function clipInline(text: string, limit: number) {
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function currentUserDisplayName(user: AuthUserDto | null) {
+  return user?.displayName?.trim() || user?.username || "我";
+}
+
+function readAvatarFile(file: File, onLoad: (avatarUrl: string) => void, onError: (message: string) => void) {
+  if (!AVATAR_TYPES.has(file.type)) {
+    onError("请选择 PNG、JPG、WebP 或 GIF 图片");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === "string") {
+      onLoad(reader.result);
+      return;
+    }
+    onError("头像图片读取失败");
+  };
+  reader.onerror = () => onError("头像图片读取失败");
+  reader.readAsDataURL(file);
 }
 
 function CapabilityTags({ capabilities }: { capabilities?: unknown[] }) {
