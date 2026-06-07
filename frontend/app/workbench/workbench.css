@@ -1049,7 +1049,7 @@ textarea:focus-visible {
 .richText del { text-decoration: line-through; color: var(--muted); }
 .richText a { color: var(--blue); text-decoration: underline; }
 .richText a:hover { color: var(--ink); }
-.richText img { max-width: 100%; border-radius: var(--radius-sm); }
+.richText img { max-width: 100%; max-height: 150px; object-fit: contain; border-radius: var(--radius-sm); cursor: zoom-in; }
 
 .richText .inlineCode {
   background: var(--surface);
@@ -1471,11 +1471,36 @@ textarea:focus-visible {
 .imageMessagePart img {
   display: block;
   width: 100%;
-  max-height: 260px;
+  max-height: 150px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   object-fit: contain;
+  cursor: zoom-in;
+}
+
+.imageZoomOverlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0 0 0 / 0.85);
+  z-index: 9999;
+  cursor: zoom-out;
+  animation: fadeIn 0.15s ease;
+}
+
+.imageZoomOverlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 40px rgba(0 0 0 / 0.5);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .imageMessagePart small {
