@@ -660,6 +660,7 @@ export function connectHubSocket(
   sessionId: string | string[] | null,
   handlers: {
     onState: (state: SocketState) => void;
+    onConnect?: () => void;
     onEvent: (event: HubEventDto) => void;
     onSession: (session: HubSessionDto) => void;
     onMessage?: (message: HubMessageDto) => void;
@@ -683,6 +684,7 @@ export function connectHubSocket(
   socket.on("connect", () => {
     handlers.onState("connected");
     for (const id of normalizeSessionIds(sessionId)) socket?.emit("session.subscribe", { sessionId: id });
+    handlers.onConnect?.();
   });
   socket.on("disconnect", () => handlers.onState("disconnected"));
   socket.on("connect_error", () => handlers.onState("unavailable"));

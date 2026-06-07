@@ -415,6 +415,9 @@ export default function WorkbenchPage() {
     if (!authenticated || socketSessionIds.length === 0) return;
     const disconnect = connectHubSocket(socketSessionIds, {
       onState: () => undefined,
+      onConnect: () => {
+        if (activeSessionId) void loadSession(activeSessionId);
+      },
       onEvent: (event) => {
         setWorkspaceDetail(event.sessionId, (current) =>
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,

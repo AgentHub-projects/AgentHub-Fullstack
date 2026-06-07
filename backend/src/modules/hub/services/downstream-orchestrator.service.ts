@@ -323,7 +323,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       activeOrchestratorAgentId: options.activeOrchestratorAgentId,
       idleTimer: null,
       lastActivityAt: Date.now(),
-      needsBootstrap: !options.downstreamSessionId,
+      needsBootstrap: true,
     };
     this.connections.set(sessionId, record);
 
@@ -368,7 +368,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         this.logger.log(`[发送JSON] session/load: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/load", params: sessionParams })}`);
         const loadResult = await acp.request("session/load", sessionParams);
         this.logger.log(`[接收JSON] session/load响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: loadResult })}`);
-        record.needsBootstrap = false;
         record.resolveDownstreamReady?.(record.downstreamSessionId);
         this.markDownstreamActivity(record);
         this.scheduleIdleDisconnectCheck(record);
