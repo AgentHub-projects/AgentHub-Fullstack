@@ -492,7 +492,7 @@ export default function WorkbenchPage() {
       });
       return;
     }
-    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    endRef.current?.scrollIntoView({ block: "end" });
   }, [conversationItems.length, detail?.events.length]);
 
   useEffect(() => {
@@ -748,6 +748,7 @@ export default function WorkbenchPage() {
     setRenamingSession(false);
     setSessionRailCollapsed(false);
     setOpenedFilePath(null);
+    preserveTimelineScrollRef.current = null;
     setSessionTabs((current) => activateSessionTab(openSessionTab(current, sessionId), sessionId));
     ensureWorkspace(sessionId);
     if (workspaces[sessionId]?.detail) {
