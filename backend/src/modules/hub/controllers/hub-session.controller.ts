@@ -24,6 +24,7 @@ import { DeploymentService } from "../services/deployment.service";
 import { HubSessionService } from "../services/hub-session.service";
 import { PrismaService } from "../services/prisma.service";
 import { assertSessionActive, assertSessionWritable } from "./controller-guards";
+import { devTimed } from "../utils/downstream-orchestrator.utils";
 
 /** 会话控制器：管理会话 CRUD、消息、成员、运行和部署 */
 @Controller("sessions")
@@ -217,16 +218,5 @@ export class HubSessionController {
   async startDeployment(@Param("sessionId") sessionId: string, @Body() body: StartDeploymentRequest) {
     await assertSessionWritable(this.prisma, sessionId);
     return this.deployments.start(sessionId, body ?? {});
-  }
-}
-
-async function devTimed<T>(label: string, task: () => T | Promise<T>): Promise<T> {
-  const started = Date.now();
-  try {
-    return await task();
-  } finally {
-    if (process.env.NODE_ENV !== "production") {
-      console.info(`[perf] ${label} ${Date.now() - started}ms`);
-    }
   }
 }

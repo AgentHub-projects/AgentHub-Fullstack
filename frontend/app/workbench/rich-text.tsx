@@ -19,6 +19,7 @@ import { artifactContentUrl } from "../../lib/agenthub-api";
 import { diffMarker, parseUnifiedPatch } from "../../lib/workbench/diff";
 import { parseInlineMarkdown, parseMarkdownBlocks, type InlineSegment, type MarkdownBlock } from "../../lib/workbench/markdown";
 import type { DiffLine } from "../../lib/workbench/types";
+import { copyText, formatBytes } from "../../lib/utils";
 
 export function RichText({ text }: { text: string }) {
   if (!text) return null;
@@ -913,10 +914,6 @@ function partCopyText(part: HubMessagePartDto) {
   return null;
 }
 
-function copyText(text: string) {
-  void navigator.clipboard?.writeText(text);
-}
-
 function handleSummaryAction(event: React.MouseEvent, action: () => void) {
   event.preventDefault();
   event.stopPropagation();
@@ -951,8 +948,3 @@ function deployStatusIcon(status: string) {
   return <RocketOutlined />;
 }
 
-function formatBytes(value: number) {
-  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${value} B`;
-}

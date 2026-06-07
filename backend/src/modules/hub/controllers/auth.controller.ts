@@ -8,6 +8,7 @@ import {
 } from "../auth/auth.utils";
 import { AuthSessionService } from "../auth/auth-session.service";
 import { ArtifactStorageService } from "../services/artifact-storage.service";
+import { devTimed } from "../utils/downstream-orchestrator.utils";
 
 /** 认证控制器：提供登录/登出/当前用户查询（公开路由） */
 @PublicRoute()
@@ -77,16 +78,5 @@ export class AuthController {
     await this.authSessions.logout(request.headers.cookie);
     response.clearCookie(AUTH_COOKIE_NAME, { path: "/" });
     return { authenticated: false };
-  }
-}
-
-async function devTimed<T>(label: string, task: () => T | Promise<T>): Promise<T> {
-  const started = Date.now();
-  try {
-    return await task();
-  } finally {
-    if (process.env.NODE_ENV !== "production") {
-      console.info(`[perf] ${label} ${Date.now() - started}ms`);
-    }
   }
 }

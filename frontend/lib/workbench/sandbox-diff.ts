@@ -5,6 +5,7 @@ import type {
   HubFileChangeDto,
 } from "@agenthub/shared";
 import { normalizePath } from "./diff";
+import { languageFromPath } from "../utils";
 
 export const SANDBOX_DIFF_SOURCE = "sandbox_observed";
 export const FILESYSTEM_DRAFT_SOURCE = "filesystem_draft";
@@ -234,19 +235,6 @@ function sandboxChangeType(changeType: string, hasBaseline: boolean): HubFileCha
   return hasBaseline ? "modified" : "added";
 }
 
-function languageFromPath(path: string) {
-  const fileName = normalizePath(path).split("/").filter(Boolean).at(-1) ?? path;
-  const ext = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() : "";
-  if (!ext) return "text";
-  if (["ts", "tsx"].includes(ext)) return "typescript";
-  if (["js", "jsx", "mjs", "cjs"].includes(ext)) return "javascript";
-  if (ext === "json") return "json";
-  if (ext === "css") return "css";
-  if (ext === "html") return "html";
-  if (["md", "mdx"].includes(ext)) return "markdown";
-  if (["yml", "yaml"].includes(ext)) return "yaml";
-  return ext;
-}
 
 function stablePathId(path: string) {
   return normalizePath(path).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "file";

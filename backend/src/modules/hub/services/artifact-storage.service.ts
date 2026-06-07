@@ -4,6 +4,7 @@ import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common"
 import type { HubArtifactDto, HubArtifactKind, HubArtifactVersionDto, UploadedAttachmentDto } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { asObject, mapArtifact, mapArtifactVersion } from "../mappers/hub.mappers";
+import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 type ArtifactPayload = Record<string, unknown>;
 type OssClient = {
@@ -449,10 +450,6 @@ export class ArtifactStorageService {
       JSON.stringify(asObject(artifact.metadata)),
     );
   }
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function bigintValue(value: unknown): bigint | null {

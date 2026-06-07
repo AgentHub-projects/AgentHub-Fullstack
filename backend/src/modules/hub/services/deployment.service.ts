@@ -4,6 +4,7 @@ import type { DeploymentPreflightResponse, StartDeploymentRequest } from "@agent
 import { mapDeployment, mapMessage, mapSession, asObject } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
+import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 const POLL_INTERVAL_MS = 3000;
 const DEPLOY_TIMEOUT_MS = 30 * 60 * 1000;
@@ -466,10 +467,6 @@ function vercelErrorMessage(payload: Record<string, unknown>) {
     stringValue(payload.error) ??
     "VERCEL_DEPLOY_FAILED"
   );
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function deploymentStatusText(status: string) {

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { SandboxFilesystemConnectionResponse } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
+import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 @Injectable()
 export class DownstreamSandboxRegistryService {
@@ -40,10 +41,6 @@ export class DownstreamSandboxRegistryService {
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
     return session;
   }
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function safeJson(value: unknown) {

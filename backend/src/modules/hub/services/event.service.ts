@@ -6,6 +6,7 @@ import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { asObject, mapArtifact, mapEvent, mapFileChange, mapMessage, mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { messageJsonWithParts } from "../utils/message-parts";
+import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 // In-memory buffer for streaming messages (dual-track: real-time push + buffer for persistence)
 type MessageBuffer = {
@@ -496,10 +497,6 @@ export class HubEventService {
 function textFromPayload(payload: Record<string, unknown>): string {
   const text = payload.text ?? payload.content ?? payload.message ?? payload.delta;
   return typeof text === "string" ? text : "";
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function textField(value: unknown): string | undefined {

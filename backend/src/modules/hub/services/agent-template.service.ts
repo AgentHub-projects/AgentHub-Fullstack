@@ -6,6 +6,7 @@ import type {
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { mapTemplate } from "../mappers/hub.mappers";
+import { normalizeTools } from "../utils/downstream-orchestrator.utils";
 
 /** Agent 模板服务：管理模板的 CRUD */
 @Injectable()
@@ -114,12 +115,6 @@ export class AgentTemplateService {
 }
 
 /** 标准化工具列表：去重、trim、最多 12 个 */
-function normalizeTools(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
-    .slice(0, 12);
-}
-
 /** 安全转换为 Record 对象 */
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};

@@ -13,6 +13,7 @@ import type {
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
 import { AgentTemplateService } from "./agent-template.service";
+import { normalizeTools, stringValue } from "../utils/downstream-orchestrator.utils";
 
 const BUILDER_SYSTEM_PROMPT = [
   "你是一个 Agent 模板创建助手。你的任务是通过多轮对话，帮助用户创建一个新的 Agent 模板。",
@@ -400,7 +401,7 @@ export function parseBuilderAssistantContent(content: string): BuilderAssistantC
   try {
     const parsed = JSON.parse(content.trim()) as Record<string, unknown>;
     return {
-      text: stringValue(parsed.text) || content.trim(),
+      text: (stringValue(parsed.text) ?? "") || content.trim(),
       options: optionsValue(parsed.options),
       draft: draftValue(parsed.draft),
     };
@@ -468,19 +469,15 @@ function draftValue(value: unknown): BuildTemplateDraft | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const draft = {
-    name: stringValue(record.name),
-    description: stringValue(record.description),
-    systemPrompt: stringValue(record.systemPrompt),
-    defaultProvider: stringValue(record.defaultProvider),
+    name: stringValue(record.name) ?? "",
+    description: stringValue(record.description) ?? "",
+    systemPrompt: stringValue(record.systemPrompt) ?? "",
+    defaultProvider: stringValue(record.defaultProvider) ?? "",
     tools: normalizeTools(record.tools),
   };
   return draft.name && draft.description && draft.systemPrompt && draft.defaultProvider
     ? draft
     : null;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function isDirectOptionReuse(value: string, userMessages: string[]) {
@@ -516,12 +513,6 @@ function buildMockDraft(messages: Array<{ role: string; content: string }>): Bui
   };
 }
 
-function normalizeTools(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
-    .slice(0, 12);
-}
-
 function parseToolList(value: string) {
   const normalized = value.trim();
   if (!normalized || /^(none|无|不需要|claude-code|open-code)$/i.test(normalized)) return [];
@@ -554,7 +545,7 @@ function buildSessionTitle(
   context: Record<string, unknown>,
   messages: Array<{ role: string; content: string }>,
 ) {
-  const completedName = status === "completed" ? stringValue(context.name) : "";
+  const completedName = status === "completed" ? (stringValue(context.name) ?? "") : "";
   if (completedName) return compactTitle(completedName);
 
   const firstUser = messages.find((message) => message.role === "user");

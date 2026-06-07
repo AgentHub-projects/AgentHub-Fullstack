@@ -4,13 +4,13 @@ import { io } from "socket.io-client";
 import Redis from "ioredis";
 import { HubEventService } from "./event.service";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
-import { mapSession } from "../mappers/hub.mappers";
+import { asObject, mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubContextService } from "./context.service";
 import { DownstreamSandboxRegistryService } from "./downstream-sandbox-registry.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { AcpConnection } from "./acp-connection";
-import { asRecord, numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
+import { numberValue, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
 type StartRunInput = {
   sessionId: string;
@@ -578,7 +578,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.markDownstreamActivity(record);
 
     const envelopeId = typeof envelope.id === "number" || typeof envelope.id === "string" ? envelope.id : undefined;
-    const params = asRecord(envelope.params ?? envelope.payload ?? envelope);
+    const params = asObject(envelope.params ?? envelope.payload ?? envelope);
     this.logger.log(`[接收] sessionId=${sessionId} method=${envelope.method ?? "无"} type=${stringValue(params.type) ?? stringValue(params.eventType) ?? "无"} id=${envelopeId ?? "无"}`);
     this.logger.log(`[接收JSON] ${safeJson(envelope, 8000)}`);
 
@@ -586,8 +586,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (envelope.method === "session/update") {
       try {
         const update = params.update;
-        const content = asRecord(typeof update === "object" ? update : {});
-        const meta = asRecord(params._meta ?? (content as any)._meta);
+        const content = asObject(typeof update === "object" ? update : {});
+        const meta = asObject(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
         let runId = stringValue(meta.runId) ?? record.activeRunId;
@@ -663,7 +663,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     // Handle JSON-RPC result with stopReason (downstream task completion signal)
     if (envelope.result) {
       this.logger.log(`[result] 收到下游result ${JSON.stringify(envelope.result)}`);
-      await this.handlePromptResult(record, asRecord(envelope.result));
+      await this.handlePromptResult(record, asObject(envelope.result));
       return;
     }
 
@@ -672,7 +672,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       this.logger.warn(`[接收] 未知method=${envelope.method}，丢弃`);
       return;
     }
-    const meta = asRecord(params._meta);
+    const meta = asObject(params._meta);
     this.logger.log(`[session/event] params有runId=${!!params.runId} envelope有runId=${!!envelope.runId} activeRunId=${record.activeRunId}`);
     const runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? stringValue(envelope.runId) ?? record.activeRunId;
     if (!runId) {
@@ -692,7 +692,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       if (envelopeId !== undefined) record.acp.respondError(envelopeId, "EVENT_TYPE_REQUIRED", "EVENT_TYPE_REQUIRED");
       return;
     }
-    const payload = asRecord(params.payload ?? params);
+    const payload = asObject(params.payload ?? params);
 
     const speakerAgentId =
       agentIdValue(meta.agentId) ??
@@ -1106,7 +1106,7 @@ function errorCode(message: string) {
 function briefPromptInput(promptInput: Record<string, unknown>) {
   const prompt = Array.isArray(promptInput.prompt)
     ? promptInput.prompt.map((part) => {
-      const record = asRecord(part);
+      const record = asObject(part);
       const text = stringValue(record.text);
       return text ? { ...record, text: `${text.slice(0, 200)}${text.length > 200 ? `...[${text.length}字符]` : ""}` } : record;
     })

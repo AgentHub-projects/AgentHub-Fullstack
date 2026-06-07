@@ -72,6 +72,7 @@ import {
   fileChangeApplyStatus,
 } from "../../lib/workbench/format";
 import { RichText } from "./rich-text";
+import { formatBytes, languageFromPath } from "../../lib/utils";
 
 export function DiffPanel({
   changes,
@@ -1915,31 +1916,12 @@ function sameStringSet(a: Set<string>, b: Set<string>) {
   return true;
 }
 
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function normalizeDirectoryPath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
 function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-}
-
-function languageFromPath(path: string) {
-  const ext = fileNameFromPath(path).split(".").at(-1)?.toLowerCase();
-  if (!ext) return "text";
-  if (["ts", "tsx"].includes(ext)) return "typescript";
-  if (["js", "jsx", "mjs", "cjs"].includes(ext)) return "javascript";
-  if (ext === "json") return "json";
-  if (ext === "css") return "css";
-  if (ext === "html") return "html";
-  if (["md", "mdx"].includes(ext)) return "markdown";
-  if (["yml", "yaml"].includes(ext)) return "yaml";
-  return ext;
 }
 
 function socketStateLabel(state: "connecting" | "connected" | "disconnected" | "unavailable") {

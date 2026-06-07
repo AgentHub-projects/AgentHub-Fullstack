@@ -37,6 +37,7 @@ import {
 import type { AuthUserDto } from "@agenthub/shared";
 import { AvatarFace } from "./avatar";
 import { MessageParts, RichText } from "./rich-text";
+import { copyText } from "../../lib/utils";
 
 export function TimelineMessage({
   message,
@@ -383,10 +384,6 @@ function RunFailureBlock({ run, events }: { run: HubRunDto; events: HubEventDto[
       <pre>{raw}</pre>
     </details>
   );
-}
-
-function copyText(text: string) {
-  void navigator.clipboard?.writeText(text);
 }
 
 function referenceCount(message: HubMessageDto) {

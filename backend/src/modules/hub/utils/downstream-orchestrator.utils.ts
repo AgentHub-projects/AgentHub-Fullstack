@@ -26,14 +26,9 @@ export function waitForSocket(socket: Socket): Promise<void> {
   });
 }
 
-/** 安全转换为 Record，非对象值返回 {} */
-export function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
 /** 安全提取非空字符串 */
 export function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 /** 安全提取有限数值 */
@@ -44,4 +39,23 @@ export function numberValue(value: unknown): number | undefined {
 /** Promise 版延时 */
 export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 标准化工具名称列表：去重、去空、最多 12 个 */
+export function normalizeTools(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    .slice(0, 12);
+}
+
+/** 开发环境性能计时器 */
+export async function devTimed<T>(label: string, task: () => T | Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await task();
+  } finally {
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[perf] ${label} ${Date.now() - started}ms`);
+    }
+  }
 }
