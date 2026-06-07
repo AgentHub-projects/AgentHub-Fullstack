@@ -67,6 +67,7 @@ import {
   startDeployment,
   uploadSessionAttachment,
   updateCurrentUser,
+  uploadAvatar,
   updateSession,
   updateAgent,
   upsertById,
@@ -1157,27 +1158,27 @@ export default function WorkbenchPage() {
   function handleProfileAvatarFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    readAvatarFile(
-      file,
-      (avatarUrl) => {
+    void readAvatarFile(file).then((base64) => {
+      if (!base64) return;
+      void uploadAvatar(base64, file.type).then((result) => {
+        if (!result.ok) { setProfileError(`头像上传失败：${result.error}`); return; }
         setProfileError("");
-        setProfileDraft((current) => ({ ...current, avatarUrl }));
-      },
-      setProfileError,
-    );
+        setProfileDraft((current) => ({ ...current, avatarUrl: result.data.avatarUrl }));
+      });
+    });
   }
 
   function handleAgentAvatarFiles(files: FileList | null) {
     const file = files?.[0];
     if (!file || !editTarget) return;
-    readAvatarFile(
-      file,
-      (avatarUrl) => {
+    void readAvatarFile(file).then((base64) => {
+      if (!base64) return;
+      void uploadAvatar(base64, file.type).then((result) => {
+        if (!result.ok) { setNotice(`头像上传失败：${result.error}`); return; }
         setNotice("");
-        setEditTarget((current) => (current ? { ...current, avatarUrl } : current));
-      },
-      setNotice,
-    );
+        setEditTarget((current) => (current ? { ...current, avatarUrl: result.data.avatarUrl } : current));
+      });
+    });
   }
 
   async function handleDeleteAgent() {
@@ -2858,21 +2859,19 @@ function currentUserDisplayName(user: AuthUserDto | null) {
   return user?.displayName?.trim() || user?.username || "我";
 }
 
-function readAvatarFile(file: File, onLoad: (avatarUrl: string) => void, onError: (message: string) => void) {
-  if (!AVATAR_TYPES.has(file.type)) {
-    onError("请选择 PNG、JPG、WebP 或 GIF 图片");
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = () => {
-    if (typeof reader.result === "string") {
-      onLoad(reader.result);
+function readAvatarFile(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!AVATAR_TYPES.has(file.type)) {
+      resolve(null);
       return;
     }
-    onError("头像图片读取失败");
-  };
-  reader.onerror = () => onError("头像图片读取失败");
-  reader.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(typeof reader.result === "string" ? reader.result : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
 }
 
 function CapabilityTags({ capabilities }: { capabilities?: unknown[] }) {
