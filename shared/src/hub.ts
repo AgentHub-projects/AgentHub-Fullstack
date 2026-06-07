@@ -554,11 +554,6 @@ export interface UpdateAgentRequest {
   avatarUrl?: string | null;
 }
 
-export interface AgentDetailResponse {
-  agent: AgentInstanceDto;
-  template?: AgentTemplateDto;
-}
-
 export interface DownstreamAgentConfigResponse {
   agentId: AgentId;
   templateId: number;
