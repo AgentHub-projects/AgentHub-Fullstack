@@ -525,6 +525,7 @@ export class HubSessionService {
       text: contextText,
       importance: 20,
     });
+    this.gateway.emitMessage(mapMessage(message));
 
     const run = await this.prisma.agentRun.create({
       data: {
