@@ -1329,11 +1329,12 @@ export default function WorkbenchPage() {
     const prompt = [
       `请修改产物「${artifact.title}」中的选中内容：`,
       "",
+      "当前选中内容：",
       "```",
       selectedText,
       "```",
       "",
-      "修改要求：",
+      "修改要求：（请在此补充你的具体修改需求）",
     ].join("\n");
     setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
     window.requestAnimationFrame(() => textareaRef.current?.focus());
@@ -1346,19 +1347,19 @@ export default function WorkbenchPage() {
     }
     const original = artifact.textContent?.trim();
     const prompt = [
-      `我编辑了产物「${artifact.title}」v${artifact.version} 的草稿，请基于编辑后的内容继续处理：`,
+      `产物「${artifact.title}」v${artifact.version} 的草稿已被编辑，请基于编辑后的内容继续处理：`,
       "",
-      original ? "原始内容摘要：" : "",
+      original ? "=== 原始内容（供参考） ===" : "",
       original ? "```" : "",
       original ? clipForPrompt(original, 2000) : "",
       original ? "```" : "",
       "",
-      "编辑后内容：",
+      "=== 编辑后内容（以此为最终依据） ===",
       "```",
       clipForPrompt(editedText, 12000),
       "```",
       "",
-      "请根据这份编辑后内容继续修改或生成后续产物。",
+      "请以编辑后内容为最终依据，继续修改或生成后续产物。如有冲突以编辑后内容为准。",
     ].filter((line) => line !== "").join("\n");
     setComposer((current) => (current.trim() ? `${current.trim()}\n\n${prompt}` : prompt));
     window.requestAnimationFrame(() => textareaRef.current?.focus());
