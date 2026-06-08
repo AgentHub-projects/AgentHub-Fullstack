@@ -549,7 +549,8 @@ async function emitFilesystemAck<T>(
   logFilesystem("request", { downstreamSessionId, event, payload });
 
   return new Promise((resolve) => {
-    socket.timeout(15000).emit(event, payload, (error: Error | null, response?: FilesystemSocketAck<T>) => {
+    const timeoutMs = event === "fs:read" ? 60000 : 15000;
+    socket.timeout(timeoutMs).emit(event, payload, (error: Error | null, response?: FilesystemSocketAck<T>) => {
       if (error) {
         logFilesystem("response:error", { downstreamSessionId, event, message: error.message });
         resolve({ ok: false, error: error.message || "Filesystem socket timeout" });
