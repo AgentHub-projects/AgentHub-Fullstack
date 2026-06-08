@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
         source: "/filesystem/git/:path*",
         destination: `${DOWNSTREAM_FILESYSTEM_ORIGIN}/filesystem/git/:path*`,
       },
+      {
+        source: "/filesystem/download/:path*",
+        destination: `${DOWNSTREAM_FILESYSTEM_ORIGIN}/filesystem/download/:path*`,
+      },
     ];
   },
 };

@@ -1104,6 +1104,15 @@ function DiffFileDetails({
   );
 }
 
+type OpenedSandboxFile = {
+  path: string;
+  size?: number | null;
+  mtime?: string | null;
+  version?: string | null;
+};
+
+type SandboxPreviewKind = "html" | "markdown" | "image" | "pdf" | "docx" | "unsupported" | null;
+
 export function FilePanel({
   sessionId,
   disabledReason,
@@ -1133,6 +1142,7 @@ export function FilePanel({
   const [socketState, setSocketState] = useState<"connecting" | "connected" | "disconnected" | "unavailable">("disconnected");
   const [currentPath, setCurrentPath] = useState("");
   const [treeItems, setTreeItems] = useState<FilesystemEntryDto[]>([]);
+  const [openedFile, setOpenedFile] = useState<OpenedSandboxFile | null>(null);
   const [file, setFile] = useState<FilesystemReadFileDto | null>(null);
   const [draft, setDraft] = useState("");
   const [loadingConnection, setLoadingConnection] = useState(false);
@@ -1167,8 +1177,10 @@ export function FilePanel({
     setSocketState("disconnected");
     setCurrentPath("");
     setTreeItems([]);
+    setOpenedFile(null);
     setFile(null);
     setDraft("");
+    setPreviewMode(false);
     setError("");
     setLoadingConnection(false);
     setLoadingTree(false);
@@ -1199,8 +1211,10 @@ export function FilePanel({
     clientRef.current = null;
     setCurrentPath("");
     setTreeItems([]);
+    setOpenedFile(null);
     setFile(null);
     setDraft("");
+    setPreviewMode(false);
     if (!connection || disabledReason) return;
 
     const client = connectSandboxFilesystemSocket(connection, {
@@ -1220,7 +1234,7 @@ export function FilePanel({
   useEffect(() => {
     const client = clientRef.current;
     if (!client || socketState !== "connected" || !openRequest?.path) return;
-    void readFile(client, openRequest.path);
+    void openSandboxFile({ path: openRequest.path });
   }, [openRequest?.nonce, socketState]);
 
   function handleFilesystemChanged(changedPath: string) {
@@ -1254,14 +1268,32 @@ export function FilePanel({
   }
 
   async function openFile(path: string) {
+    const item = treeItems.find((entry) => entry.kind === "file" && entry.path === path);
+    await openSandboxFile({ path, size: item?.size, mtime: item?.mtime, version: item?.version });
+  }
+
+  async function openSandboxFile(target: OpenedSandboxFile) {
     const client = clientRef.current;
     if (!client) return;
-    await readFile(client, path);
+    onFileOpened?.(target.path);
+    setOpenedFile(target);
+    setError("");
+
+    const editable = isTextEditableFile(target.path);
+    const kind = previewKindFromPath(target.path);
+    setPreviewMode(!editable && Boolean(kind));
+
+    if (!editable) {
+      setFile(null);
+      setDraft("");
+      return;
+    }
+
+    await readFile(client, target.path);
   }
 
   async function readFile(client: SandboxFilesystemClient, path: string, options: { silent?: boolean } = {}) {
     if (!options.silent) {
-      onFileOpened?.(path);
       setLoadingFile(true);
     }
     const result = await client.read(path, 0, 0);
@@ -1270,8 +1302,15 @@ export function FilePanel({
       setError(`文件读取失败：${result.error}`);
       return;
     }
+    setOpenedFile({
+      path: result.data.path,
+      size: result.data.size,
+      mtime: result.data.mtime,
+      version: result.data.version,
+    });
     setFile(result.data);
     setDraft(result.data.content);
+    if (!options.silent) setPreviewMode(false);
     onFileContentLoaded?.(result.data.path, result.data.content);
     setError("");
   }
@@ -1300,6 +1339,7 @@ export function FilePanel({
       version: result.data.version,
     };
     setFile(nextFile);
+    setOpenedFile(nextFile);
     setDraft(nextFile.content);
     onDraftChanged?.(nextFile.path, nextFile.content, nextFile.content, languageFromPath(nextFile.path));
     setError("");
@@ -1321,21 +1361,19 @@ export function FilePanel({
   }
 
   const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
-  const fileName = file ? fileNameFromPath(file.path) : "";
-  const fileLanguage = file ? languageFromPath(file.path) : "text";
-  const fileExt = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
-  const previewKind: "html" | "markdown" | "image" | "pdf" | "docx" | "pptx" | null =
-    fileExt === "html" || fileExt === "htm" ? "html"
-    : fileExt === "md" || fileExt === "markdown" ? "markdown"
-    : fileExt === "png" || fileExt === "jpg" || fileExt === "jpeg" || fileExt === "gif" || fileExt === "webp" || fileExt === "svg" ? "image"
-    : fileExt === "pdf" ? "pdf"
-    : fileExt === "docx" ? "docx"
-    : fileExt === "pptx" ? "pptx"
-    : null;
-  const canPreview = previewKind && file;
+  const fileName = openedFile ? fileNameFromPath(openedFile.path) : "";
+  const fileLanguage = openedFile ? languageFromPath(openedFile.path) : "text";
+  const previewKind = openedFile ? previewKindFromPath(openedFile.path) : null;
+  const canPreview = Boolean(previewKind && openedFile);
+  const canEdit = Boolean(file);
+  const previewUrl = connection && openedFile ? sandboxPreviewUrl(connection.downstreamSessionId, openedFile.path) : "";
+  const previewDirUrl = connection && openedFile ? sandboxPreviewBaseUrl(connection.downstreamSessionId, openedFile.path) : "";
+  const previewRootUrl = connection ? sandboxPreviewRootUrl(connection.downstreamSessionId) : "";
+  const htmlPreview = previewKind === "html" ? htmlWithPreviewBase(draft, previewDirUrl, previewRootUrl) : "";
+  const statusSize = file?.size ?? openedFile?.size ?? 0;
 
   return (
-    <div className={`panelScroll filePanel ${file ? "hasFile" : ""}`}>
+    <div className={`panelScroll filePanel ${openedFile ? "hasFile" : ""}`}>
       {disabledReason ? (
         <PanelEmpty icon={<FileOutlined />} text={disabledReason} />
       ) : (
@@ -1375,7 +1413,7 @@ export function FilePanel({
                 ) : (
                   treeItems.map((item) => (
                     <button
-                      className={`fileTreeItem ${item.kind === "dir" ? "directory" : "file"} ${file?.path === item.path ? "active" : ""}`}
+                      className={`fileTreeItem ${item.kind === "dir" ? "directory" : "file"} ${openedFile?.path === item.path ? "active" : ""}`}
                       type="button"
                       title={item.path}
                       key={`${item.kind}:${item.path}`}
@@ -1391,12 +1429,12 @@ export function FilePanel({
             </section>
           </section>
 
-          <section className="fileEditorPane" aria-label="沙箱文件编辑器">
+          <section className={`fileEditorPane ${previewMode ? "previewMode" : "editMode"}`} aria-label="沙箱文件编辑器">
             <div className="fileEditorTabs">
-              <div className={`fileEditorTab ${file && !previewMode ? "active" : "empty"}`}>
-                <button className="fileTabButton" type="button" disabled={!file} onClick={() => setPreviewMode(false)}>
-                  {file ? <FileOutlined /> : <CodeOutlined />}
-                  <span title={file?.path ?? ""}>{file ? fileName : "未打开文件"}</span>
+              <div className={`fileEditorTab ${openedFile && !previewMode ? "active" : "empty"}`}>
+                <button className="fileTabButton" type="button" disabled={!canEdit} onClick={() => setPreviewMode(false)}>
+                  {openedFile ? <FileOutlined /> : <CodeOutlined />}
+                  <span title={openedFile?.path ?? ""}>{openedFile ? fileName : "未打开文件"}</span>
                   {dirty && <small>未保存</small>}
                 </button>
               </div>
@@ -1407,7 +1445,7 @@ export function FilePanel({
                 </button>
               )}
               {previewMode && (
-                <button className="filePreviewButton active" type="button" onClick={() => setPreviewMode(false)}>
+                <button className="filePreviewButton active" type="button" disabled={!canEdit} onClick={() => setPreviewMode(false)}>
                   <EditOutlined />
                   <span>编辑</span>
                 </button>
@@ -1419,9 +1457,9 @@ export function FilePanel({
                 </button>
               )}
             </div>
-            {file && !previewMode && (
+            {openedFile && !previewMode && (
             <div className="fileEditorPathBar">
-              <span title={file.path}>{file.path}</span>
+              <span title={openedFile.path}>{openedFile.path}</span>
               {loadingFile && <small>正在读取...</small>}
             </div>
             )}
@@ -1438,7 +1476,17 @@ export function FilePanel({
                 }}
               />
             )}
-            {file && previewMode && previewKind && (
+            {openedFile && !file && !previewMode && (
+              <div className="filePreviewPlaceholder">
+                <p>该类型仅支持预览，不能直接编辑。</p>
+                {previewUrl && (
+                  <a href={previewUrl} target="_blank" rel="noreferrer">
+                    打开原文件
+                  </a>
+                )}
+              </div>
+            )}
+            {openedFile && previewMode && previewKind && (
               <div className="filePreviewPane">
                 {previewKind === "html" && (
                   <iframe className="filePreviewFrame" title={fileName} srcDoc={draft} sandbox="allow-scripts" />
@@ -1447,18 +1495,33 @@ export function FilePanel({
                   <div className="filePreviewMarkdown"><RichText text={draft} /></div>
                 )}
                 {previewKind === "image" && (
-                  <div className="filePreviewImage"><img alt={fileName} src={draft} /></div>
+                  <div className="filePreviewImage"><img alt={fileName} src={previewUrl} /></div>
                 )}
-                {previewKind && previewKind !== "html" && previewKind !== "markdown" && previewKind !== "image" && (
-                  <div className="filePreviewPlaceholder"><p>暂不支持预览 {fileExt.toUpperCase()} 文件</p></div>
+                {previewKind === "pdf" && (
+                  <iframe className="filePreviewFrame" title={fileName} src={previewUrl} />
+                )}
+                {previewKind === "docx" && (
+                  <DocxSandboxPreview title={fileName} url={previewUrl} />
+                )}
+                {previewKind === "unsupported" && (
+                  <div className="filePreviewPlaceholder">
+                    <p>当前类型暂不支持内嵌预览。</p>
+                    {previewUrl && (
+                      <a href={previewUrl} target="_blank" rel="noreferrer">
+                        打开原文件
+                      </a>
+                    )}
+                  </div>
                 )}
               </div>
             )}
-            <footer className="fileEditorStatus">
-              <span>{file ? fileLanguage : "No file"}</span>
-              <span>{file ? `${draft.length} 字符 · ${formatBytes(file.size)}` : "Ready"}</span>
-              <span>{dirty ? "已修改" : file ? "已同步" : "空闲"}</span>
-            </footer>
+            {!previewMode && (
+              <footer className="fileEditorStatus">
+                <span>{openedFile ? fileLanguage : "No file"}</span>
+                <span>{file ? `${draft.length} 字符 · ${formatBytes(statusSize)}` : openedFile ? formatBytes(statusSize) : "Ready"}</span>
+                <span>{dirty ? "已修改" : file ? "已同步" : openedFile ? "仅预览" : "空闲"}</span>
+              </footer>
+            )}
           </section>
         </div>
       )}
@@ -1977,6 +2040,189 @@ function normalizeDirectoryPath(path: string) {
 
 function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function previewKindFromPath(path: string): SandboxPreviewKind {
+  const ext = fileExtFromPath(path);
+  if (ext === "html" || ext === "htm") return "html";
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (ext === "docx") return "docx";
+  if (["doc", "ppt", "pptx"].includes(ext)) return "unsupported";
+  return null;
+}
+
+function isTextEditableFile(path: string) {
+  const name = fileNameFromPath(path).toLowerCase();
+  if (TEXT_EDITABLE_FILENAMES.has(name)) return true;
+  const ext = fileExtFromPath(path);
+  return Boolean(ext && TEXT_EDITABLE_EXTENSIONS.has(ext));
+}
+
+const TEXT_EDITABLE_FILENAMES = new Set([
+  ".dockerignore",
+  ".env",
+  ".env.example",
+  ".eslintignore",
+  ".eslintrc",
+  ".gitignore",
+  ".npmrc",
+  ".prettierignore",
+  ".prettierrc",
+  "dockerfile",
+  "license",
+  "makefile",
+  "readme",
+]);
+
+const TEXT_EDITABLE_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "json",
+  "jsonl",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "htm",
+  "xml",
+  "svg",
+  "yml",
+  "yaml",
+  "toml",
+  "ini",
+  "env",
+  "sh",
+  "bash",
+  "ps1",
+  "py",
+  "java",
+  "go",
+  "rs",
+  "c",
+  "cpp",
+  "h",
+  "hpp",
+  "cs",
+  "php",
+  "rb",
+  "sql",
+  "prisma",
+  "log",
+  "gitignore",
+]);
+
+function fileExtFromPath(path: string) {
+  const fileName = fileNameFromPath(path);
+  return fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
+}
+
+function sandboxPreviewUrl(downstreamSessionId: string, path: string) {
+  const normalizedPath = normalizeFilePath(path);
+  return `/filesystem/preview/${encodeURIComponent(downstreamSessionId)}/${encodePathSegments(normalizedPath)}`;
+}
+
+function sandboxPreviewBaseUrl(downstreamSessionId: string, path: string) {
+  const normalizedPath = normalizeFilePath(path);
+  const dir = normalizedPath.includes("/") ? normalizedPath.split("/").slice(0, -1).join("/") : "";
+  const base = sandboxPreviewRootUrl(downstreamSessionId);
+  return dir ? `${base}${encodePathSegments(dir)}/` : base;
+}
+
+function sandboxPreviewRootUrl(downstreamSessionId: string) {
+  return `/filesystem/preview/${encodeURIComponent(downstreamSessionId)}/`;
+}
+
+function encodePathSegments(path: string) {
+  return normalizeFilePath(path).split("/").filter(Boolean).map(encodeURIComponent).join("/");
+}
+
+function normalizeFilePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/^\/+/g, "");
+}
+
+function htmlWithPreviewBase(html: string, baseUrl: string, rootUrl: string) {
+  if (!baseUrl) return html;
+  const baseTag = `<base href="${escapeHtmlAttribute(baseUrl)}">`;
+  const withBase = /<base\s/i.test(html)
+    ? html.replace(/<base\b[^>]*>/i, baseTag)
+    : /<head\b[^>]*>/i.test(html)
+      ? html.replace(/<head\b([^>]*)>/i, `<head$1>${baseTag}`)
+      : `${baseTag}${html}`;
+  if (!rootUrl) return withBase;
+  const escapedRoot = escapeHtmlAttribute(rootUrl);
+  return withBase.replace(/\b(src|href)=("|')\/(?!\/)([^"']*)\2/gi, (_match, attr: string, quote: string, path: string) => {
+    return `${attr}=${quote}${escapedRoot}${path}${quote}`;
+  });
+}
+
+function escapeHtmlAttribute(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function DocxSandboxPreview({ title, url }: { title: string; url: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    const container = containerRef.current;
+    if (!container || !url) return;
+    container.innerHTML = "";
+    setState("loading");
+
+    void (async () => {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.arrayBuffer();
+        const { renderAsync } = await import("docx-preview");
+        if (cancelled) return;
+        container.innerHTML = "";
+        await renderAsync(data, container, undefined, {
+          className: "sandboxDocx",
+          inWrapper: true,
+          ignoreWidth: true,
+          ignoreHeight: true,
+          breakPages: true,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          renderEndnotes: true,
+        });
+        if (!cancelled) setState("ready");
+      } catch {
+        if (!cancelled) setState("failed");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return (
+    <div className="filePreviewDocx" aria-label={title}>
+      {state === "loading" && <div className="filePreviewPlaceholder"><p>正在渲染 Word 文档...</p></div>}
+      {state === "failed" && (
+        <div className="filePreviewPlaceholder">
+          <p>Word 文档预览失败。</p>
+          <a href={url} target="_blank" rel="noreferrer">
+            打开原文件
+          </a>
+        </div>
+      )}
+      <div className="filePreviewDocxBody" ref={containerRef} hidden={state !== "ready"} />
+    </div>
+  );
 }
 
 function socketStateLabel(state: "connecting" | "connected" | "disconnected" | "unavailable") {
