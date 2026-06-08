@@ -22,9 +22,4 @@ export class HubArtifactController {
     response.type(content.contentType).send(content.body ?? "");
   }
 
-  /** 列出产物版本历史 */
-  @Get(":artifactId/versions")
-  async listArtifactVersions(@Param("artifactId") artifactId: string) {
-    return { items: await this.artifacts.listVersions(artifactId) };
-  }
 }

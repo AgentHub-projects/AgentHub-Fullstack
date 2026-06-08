@@ -296,7 +296,7 @@ export class HubSessionService {
   async listPinnedMessages(sessionId: string, input: { limit?: number } = {}) {
     const limit = normalizeLimit(input.limit, 20, 50);
     const messages = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT m.* FROM messages m WHERE m.session_id = $1 AND (m.is_pinned = true OR (m.content_json->>'pinnedPartIds')::jsonb <> '[]'::jsonb) ORDER BY m.updated_at DESC LIMIT $2`,
+      `SELECT m.* FROM messages m WHERE m.session_id = $1::uuid AND (m.is_pinned = true OR (m.content_json->>'pinnedPartIds')::jsonb <> '[]'::jsonb) ORDER BY m.updated_at DESC LIMIT $2`,
       sessionId,
       limit,
     );

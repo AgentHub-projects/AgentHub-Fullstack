@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
-import type { HubArtifactDto, HubArtifactKind, HubArtifactVersionDto, UploadedAttachmentDto } from "@agenthub/shared";
+import type { HubArtifactDto, HubArtifactKind, UploadedAttachmentDto } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { asObject, mapArtifact, mapArtifactVersion } from "../mappers/hub.mappers";
+import { asObject, mapArtifact } from "../mappers/hub.mappers";
 import { stringValue } from "../utils/downstream-orchestrator.utils";
 
 type ArtifactPayload = Record<string, unknown>;
@@ -57,8 +57,6 @@ export class ArtifactStorageService {
         } as any,
       },
     });
-    await this.recordVersion(artifact);
-
     return {
       id: artifact.id,
       name: artifact.title,
@@ -149,10 +147,8 @@ export class ArtifactStorageService {
         sizeBytes,
         final,
         metadata: metadata as any,
-        version: { increment: 1 },
       },
     });
-    await this.recordVersion(artifact);
 
     return mapArtifact(artifact);
   }
@@ -181,10 +177,8 @@ export class ArtifactStorageService {
           textContent: (existing.textContent ?? "") + delta,
           sizeBytes: BigInt(((existing.textContent ?? "").length + delta.length)),
           producingEventId: input.producingEventId,
-          version: { increment: 1 },
-        },
+          },
       });
-      await this.recordVersion(updated);
       return mapArtifact(updated);
     }
 
@@ -230,42 +224,12 @@ export class ArtifactStorageService {
       data: {
         final: true,
         producingEventId: input.producingEventId,
-        version: { increment: 1 },
       },
     });
-    await this.recordVersion(updated);
     return mapArtifact(updated);
   }
 
   /** 列出 artifact 的所有版本 */
-  async listVersions(artifactId: string): Promise<HubArtifactVersionDto[]> {
-    const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-      `
-        SELECT
-          id,
-          artifact_id,
-          version,
-          producing_event_id,
-          title,
-          kind,
-          mime_type,
-          storage_kind,
-          storage_uri,
-          text_content,
-          sha256,
-          size_bytes,
-          final,
-          metadata,
-          created_at
-        FROM artifact_versions
-        WHERE artifact_id = $1::uuid
-        ORDER BY version DESC
-      `,
-      artifactId,
-    );
-    return rows.map(mapArtifactVersion);
-  }
-
   /** 获取 artifact 内容：内联文本直接返回，OSS 返回签名重定向 URL */
   async getContent(artifactId: string) {
     const artifact = await this.prisma.artifact.findUnique({ where: { id: artifactId } });
@@ -374,82 +338,6 @@ export class ArtifactStorageService {
   }
 
   /** 在 artifact_versions 表中插入或更新版本记录 */
-  private async recordVersion(artifact: {
-    id: string;
-    version: number;
-    producingEventId?: string | null;
-    title: string;
-    kind: string;
-    mimeType: string;
-    storageKind: string;
-    storageUri?: string | null;
-    textContent?: string | null;
-    sha256?: string | null;
-    sizeBytes?: bigint | number | null;
-    final: boolean;
-    metadata: unknown;
-  }) {
-    await this.prisma.$executeRawUnsafe(
-      `
-        INSERT INTO artifact_versions (
-          artifact_id,
-          version,
-          producing_event_id,
-          title,
-          kind,
-          mime_type,
-          storage_kind,
-          storage_uri,
-          text_content,
-          sha256,
-          size_bytes,
-          final,
-          metadata
-        )
-        VALUES (
-          $1::uuid,
-          $2,
-          $3::uuid,
-          $4,
-          $5::artifact_kind,
-          $6,
-          $7::storage_kind,
-          $8,
-          $9,
-          $10,
-          $11,
-          $12,
-          $13::jsonb
-        )
-        ON CONFLICT (artifact_id, version)
-        DO UPDATE SET
-          producing_event_id = EXCLUDED.producing_event_id,
-          title = EXCLUDED.title,
-          kind = EXCLUDED.kind,
-          mime_type = EXCLUDED.mime_type,
-          storage_kind = EXCLUDED.storage_kind,
-          storage_uri = EXCLUDED.storage_uri,
-          text_content = EXCLUDED.text_content,
-          sha256 = EXCLUDED.sha256,
-          size_bytes = EXCLUDED.size_bytes,
-          final = EXCLUDED.final,
-          metadata = EXCLUDED.metadata
-      `,
-      artifact.id,
-      artifact.version,
-      artifact.producingEventId ?? null,
-      artifact.title,
-      artifact.kind,
-      artifact.mimeType,
-      artifact.storageKind,
-      artifact.storageUri ?? null,
-      artifact.textContent ?? null,
-      artifact.sha256 ?? null,
-      artifact.sizeBytes ?? null,
-      artifact.final,
-      JSON.stringify(asObject(artifact.metadata)),
-    );
-  }
 }
 
 function bigintValue(value: unknown): bigint | null {
