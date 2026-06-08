@@ -20,7 +20,9 @@ import {
   CodeOutlined,
   CopyOutlined,
   DownOutlined,
+  EditOutlined,
   ExpandOutlined,
+  EyeOutlined,
   FileDoneOutlined,
   FileMarkdownOutlined,
   FileOutlined,
@@ -1137,6 +1139,7 @@ export function FilePanel({
   const [loadingTree, setLoadingTree] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
   const [error, setError] = useState("");
 
   const canUseSandbox = Boolean(sessionId && !disabledReason && connection);
@@ -1320,6 +1323,16 @@ export function FilePanel({
   const parentPath = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") : "";
   const fileName = file ? fileNameFromPath(file.path) : "";
   const fileLanguage = file ? languageFromPath(file.path) : "text";
+  const fileExt = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
+  const previewKind: "html" | "markdown" | "image" | "pdf" | "docx" | "pptx" | null =
+    fileExt === "html" || fileExt === "htm" ? "html"
+    : fileExt === "md" || fileExt === "markdown" ? "markdown"
+    : fileExt === "png" || fileExt === "jpg" || fileExt === "jpeg" || fileExt === "gif" || fileExt === "webp" || fileExt === "svg" ? "image"
+    : fileExt === "pdf" ? "pdf"
+    : fileExt === "docx" ? "docx"
+    : fileExt === "pptx" ? "pptx"
+    : null;
+  const canPreview = previewKind && file;
 
   return (
     <div className={`panelScroll filePanel ${file ? "hasFile" : ""}`}>
@@ -1380,23 +1393,39 @@ export function FilePanel({
 
           <section className="fileEditorPane" aria-label="沙箱文件编辑器">
             <div className="fileEditorTabs">
-              <div className={`fileEditorTab ${file ? "active" : "empty"}`}>
-                {file ? <FileOutlined /> : <CodeOutlined />}
-                <span title={file?.path ?? ""}>{file ? fileName : "未打开文件"}</span>
-                {dirty && <small>未保存</small>}
+              <div className={`fileEditorTab ${file && !previewMode ? "active" : "empty"}`}>
+                <button className="fileTabButton" type="button" disabled={!file} onClick={() => setPreviewMode(false)}>
+                  {file ? <FileOutlined /> : <CodeOutlined />}
+                  <span title={file?.path ?? ""}>{file ? fileName : "未打开文件"}</span>
+                  {dirty && <small>未保存</small>}
+                </button>
               </div>
-              <button className="fileSaveButton" type="button" disabled={!dirty || saving || loadingFile} onClick={() => void saveFile()}>
-                <SaveOutlined />
-                <span>{saving ? "保存中" : "保存"}</span>
-              </button>
+              {canPreview && !previewMode && (
+                <button className="filePreviewButton" type="button" onClick={() => setPreviewMode(true)}>
+                  <EyeOutlined />
+                  <span>预览</span>
+                </button>
+              )}
+              {previewMode && (
+                <button className="filePreviewButton active" type="button" onClick={() => setPreviewMode(false)}>
+                  <EditOutlined />
+                  <span>编辑</span>
+                </button>
+              )}
+              {!previewMode && (
+                <button className="fileSaveButton" type="button" disabled={!dirty || saving || loadingFile} onClick={() => void saveFile()}>
+                  <SaveOutlined />
+                  <span>{saving ? "保存中" : "保存"}</span>
+                </button>
+              )}
             </div>
-            {file && (
+            {file && !previewMode && (
             <div className="fileEditorPathBar">
               <span title={file.path}>{file.path}</span>
               {loadingFile && <small>正在读取...</small>}
             </div>
             )}
-            {file && (
+            {file && !previewMode && (
               <textarea
                 spellCheck={false}
                 value={draft}
@@ -1408,6 +1437,22 @@ export function FilePanel({
                   if (file) onDraftChanged?.(file.path, file.content, next, fileLanguage);
                 }}
               />
+            )}
+            {file && previewMode && previewKind && (
+              <div className="filePreviewPane">
+                {previewKind === "html" && (
+                  <iframe className="filePreviewFrame" title={fileName} srcDoc={draft} sandbox="allow-scripts" />
+                )}
+                {previewKind === "markdown" && (
+                  <div className="filePreviewMarkdown"><RichText text={draft} /></div>
+                )}
+                {previewKind === "image" && (
+                  <div className="filePreviewImage"><img alt={fileName} src={draft.startsWith("data:") ? draft : `data:image/${fileExt};base64,${btoa(draft)}`} /></div>
+                )}
+                {previewKind && previewKind !== "html" && previewKind !== "markdown" && previewKind !== "image" && (
+                  <div className="filePreviewPlaceholder"><p>暂不支持预览 {fileExt.toUpperCase()} 文件</p></div>
+                )}
+              </div>
             )}
             <footer className="fileEditorStatus">
               <span>{file ? fileLanguage : "No file"}</span>
