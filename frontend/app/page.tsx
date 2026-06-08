@@ -1873,7 +1873,7 @@ export default function WorkbenchPage() {
                     ? "当前 run 运行中，完成后可继续发送"
                   : mode === "direct"
                     ? "输入要交给这个 Agent 的任务"
-                    : "输入任务"
+                    : ""
               }
               disabled={sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
             />
