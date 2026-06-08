@@ -296,11 +296,25 @@ function referenceArray(value: unknown) {
   const items = value
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
     .map((item) => ({
-      messageId: stringValue(item.messageId) ?? "",
+      messageId: stringValue(item.messageId),
       partId: stringValue(item.partId),
+      selectedText: selectedTextValue(item.selectedText),
+      sourceLabel: sourceLabelValue(item.sourceLabel),
     }))
-    .filter((item) => item.messageId);
+    .filter((item) => item.messageId || item.selectedText);
   return items.length ? items.slice(0, 5) : undefined;
+}
+
+function selectedTextValue(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\r\n/g, "\n").trim();
+  return text ? text.slice(0, 8000) : undefined;
+}
+
+function sourceLabelValue(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 80) : undefined;
 }
 
 function attachmentArray(value: unknown) {

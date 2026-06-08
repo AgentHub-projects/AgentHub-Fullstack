@@ -506,8 +506,8 @@ export class HubSessionService {
           {
             mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
             attachmentIds: attachmentParts.map((part) => part.metadata?.artifactId),
-            quotedMessageId: input.quotedMessageId ?? references[0]?.messageId,
-            quotedMessageIds: references.map((item) => item.messageId),
+            quotedMessageId: input.quotedMessageId ?? firstReferenceMessageId(references),
+            quotedMessageIds: references.map((item) => item.messageId).filter((id): id is string => Boolean(id)),
             references,
           },
           text,
@@ -724,10 +724,12 @@ export class HubSessionService {
       ? contentJson.references
           .map((item) => mergeMetadata(item, {}))
           .map((item) => ({
-            messageId: typeof item.messageId === "string" ? item.messageId : "",
+            messageId: typeof item.messageId === "string" ? item.messageId : undefined,
             partId: typeof item.partId === "string" ? item.partId : undefined,
+            selectedText: cleanSelectedText(item.selectedText),
+            sourceLabel: typeof item.sourceLabel === "string" ? item.sourceLabel.trim().slice(0, 80) : undefined,
           }))
-          .filter((item) => item.messageId)
+          .filter((item) => item.messageId || item.selectedText)
       : undefined;
     return this.sendMessage(sessionId, {
       content: message.contentText,
@@ -875,17 +877,22 @@ export class HubSessionService {
   /** 加载引用消息的上下文文本块 */
   private async loadReferenceBlocks(
     sessionId: string,
-    references: Array<{ messageId: string; partId?: string }>,
+    references: Array<{ messageId?: string; partId?: string; selectedText?: string; sourceLabel?: string }>,
   ): Promise<Array<{ label: string; text: string }>> {
     if (references.length === 0) return [];
-    const messageIds = [...new Set(references.map((item) => item.messageId))];
+    const messageIds = [...new Set(references.filter((item) => !item.selectedText).map((item) => item.messageId).filter((id): id is string => Boolean(id)))];
     const messages = await this.prisma.message.findMany({
       where: { sessionId, id: { in: messageIds } },
       include: { agent: true },
     });
     if (messages.length !== messageIds.length) throw new BadRequestException("REFERENCE_NOT_FOUND");
+    const messagesById = new Map(messages.map((message) => [message.id, message]));
     return references.map((reference, index) => {
-      const message = messages.find((item) => item.id === reference.messageId)!;
+      if (reference.selectedText) {
+        return { label: `${index + 1}. ${reference.sourceLabel ?? "selection"}`, text: reference.selectedText };
+      }
+      const message = reference.messageId ? messagesById.get(reference.messageId) : null;
+      if (!message) throw new BadRequestException("REFERENCE_NOT_FOUND");
       const partText = reference.partId ? referencedPartText(message.contentJson, reference.partId) : null;
       if (reference.partId && partText == null) throw new BadRequestException("REFERENCE_PART_NOT_FOUND");
       const label = `${index + 1}. ${message.role}${message.agent?.name ? `:${message.agent.name}` : ""}`;
@@ -1052,20 +1059,48 @@ function withReferencePrompt(text: string, references: Array<{ label: string; te
   return `${text}\n\n引用上下文：\n${quoted}`;
 }
 
+type NormalizedReference = { messageId?: string; partId?: string; selectedText?: string; sourceLabel?: string };
+
 function normalizeReferences(input: SendHubMessageRequest) {
-  const references: Array<{ messageId: string; partId?: string }> = Array.isArray(input.references)
+  const references: NormalizedReference[] = Array.isArray(input.references)
     ? input.references
-        .filter((item) => item && typeof item.messageId === "string" && item.messageId.trim())
-        .map((item) => ({ messageId: item.messageId, partId: item.partId }))
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+          messageId: cleanString(item.messageId),
+          partId: cleanString(item.partId),
+          selectedText: cleanSelectedText(item.selectedText),
+          sourceLabel: cleanSourceLabel(item.sourceLabel),
+        }))
+        .filter((item) => item.messageId || item.selectedText)
     : [];
   if (references.length === 0 && input.quotedMessageId) {
     references.push({ messageId: input.quotedMessageId });
   }
-  const deduped = new Map<string, { messageId: string; partId?: string }>();
+  const deduped = new Map<string, NormalizedReference>();
   for (const reference of references) {
-    deduped.set(`${reference.messageId}:${reference.partId ?? ""}`, reference);
+    deduped.set(`${reference.messageId}:${reference.partId ?? ""}:${reference.selectedText ?? ""}`, reference);
   }
   return [...deduped.values()];
+}
+
+function firstReferenceMessageId(references: NormalizedReference[]) {
+  return references.find((item) => item.messageId)?.messageId;
+}
+
+function cleanString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function cleanSelectedText(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\r\n/g, "\n").trim();
+  return text ? text.slice(0, 8000) : undefined;
+}
+
+function cleanSourceLabel(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 80) : undefined;
 }
 
 /** 检测用户输入是否为部署命令（部署/发布/上线/deploy/vercel 等关键词） */

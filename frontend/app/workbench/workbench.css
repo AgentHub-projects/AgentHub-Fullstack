@@ -5271,6 +5271,146 @@ div.agentChoice {
   color: #111111;
 }
 
+.selectionReferencePopover {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border: 1px solid #ececec;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(17, 17, 17, 0.12);
+  padding: 3px;
+}
+
+.selectionReferencePopover button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #2b2b2b;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.selectionReferencePopover button:hover {
+  background: #f5f5f5;
+}
+
+.selectionReferencePopover .selectionPopoverClose {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  color: #777777;
+}
+
+.selectionReferencePreview {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(920px, 100%);
+  margin: 0 auto 9px;
+}
+
+.selectionPreviewChipRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.selectionPreviewChipWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.selectionPreviewChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  border: 2px solid #f2a200;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #333333;
+  padding: 0 5px 0 10px;
+  font-size: 13px;
+}
+
+.selectionPreviewChip:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 2px;
+}
+
+.selectionPreviewChip strong {
+  font-weight: 750;
+}
+
+.selectionChipIcon {
+  color: #777777;
+  font-size: 13px;
+}
+
+.selectionPreviewChip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #555555;
+  padding: 0;
+}
+
+.selectionPreviewChip button:hover,
+.selectionClearAll:hover {
+  background: #f5f5f5;
+}
+
+.selectionPreviewBubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 45;
+  display: none;
+  width: max-content;
+  max-width: min(360px, 70vw);
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(17, 17, 17, 0.12);
+  color: #2c2c2c;
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.selectionPreviewChipWrap:hover .selectionPreviewBubble,
+.selectionPreviewChipWrap:focus-within .selectionPreviewBubble {
+  display: block;
+}
+
+.selectionClearAll {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #777777;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .preservedAttachmentBanner {
   margin-top: 0;
 }

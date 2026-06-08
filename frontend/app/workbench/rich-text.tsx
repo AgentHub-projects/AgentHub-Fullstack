@@ -21,12 +21,27 @@ import { parseInlineMarkdown, parseMarkdownBlocks, type InlineSegment, type Mark
 import type { DiffLine } from "../../lib/workbench/types";
 import { copyText, formatBytes } from "../../lib/utils";
 
-export function RichText({ text }: { text: string }) {
+export type SelectionSource = {
+  sourceId?: string;
+  messageId?: string;
+  sourceLabel?: string;
+};
+
+function selectionAttrs(source?: SelectionSource, partId?: string) {
+  return {
+    "data-selection-source-id": source?.sourceId,
+    "data-selection-message-id": source?.messageId,
+    "data-selection-source-label": source?.sourceLabel,
+    "data-selection-part-id": partId,
+  };
+}
+
+export function RichText({ text, selectionSource }: { text: string; selectionSource?: SelectionSource }) {
   if (!text) return null;
   const blocks = parseMarkdownBlocks(text);
   return (
-    <div className="richText">
-      {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+    <div className="richText" {...selectionAttrs(selectionSource)}>
+      {blocks.map((block, index) => renderMarkdownBlock(block, index, selectionSource))}
     </div>
   );
 }
@@ -40,6 +55,7 @@ export function MessageParts({
   onOpenPart,
   onOpenDiffPanel,
   onOpenArtifactsPanel,
+  selectionSource,
 }: {
   parts?: HubMessagePartDto[];
   fallbackText: string;
@@ -49,10 +65,11 @@ export function MessageParts({
   onOpenPart?: (part: HubMessagePartDto) => void;
   onOpenDiffPanel?: () => void;
   onOpenArtifactsPanel?: () => void;
+  selectionSource?: SelectionSource;
 }) {
-  if (!parts?.length) return <RichText text={fallbackText} />;
+  if (!parts?.length) return <RichText text={fallbackText} selectionSource={selectionSource} />;
   return (
-    <div className="richText">
+    <div className="richText" {...selectionAttrs(selectionSource)}>
       {parts.flatMap((part, index) =>
         renderMessagePart(
           part,
@@ -63,6 +80,7 @@ export function MessageParts({
           onOpenPart,
           onOpenDiffPanel,
           onOpenArtifactsPanel,
+          selectionSource,
         ),
       )}
     </div>
@@ -78,6 +96,7 @@ function renderMessagePart(
   onOpenPart?: (part: HubMessagePartDto) => void,
   onOpenDiffPanel?: () => void,
   onOpenArtifactsPanel?: () => void,
+  selectionSource?: SelectionSource,
 ): React.ReactNode[] {
   if (part.type === "code") {
     return [
@@ -89,6 +108,8 @@ function renderMessagePart(
         onPin={onPinPart ? () => onPinPart(part) : undefined}
         onReference={onReferencePart ? () => onReferencePart(part) : undefined}
         onExpand={onOpenPart ? () => onOpenPart(part) : undefined}
+        selectionSource={selectionSource}
+        selectionPartId={part.id}
       />,
     ];
   }
@@ -158,7 +179,7 @@ function renderMessagePart(
     ];
   }
   return parseMarkdownBlocks(part.text ?? "").map((block, blockIndex) =>
-    renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`),
+    renderMarkdownBlock(block, `${part.id || index}-${blockIndex}`, selectionSource, part.id),
   );
 }
 
@@ -540,13 +561,21 @@ function DeployStatusPart({
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock, key: React.Key): React.ReactNode {
+function renderMarkdownBlock(block: MarkdownBlock, key: React.Key, selectionSource?: SelectionSource, selectionPartId?: string): React.ReactNode {
   if (block.kind === "heading") {
     const Tag = block.level <= 1 ? "h2" : "h3";
     return <Tag key={key}><InlineText text={block.text} /></Tag>;
   }
   if (block.kind === "code") {
-    return <CodeBlock key={key} text={block.text} language={block.language} />;
+    return (
+      <CodeBlock
+        key={key}
+        text={block.text}
+        language={block.language}
+        selectionSource={selectionSource}
+        selectionPartId={selectionPartId}
+      />
+    );
   }
   if (block.kind === "ul") {
     return <ul key={key}>{block.items.map((item, itemIndex) => <li key={itemIndex}><InlineText text={item} /></li>)}</ul>;
@@ -636,6 +665,8 @@ function CodeBlock({
   onPin,
   onReference,
   onExpand,
+  selectionSource,
+  selectionPartId,
 }: {
   text: string;
   language?: string;
@@ -643,6 +674,8 @@ function CodeBlock({
   onPin?: () => void;
   onReference?: () => void;
   onExpand?: () => void;
+  selectionSource?: SelectionSource;
+  selectionPartId?: string;
 }) {
   const trimmed = text ? text.replace(/\r\n/g, "\n").replace(/\n$/, "") : "";
   const lineCount = trimmed ? trimmed.split("\n").length : 0;
@@ -689,7 +722,7 @@ function CodeBlock({
       </summary>
       <Highlight theme={themes.nightOwl} code={trimmed} language={lang}>
         {({ tokens, getLineProps, getTokenProps }) => (
-          <pre>
+          <pre {...selectionAttrs(selectionSource, selectionPartId)}>
             {tokens.map((line, i) => (
               <div key={i} {...getLineProps({ line })}>
                 <span className="lineNo">{i + 1}</span>

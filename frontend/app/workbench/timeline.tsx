@@ -268,6 +268,7 @@ function UserMessage({
         <MessageParts
           parts={message.parts}
           fallbackText={message.contentText}
+          selectionSource={{ sourceId: message.id, messageId: message.id, sourceLabel: "你" }}
           onPinPart={onPinPart ? (part) => onPinPart(message, part) : undefined}
           onReferencePart={onReferencePart ? (part) => onReferencePart(message, part) : undefined}
           onOpenArtifact={onOpenArtifact}
@@ -308,6 +309,7 @@ function AgentReplyBlock({
   onOpenArtifactsPanel?: () => void;
 }) {
   const streaming = block.status === "thinking" || block.status === "streaming" || block.status === "queued";
+  const selectionSource = { sourceId: block.messageId ?? block.id, messageId: block.messageId, sourceLabel: block.name };
   return (
     <article className="agentReply">
       {streaming ? (
@@ -340,6 +342,7 @@ function AgentReplyBlock({
           <MessageParts
             parts={block.parts}
             fallbackText={block.text}
+            selectionSource={selectionSource}
             onPinPart={block.messageId ? onPinPart : undefined}
             onReferencePart={block.messageId ? onReferencePart : undefined}
             onOpenArtifact={onOpenArtifact}
@@ -348,7 +351,7 @@ function AgentReplyBlock({
             onOpenArtifactsPanel={onOpenArtifactsPanel}
           />
         ) : (
-          <RichText text={block.text} />
+          <RichText text={block.text} selectionSource={selectionSource} />
         )}
       </div>
     </article>

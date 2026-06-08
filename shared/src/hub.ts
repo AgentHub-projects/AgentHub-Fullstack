@@ -457,7 +457,7 @@ export interface SendHubMessageRequest {
   orchestratorAgentId?: AgentId;
   parentMessageId?: string;
   quotedMessageId?: string;
-  references?: Array<{ messageId: string; partId?: string }>;
+  references?: Array<{ messageId?: string; partId?: string; selectedText?: string; sourceLabel?: string }>;
   attachments?: Array<{ id: string }>;
 }
 

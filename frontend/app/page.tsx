@@ -124,9 +124,22 @@ const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
 };
 
 type ReplyTarget = {
-  message: HubMessageDto;
+  message?: HubMessageDto;
+  kind: "message" | "part" | "selection";
   partId?: string;
+  selectedText?: string;
+  sourceId?: string;
+  sourceLabel?: string;
   preview: string;
+};
+
+type SelectionReferenceTarget = {
+  message?: HubMessageDto;
+  partId?: string;
+  sourceId: string;
+  sourceLabel?: string;
+  selectedText: string;
+  rect: { top: number; left: number };
 };
 
 type SessionWorkspace = {
@@ -188,6 +201,7 @@ export default function WorkbenchPage() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [selectionTarget, setSelectionTarget] = useState<SelectionReferenceTarget | null>(null);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
@@ -415,6 +429,10 @@ export default function WorkbenchPage() {
     updateActiveWorkspace((current) => ({ ...current, replyTargets: resolveState(value, current.replyTargets) }));
   }
 
+  function removeReplyTarget(index: number) {
+    setReplyTargets((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
   function setInspectorTab(value: SetStateAction<InspectorTab>) {
     updateActiveWorkspace((current) => ({ ...current, inspectorTab: resolveState(value, current.inspectorTab) }));
   }
@@ -538,7 +556,12 @@ export default function WorkbenchPage() {
     if (!chatActionLocked) return;
     setMentionMatch(null);
     setActiveMentionIndex(0);
+    setSelectionTarget(null);
   }, [chatActionLocked]);
+
+  useEffect(() => {
+    setSelectionTarget(null);
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (inspectorTab === "files" && !inspectorCollapsed && !sandboxEditorDisabledReason) return;
@@ -1109,9 +1132,14 @@ export default function WorkbenchPage() {
       content: text,
       mentionedAgentIds: targetAgentIds,
       orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
-      parentMessageId: replyTargets[0]?.message.id,
-      quotedMessageId: replyTargets[0]?.message.id,
-      references: replyTargets.map((target) => ({ messageId: target.message.id, partId: target.partId })),
+      parentMessageId: firstReplyMessageId(replyTargets),
+      quotedMessageId: firstReplyMessageId(replyTargets),
+      references: replyTargets.map((target) => ({
+        messageId: target.message?.id,
+        partId: target.partId,
+        selectedText: target.selectedText,
+        sourceLabel: target.sourceLabel,
+      })),
       attachments: dedupeAttachments(attachmentIds),
     };
   }
@@ -1193,7 +1221,25 @@ export default function WorkbenchPage() {
       const targets: ReplyTarget[] = [];
       for (const reference of pending.payload.references ?? []) {
         const message = detail?.messages.find((item) => item.id === reference.messageId);
-        if (message) targets.push({ message, partId: reference.partId, preview: message.contentText || "引用消息" });
+        if (message) {
+          targets.push({
+            message,
+            kind: reference.selectedText ? "selection" : reference.partId ? "part" : "message",
+            partId: reference.partId,
+            selectedText: reference.selectedText,
+            sourceId: reference.messageId,
+            sourceLabel: reference.sourceLabel,
+            preview: (reference.selectedText ?? message.contentText) || "引用消息",
+          });
+        } else if (reference.selectedText) {
+          targets.push({
+            kind: "selection",
+            selectedText: reference.selectedText,
+            sourceId: reference.messageId ?? reference.sourceLabel ?? reference.selectedText,
+            sourceLabel: reference.sourceLabel,
+            preview: reference.selectedText,
+          });
+        }
       }
       setComposer(pending.payload.content);
       setAttachments([]);
@@ -1542,18 +1588,106 @@ export default function WorkbenchPage() {
   function addReplyTarget(message: HubMessageDto) {
     if (!sessionWritable) return;
     setReplyTargets((current) => {
-      if (current.some((item) => item.message.id === message.id && !item.partId)) return current;
-      return [...current, { message, preview: message.contentText.slice(0, 48) || message.role }].slice(0, 5);
+      if (current.some((item) => item.message?.id === message.id && !item.partId)) return current;
+      return [...current, { message, kind: "message" as const, preview: message.contentText.slice(0, 48) || message.role }].slice(0, 5);
     });
   }
 
   function addReplyPartTarget(message: HubMessageDto, part: HubMessagePartDto) {
     if (!sessionWritable) return;
     setReplyTargets((current) => {
-      if (current.some((item) => item.message.id === message.id && item.partId === part.id)) return current;
+      if (current.some((item) => item.message?.id === message.id && item.partId === part.id)) return current;
       const preview = part.title ?? part.text?.slice(0, 48) ?? part.type;
-      return [...current, { message, partId: part.id, preview }].slice(0, 5);
+      return [...current, { message, kind: "part" as const, partId: part.id, preview }].slice(0, 5);
     });
+  }
+
+  function handleTimelineSelection() {
+    if (!sessionWritable || !detail) {
+      setSelectionTarget(null);
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setSelectionTarget(null);
+      return;
+    }
+    const selectedText = selection.toString().replace(/\r\n/g, "\n").trim();
+    if (!selectedText) {
+      setSelectionTarget(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const start = selectionNodeElement(range.startContainer);
+    const end = selectionNodeElement(range.endContainer);
+    const startSource = start?.closest<HTMLElement>("[data-selection-source-id]");
+    const endSource = end?.closest<HTMLElement>("[data-selection-source-id]");
+    const sourceId = startSource?.dataset.selectionSourceId;
+    if (!sourceId || sourceId !== endSource?.dataset.selectionSourceId) {
+      setSelectionTarget(null);
+      return;
+    }
+    const messageId = startSource?.dataset.selectionMessageId;
+    const endMessageId = endSource?.dataset.selectionMessageId;
+    if ((messageId ?? "") !== (endMessageId ?? "")) {
+      setSelectionTarget(null);
+      return;
+    }
+    const message = detail.messages.find((item) => item.id === messageId);
+    if (messageId && !message) {
+      setSelectionTarget(null);
+      return;
+    }
+    const partId = startSource?.dataset.selectionPartId;
+    if ((endSource?.dataset.selectionPartId ?? "") !== (partId ?? "")) {
+      setSelectionTarget(null);
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      setSelectionTarget(null);
+      return;
+    }
+    setSelectionTarget({
+      message,
+      partId,
+      sourceId,
+      sourceLabel: startSource?.dataset.selectionSourceLabel,
+      selectedText: selectedText.slice(0, 8000),
+      rect: {
+        top: Math.max(8, rect.top - 44),
+        left: Math.max(12, rect.left + rect.width / 2),
+      },
+    });
+  }
+
+  function addSelectionToChat(target: SelectionReferenceTarget) {
+    if (!sessionWritable) return;
+    setReplyTargets((current) => {
+      const exists = current.some(
+        (item) =>
+          item.kind === "selection" &&
+          item.sourceId === target.sourceId &&
+          item.partId === target.partId &&
+          item.selectedText === target.selectedText,
+      );
+      if (exists) return current;
+      return [
+        ...current,
+        {
+          message: target.message,
+          kind: "selection" as const,
+          partId: target.partId,
+          sourceId: target.sourceId,
+          sourceLabel: target.sourceLabel,
+          selectedText: target.selectedText,
+          preview: target.selectedText,
+        },
+      ].slice(0, 5);
+    });
+    setSelectionTarget(null);
+    window.getSelection()?.removeAllRanges();
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
   async function uploadAttachmentFiles(files: File[]) {
@@ -1867,7 +2001,13 @@ export default function WorkbenchPage() {
           onOpenPart={setActivePartViewer}
         />
 
-        <div className="timeline" ref={timelineRef} onScroll={handleTimelineScroll}>
+        <div
+          className="timeline"
+          ref={timelineRef}
+          onScroll={handleTimelineScroll}
+          onMouseUp={() => window.setTimeout(handleTimelineSelection, 0)}
+          onKeyUp={() => window.setTimeout(handleTimelineSelection, 0)}
+        >
           {activeWorkspace?.timelineLoadingOlder && <p className="emptySessionList">加载更早消息...</p>}
           {conversationItems.map((item) =>
             item.kind === "message" ? (
@@ -1914,6 +2054,14 @@ export default function WorkbenchPage() {
           <RunStatusPill run={latestRun} events={detail?.events ?? []} />
         )}
 
+        {selectionTarget && (
+          <SelectionReferencePopover
+            target={selectionTarget}
+            onAdd={() => addSelectionToChat(selectionTarget)}
+            onClose={() => setSelectionTarget(null)}
+          />
+        )}
+
         <footer className="composer">
           {pendingMessages.length > 0 && (
             <PendingMessageQueue
@@ -1924,15 +2072,7 @@ export default function WorkbenchPage() {
             />
           )}
           {replyTargets.length > 0 && (
-            <div className="replyBanner">
-              <span>
-                引用 {replyTargets.length}/5：
-                {replyTargets.map((target) => `${target.partId ? "片段 " : ""}${target.preview.slice(0, 28)}`).join(" / ")}
-              </span>
-              <button type="button" onClick={() => setReplyTargets([])}>
-                取消
-              </button>
-            </div>
+            <ComposerReferencePreview targets={replyTargets} onRemove={removeReplyTarget} onClear={() => setReplyTargets([])} />
           )}
           {preservedAttachmentIds.length > 0 && (
             <div className="replyBanner preservedAttachmentBanner">
@@ -2874,10 +3014,90 @@ function dedupeAttachments(items: Array<{ id: string }>) {
   return next.length ? next : undefined;
 }
 
+function firstReplyMessageId(targets: ReplyTarget[]) {
+  return targets.find((target) => target.message)?.message?.id;
+}
+
 function pendingStatusText(item: PendingHubMessageDto) {
   if (item.status === "sending") return "发送中";
   if (item.status === "failed") return "发送失败";
   return "等待上一个 run 完成";
+}
+
+function selectionNodeElement(node: Node | null) {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+}
+
+function SelectionReferencePopover({
+  target,
+  onAdd,
+  onClose,
+}: {
+  target: SelectionReferenceTarget;
+  onAdd: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="selectionReferencePopover"
+      style={{ top: target.rect.top, left: target.rect.left }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button type="button" onClick={onAdd}>
+        <PlusOutlined />
+        <span>Add to chat</span>
+      </button>
+      <button className="selectionPopoverClose" type="button" title="关闭" onClick={onClose}>
+        <CloseOutlined />
+      </button>
+    </div>
+  );
+}
+
+function ComposerReferencePreview({
+  targets,
+  onRemove,
+  onClear,
+}: {
+  targets: ReplyTarget[];
+  onRemove: (index: number) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="selectionReferencePreview">
+      <div className="selectionPreviewChipRow">
+        {targets.map((target, index) => (
+          <span className="selectionPreviewChipWrap" key={referenceTargetKey(target, index)}>
+            <span className="selectionPreviewChip" tabIndex={0}>
+              <FileOutlined className="selectionChipIcon" />
+              <strong>selection</strong>
+              <button type="button" title="移除引用" onClick={() => onRemove(index)}>
+                <CloseOutlined />
+              </button>
+            </span>
+            <span className="selectionPreviewBubble" role="tooltip">
+              “{referencePreviewText(target)}”
+            </span>
+          </span>
+        ))}
+        {targets.length > 1 && (
+          <button className="selectionClearAll" type="button" onClick={onClear}>
+            全部移除
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function referenceTargetKey(target: ReplyTarget, index: number) {
+  return `${target.message?.id ?? target.sourceId ?? "selection"}-${target.partId ?? "message"}-${target.selectedText ?? target.preview}-${index}`;
+}
+
+function referencePreviewText(target: ReplyTarget) {
+  const text = target.selectedText ?? target.preview;
+  return text.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 function PinnedKeyMessages({
