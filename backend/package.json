@@ -10,7 +10,6 @@
     "typecheck": "pnpm --filter @agenthub/shared build && tsc -p tsconfig.json --noEmit",
     "lint": "pnpm --filter @agenthub/shared build && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "mock:orchestrator": "tsx src/mock/mock-orchestrator.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts"

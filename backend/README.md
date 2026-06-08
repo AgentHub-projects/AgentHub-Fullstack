@@ -17,7 +17,7 @@ Frontend POST /api/sessions/:id/messages
   -> Socket.IO push to frontend
 ```
 
-When `DOWNSTREAM_ORCHESTRATOR_WS_URL` is not configured, the backend uses the built-in mock Orchestrator path. That path emits `message.delta`, `file.change`, `artifact.upsert`, `message.completed`, and `run.completed`, so the frontend and persistence flow can be demonstrated without a real Agent runtime.
+`DOWNSTREAM_ORCHESTRATOR_WS_URL` must be configured to connect to the downstream orchestrator via WebSocket.
 
 ## Directory Structure
 
@@ -83,7 +83,7 @@ REDIS_URL=redis://localhost:6379
 # Seed 会创建账号 admin；真实密码只放本地 .env。
 AGENTHUB_ADMIN_PASSWORD=change-me
 
-# Optional. If omitted, the built-in mock Orchestrator is used.
+# Required. Downstream orchestrator WebSocket URL.
 DOWNSTREAM_ORCHESTRATOR_WS_URL=http://localhost:4000/acp
 
 # Optional context retrieval.

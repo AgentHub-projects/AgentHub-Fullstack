@@ -10,7 +10,7 @@ import { HubContextService } from "./context.service";
 import { DownstreamSandboxRegistryService } from "./downstream-sandbox-registry.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { AcpConnection } from "./acp-connection";
-import { asRecord, sleep, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
+import { asRecord, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
 
 type StartRunInput = {
   sessionId: string;
@@ -89,8 +89,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 
     const downstreamUrl = process.env.DOWNSTREAM_ORCHESTRATOR_WS_URL;
     if (!downstreamUrl) {
-      await this.simulateRun(input);
-      return;
+      throw new Error("DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured");
     }
 
     try {
@@ -712,98 +711,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     if (envelopeId !== undefined) record.acp.respond(envelopeId);
   }
 
-  /** Mock 模式模拟运行：未配置下游时生成示例事件 */
-  private async simulateRun(input: {
-    sessionId: string;
-    runId: string;
-    promptText: string;
-    orchestrator: AgentInstanceDto;
-    mentionedAgents: AgentInstanceDto[];
-  }) {
-    const speakers = input.mentionedAgents.length > 0 ? input.mentionedAgents : [
-      // Default mock agents
-      { id: 2, name: "frontend-agent" } as AgentInstanceDto,
-      { id: 3, name: "backend-agent" } as AgentInstanceDto,
-      { id: 4, name: "review-agent" } as AgentInstanceDto,
-    ];
-
-    // Check if already cancelled before starting
-    if (await this.isRunCancelled(input.runId)) return;
-
-    await this.prisma.agentRun.update({
-      where: { id: input.runId },
-      data: { status: "running", startedAt: new Date(), downstreamSessionId: `mock-${input.sessionId}` },
-    });
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "run.status",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: { status: "running", mode: "mock", reason: "DOWNSTREAM_ORCHESTRATOR_WS_URL is not configured" },
-    });
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "message.completed",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: {
-        text: `已收到任务，并将按 @Agent 分工推进：${speakers.map((agent) => agent.name).join("、") || "默认团队"}。`,
-      },
-    });
-
-    for (const agent of speakers.slice(0, 3)) {
-      await sleep(250);
-      if (await this.isRunCancelled(input.runId)) return;
-      await this.events.append({
-        sessionId: input.sessionId,
-        runId: input.runId,
-        eventType: "message.completed",
-        speakerAgentId: agent.id,
-        source: "mock_orchestrator",
-        payload: {
-          text: `${agent.name}：基于任务"${input.promptText.slice(0, 80)}"，我会输出可落库的消息和文件变更快照。`,
-          speaker: agent.id,
-        },
-      });
-    }
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "file.change",
-      speakerAgentId: speakers[0]?.id ?? input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: {
-        speaker: speakers[0]?.id ?? input.orchestrator.id,
-        path: "src/app/page.tsx",
-        changeType: "modified",
-        language: "tsx",
-        before: { content: "export default function Page(){ return <div /> }", truncated: false },
-        after: { content: "export default function Page(){ return <main>AgentHub Workbench</main> }", truncated: false },
-        patch: "@@ -1 +1 @@\n-export default function Page(){ return <div /> }\n+export default function Page(){ return <main>AgentHub Workbench</main> }\n",
-      },
-    });
-
-    await sleep(250);
-    if (await this.isRunCancelled(input.runId)) return;
-    await this.events.append({
-      sessionId: input.sessionId,
-      runId: input.runId,
-      eventType: "message.completed",
-      speakerAgentId: input.orchestrator.id,
-      source: "mock_orchestrator",
-      payload: { text: "本轮 mock 执行完成。接入真实下游后，该链路会复用同一套持久化与前端实时展示。" },
-    });
-    await this.completeRun(input.sessionId, input.runId, input.orchestrator.id, { status: "completed" });
-  }
-
   /** 读取 Session 表的下游 session ID */
   private async readSessionDownstreamId(sessionId: string): Promise<string | null> {
     const session = await this.prisma.session.findUnique({
@@ -877,21 +784,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     this.gateway.emitSession(mapSession(session));
   }
 
-  /** 标记 run 失败并推送会话更新 */
-  private async markRunFailed(sessionId: string, runId: string, code: string, message: string) {
-    await this.prisma.agentRun.update({
-      where: { id: runId },
-      data: { status: "failed", errorCode: code, errorMessage: message, completedAt: new Date() },
-    });
-    if (typeof this.prisma.session.findUnique === "function") {
-      const session = await this.prisma.session.findUnique({
-        where: { id: sessionId },
-        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
-      });
-      if (session) this.gateway.emitSession(mapSession(session));
-    }
-  }
-
   /** 构建 ACP session/prompt 的输入参数 */
   private async buildPromptInput(
     input: {
@@ -953,29 +845,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       agentId: participant.agent.id,
       description: participant.agent.description || participant.agent.template?.description || "",
     }));
-  }
-
-  /** 完结 run：更新状态，推送事件和会话 */
-  private async completeRun(sessionId: string, runId: string, speakerAgentId: AgentId, payload: Record<string, unknown>) {
-    await this.prisma.agentRun.update({
-      where: { id: runId },
-      data: { status: "completed", completedAt: new Date() },
-    });
-    const record = this.connections.get(sessionId);
-    if (record?.activeRunId === runId) record.activeRunId = undefined;
-    const session = await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { updatedAt: new Date() },
-      include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
-    });
-    await this.events.append({
-      sessionId,
-      runId,
-      eventType: "run.completed",
-      speakerAgentId,
-      payload,
-    });
-    this.gateway.emitSession(mapSession(session));
   }
 
   /** 标记 run 为失败：更新状态，推送失败事件和会话 */

@@ -55,7 +55,7 @@ export type BuilderAssistantContent = {
   draft: BuildTemplateDraft | null;
 };
 
-/** Agent 模板构建器：通过多轮 LLM 对话引导用户创建 Agent 模板，支持 mock 回退 */
+/** Agent 模板构建器：通过多轮 LLM 对话引导用户创建 Agent 模板 */
 @Injectable()
 export class BuilderService {
   private readonly summaryApiKey = process.env.SUMMARY_API_KEY ?? process.env.OPENAI_API_KEY;
@@ -372,23 +372,12 @@ export function normalizeDraftForConversation(
     .filter((message) => message.role === "user")
     .map((message) => message.content.trim())
     .filter(Boolean);
-  const initialNeed = userMessages[0] || draft.name;
-  const selectedName = userMessages[1] || draft.name;
-  const selectedDescription = userMessages[2] || draft.description;
-  const selectedPromptDirection = userMessages[3] || draft.systemPrompt;
   const selectedTools = parseToolList(userMessages[4] || "");
 
-  const description = isDirectOptionReuse(draft.description, userMessages)
-    ? buildMockDescription(initialNeed, selectedDescription)
-    : draft.description;
-  const systemPrompt = isDirectOptionReuse(draft.systemPrompt, userMessages) || draft.systemPrompt.length < 80
-    ? buildMockSystemPrompt(selectedName, description, selectedPromptDirection)
-    : draft.systemPrompt;
-
   return {
-    name: draft.name || deriveMockName(selectedName),
-    description,
-    systemPrompt,
+    name: draft.name || userMessages[0]?.slice(0, 28) || "新 Agent",
+    description: draft.description,
+    systemPrompt: draft.systemPrompt,
     defaultProvider: draft.defaultProvider === "open-code" ? "open-code" : "claude-code",
     tools: selectedTools.length ? selectedTools : normalizeTools(draft.tools),
   };
@@ -418,44 +407,10 @@ function draftValue(value: unknown): BuildTemplateDraft | null {
     : null;
 }
 
-function isDirectOptionReuse(value: string, userMessages: string[]) {
-  const normalized = compactComparable(value);
-  if (!normalized) return false;
-  return userMessages
-    .slice(1)
-    .filter((message) => message !== "claude-code" && message !== "open-code")
-    .some((message) => compactComparable(message) === normalized);
-}
-
-function compactComparable(value: string) {
-  return value.replace(/\s+/g, "").replace(/[。.!！?？,，;；:："'“”‘’]/g, "").toLowerCase();
-}
-
 function parseToolList(value: string) {
   const normalized = value.trim();
   if (!normalized || /^(none|无|不需要|claude-code|open-code)$/i.test(normalized)) return [];
   return normalizeTools(normalized.split(/[,，、\n]/).filter((item) => !/^(claude-code|open-code)$/i.test(item.trim())));
-}
-
-function deriveMockName(value: string) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) return "新 Agent";
-  if (normalized.length <= 28 && /Agent|助手|专家|审查|开发|分析/i.test(normalized)) return normalized;
-  return `${normalized.slice(0, 20)} Agent`;
-}
-
-function buildMockDescription(initialNeed: string, selectedDescription: string) {
-  return `根据用户需求“${initialNeed.slice(0, 48)}”，负责${selectedDescription.replace(/[。.]$/, "")}，并在对话中给出可执行、可验证的结果。`;
-}
-
-function buildMockSystemPrompt(name: string, description: string, direction: string) {
-  return [
-    `你是 ${deriveMockName(name)}。`,
-    `你的职责是${description.replace(/[。.]$/, "")}。`,
-    `回答时要结合用户目标主动澄清关键缺口，优先给出可执行方案、必要步骤和验收标准。`,
-    `风格方向：${direction.replace(/[。.]$/, "")}。不要只给泛泛建议，涉及代码或配置时要指出关键文件、命令或风险。`,
-    `如果信息不足，先说明假设；如果任务超出能力边界，明确指出限制并给出替代路径。`,
-  ].join("\n");
 }
 
 function buildSessionTitle(

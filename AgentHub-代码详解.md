@@ -564,25 +564,14 @@ confirmBuild(buildId, input):
   3. 更新 BuildSession 状态为 "completed"
 
 chatLLM(buildId, systemPrompt, messages):
-  如果配置了 API_KEY + BASE_URL:
-    POST {BASE_URL}/chat/completions, 非流式
-  否则: mockReply() 模拟回复
-
-mockReply(_buildId, messages):
-  根据对话轮次逐步返回模拟回复:
-    轮次 1-2: 问名称
-    轮次 3-4: 问描述
-    轮次 5-6: 问系统提示词
-    轮次 7-8: 问工具
-    轮次 9-10: 问提供者
-    之后: 生成 draft
+  POST {BASE_URL}/chat/completions, 非流式（需配置 API_KEY + BASE_URL）
 ```
 
 **导出的纯函数**：
 
 - `parseBuilderAssistantContent(content)` — 解析 JSON 为 `{ text, options, draft }`
 - `normalizeBuilderAssistantReply(content, messages)` — 如果有 draft，调用 `normalizeDraftForConversation` 丰富草稿
-- `normalizeDraftForConversation(draft, messages)` — 检查描述/系统提示是否直接复用了用户选项，如果是则生成更详细的模拟版本
+- `normalizeDraftForConversation(draft, messages)` — 标准化 draft 字段：填充默认 provider、规范化 tools、解析用户选项中的工具列表
 
 #### 4.3.5 HubSessionService — 会话核心编排
 
@@ -1984,11 +1973,11 @@ SandboxService.recordFileChangeFromSandbox():
 
 | 开关                                      | 效果                                                   |
 | --------------------------------------- | ---------------------------------------------------- |
-| `DOWNSTREAM_ORCHESTRATOR_WS_URL` 未配置    | 使用内置 mock orchestrator 模拟 Agent 回复                   |
+| `DOWNSTREAM_ORCHESTRATOR_WS_URL` 未配置    | 运行抛出错误，无法启动 Agent 运行                           |
 | `DOWNSTREAM_ENABLE_SESSION_LOAD` 未设置    | 每次运行创建新的下游会话，不复用                                     |
 | `DOWNSTREAM_ENABLE_CONTEXT_DELTA` 未设置   | pin/member 变更不通过 ACP 通知下游                            |
 | `DOWNSTREAM_ENABLE_FILE_APPLY_DIFF` 未设置 | applyFileChange 不发送 file/apply_diff 到下游              |
-| `SUMMARY_API_KEY` 未设置                   | BuilderService 使用 mockReply，ContextService 摘要回退到截断文本 |
+| `SUMMARY_API_KEY` 未设置                   | BuilderService 抛出错误，ContextService 摘要回退到截断文本 |
 | `ALIYUN_OSS_*` 未配置                      | 产物仅支持 inline_text 存储                                 |
 | `VERCEL_TOKEN` 未配置                      | 部署功能不可用（preflight 返回 missing）                        |
 | `AGENTHUB_SANDBOX_*` 未配置                | 沙箱编辑功能不可用                                            |

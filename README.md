@@ -73,7 +73,7 @@ AgentHub-Fullstack/
 ├── docs/                   # 设计和参考文档
 │   ├── design/
 │   └── reference/
-└── examples/               # demo/mock 数据
+└── examples/               # 示例数据
 ```
 
 ## 快速开始
@@ -115,7 +115,7 @@ REDIS_URL=redis://localhost:6379
 # 数据库
 DATABASE_URL=postgresql://agenthub:agenthub@localhost:5432/agenthub?schema=public
 
-# 下游编排器（可选，留空使用内置 Mock）
+# 下游编排器（必填）
 DOWNSTREAM_ORCHESTRATOR_WS_URL=
 
 # OpenAI / 兼容 API（用于上下文嵌入和摘要）
@@ -359,8 +359,6 @@ npx prisma migrate dev
 npx prisma generate
 npx prisma seed
 
-# Mock Orchestrator（用于本地开发）
-cd backend && pnpm mock:orchestrator
 
 # 运行测试
 pnpm test

@@ -478,8 +478,7 @@ export default function WorkbenchPage() {
     });
     hubSocketRef.current = disposable;
     return disposable;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated]);
+  }, [authenticated, socketSessionKey]);
 
   useEffect(() => {
     const preserve = preserveTimelineScrollRef.current;
