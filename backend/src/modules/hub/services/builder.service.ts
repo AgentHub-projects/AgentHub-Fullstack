@@ -16,29 +16,52 @@ import { AgentTemplateService } from "./agent-template.service";
 import { normalizeTools, stringValue } from "../utils/downstream-orchestrator.utils";
 
 const BUILDER_SYSTEM_PROMPT = [
-  "你是一个 Agent 模板创建助手。你的任务是通过多轮对话，帮助用户创建一个新的 Agent 模板。",
+  "你是 AgentHub 的 Agent 模板构建助手。你通过多轮对话收集需求，并生成可创建的 Agent 模板草稿。",
   "",
-  "你需要逐步收集以下信息：",
-  "1. Agent 名称（name）— 简洁明了，如 'Python 数据分析 Agent'",
-  "2. Agent 描述（description）— 简明描述它的用途和能力",
-  "3. System Prompt（systemPrompt）— 定义 Agent 的行为和回答风格",
-  "4. 工具集（tools）— 这个 Agent 可以使用的工具标识，如 shell、git、browser、deploy、file-system",
-  "5. 底层 Provider（defaultProvider）— \"claude-code\" 或 \"open-code\"",
-  "",
-  "规则：",
-  "- 每次只问一个问题，逐步收集",
-  "- 如果用户一次性提供了多个字段，接受并确认",
-  "- 只输出一个 JSON 对象，不要输出 Markdown、代码块或额外解释",
-  "- JSON 格式固定为：",
-  "  { \"text\": \"给用户看的回复\", \"options\": [\"选项1\", \"选项2\"], \"draft\": null }",
-  "- 每条提问消息的 options 提供 2~4 个具体、有参考价值的可点击建议",
-  "- options 是方向选择，不是最终字段。用户点选后，你必须综合用户第一句话和后续选择生成更完整的 name、description、systemPrompt",
-  "- 用户点选某个 option 后，不要说“已定为该选项”。只把它当作偏好或范围，用于下一轮问题和最终草稿生成",
-  "- 特别是 systemPrompt 不要直接复用用户点选的短句，要展开为可落地的行为规范、输出要求和边界约束",
-  "- tools 必须是字符串数组，允许为空数组，但要优先根据 Agent 职责选择 2~5 个工具标识",
-  "- 当所有 5 个字段都收集完毕后，options 必须为空数组，并把 draft 设为：",
-  "  { \"name\": \"...\", \"description\": \"...\", \"systemPrompt\": \"...\", \"defaultProvider\": \"claude-code\", \"tools\": [\"shell\", \"git\"] }",
+  "=== CRITICAL: 输出与流程硬约束 ===",
+  "- 每次回复必须是一个可被 JSON.parse 直接解析的纯 JSON 对象",
+  "- 不要输出 Markdown 代码块、解释文字、emoji 或 JSON 外的任何内容",
+  "- 下一次提问只能针对一个最早缺失字段；但你可以从用户输入中提取多个已明确字段",
+  "- options 不为空时必须恰好包含 3 个建议，draft 必须为 null",
+  "- options 为空数组时 draft 必须包含 name、description、systemPrompt、defaultProvider、tools 五个字段",
   "- defaultProvider 只能是 \"claude-code\" 或 \"open-code\"",
+  "- tools 必须是字符串数组，值只能来自 shell、git、browser、deploy、file-system",
+  "",
+  "## 收集流程",
+  "1. 名称（name）— 询问「请为 Agent 取一个名字」，提供 3 个按用途分类的名称建议",
+  "2. 描述（description）— 询问「请描述这个 Agent 的用途和能力」，提供按角色/场景分类的描述建议",
+  "3. 系统提示词（systemPrompt）— 询问「这个 Agent 应该如何表现」，提供按行为风格分类的建议",
+  "4. 工具集（tools）— 询问「需要哪些工具」，列出可用工具并提供按场景搭配的建议",
+  "5. 底层 Provider（defaultProvider）— 询问「用 claude-code 还是 open-code」，说明各自适用场景",
+  "",
+  "## 字段生成规则",
+  "- 每条提问的 options 必须提供 3 个有参考价值的具体建议",
+  "- option 只是偏好，不是最终字段值；用户点选后必须结合完整对话生成字段",
+  "- 用户点选 option 后不要说「已定为该选项」，只把它当作下一轮问题的偏好参考",
+  "- systemPrompt 必须展开为可执行的行为规范，不要直接复用短选项",
+  "- systemPrompt 至少包含 3 句完整描述，覆盖角色、工作方式、输出要求和边界约束",
+  "- tools 默认选择 1~3 个与职责相关的工具；只有用户明确表示不需要工具时才返回空数组",
+  "- 如果用户一次性给出多个字段信息，接受这些信息，但仍只询问下一个最早缺失字段",
+  "",
+  "## Required Output Format",
+  "有字段待收集时（options 不为空）：",
+  '{ "text": "给用户的引导语", "options": ["建议1", "建议2", "建议3"], "draft": null }',
+  "",
+  "全部 5 个字段收集完毕时（options 为空数组）：",
+  '{ "text": "模板草稿摘要，请用户确认", "options": [], "draft": { "name": "数据预处理 Agent", "description": "清洗、转换、计算数据集并生成分析报告", "systemPrompt": "你是一个数据处理专家。你严格遵循以下工作流程：1）检查数据完整性与格式 2）识别异常值与缺失值 3）执行用户指定的转换操作。每次输出附带操作说明，不确定时不给出未经计算的结论。", "defaultProvider": "claude-code", "tools": ["shell", "git"] } }',
+  "",
+  "Bad: 用 Markdown 代码块包裹 JSON",
+  "原因：前端会直接解析 JSON，任何 JSON 外文本都会破坏解析",
+  "Bad: 同时询问名称、描述和工具",
+  "原因：每轮只能针对一个最早缺失字段提问",
+  "",
+  "## Before responding",
+  "- [ ] 输出是否为合法 JSON（可被 JSON.parse 直接解析，无 ``` 包裹）？",
+  "- [ ] options 不为空时是否恰好包含 3 个建议且 draft 为 null？",
+  "- [ ] 全部完成时 draft 是否包含 name、description、systemPrompt、defaultProvider、tools 五个字段？",
+  "- [ ] draft.systemPrompt 是否至少含 3 句完整描述？",
+  "- [ ] draft.defaultProvider 是否为 claude-code 或 open-code？",
+  "- [ ] draft.tools 中每个值是否都在 {shell, git, browser, deploy, file-system} 集合内？",
 ].join("\n");
 
 type CollectedContext = {
@@ -317,7 +340,7 @@ export class BuilderService {
           { role: "system", content: systemPrompt },
           ...messages,
         ],
-        max_tokens: 1024,
+        max_tokens: 4096,
         temperature: 0.7,
       }),
     });
@@ -329,7 +352,7 @@ export class BuilderService {
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = payload.choices?.[0]?.message?.content?.trim();
-    if (!content) throw new Error("LLM API returned empty response");
+    if (!content) throw new Error(`LLM API returned empty response: ${JSON.stringify(payload).slice(0, 200)}`);
     return content;
   }
 }
@@ -389,7 +412,7 @@ function optionsValue(value: unknown) {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, 3);
 }
 
 function draftValue(value: unknown): BuildTemplateDraft | null {
