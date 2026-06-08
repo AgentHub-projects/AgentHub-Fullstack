@@ -1489,7 +1489,7 @@ export function FilePanel({
             {openedFile && previewMode && previewKind && (
               <div className="filePreviewPane">
                 {previewKind === "html" && (
-                  <iframe className="filePreviewFrame" title={fileName} srcDoc={file?.content || draft} sandbox="allow-scripts" />
+                  <iframe key={`preview-${openedFile.path}`} className="filePreviewFrame" title={fileName} srcDoc={file?.content ?? draft} sandbox="" />
                 )}
                 {previewKind === "markdown" && (
                   <div className="filePreviewMarkdown"><RichText text={draft} /></div>

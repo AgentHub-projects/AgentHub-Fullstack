@@ -34,8 +34,6 @@ app.prepare().then(() => {
       filesystemProxy.web(req, res);
     } else if (parsedUrl.pathname?.startsWith("/filesystem/download")) {
       filesystemProxy.web(req, res);
-    } else if (parsedUrl.pathname?.startsWith("/filesystem/preview")) {
-      filesystemProxy.web(req, res);
     } else if (parsedUrl.pathname?.startsWith("/socket.io")) {
       req.socket.setTimeout(0);
       res.socket?.setTimeout(0);
