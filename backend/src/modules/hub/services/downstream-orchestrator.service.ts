@@ -322,7 +322,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       activeOrchestratorAgentId: options.activeOrchestratorAgentId,
       idleTimer: null,
       lastActivityAt: Date.now(),
-      needsBootstrap: !options.downstreamSessionId,
+      needsBootstrap: true,
     };
     this.connections.set(sessionId, record);
 
@@ -366,7 +366,6 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         this.logger.log(`[发送JSON] session/load: ${JSON.stringify({ jsonrpc: "2.0", id: "<acp-auto>", method: "session/load", params: sessionParams })}`);
         const loadResult = await acp.request("session/load", sessionParams);
         this.logger.log(`[接收JSON] session/load响应: ${JSON.stringify({ jsonrpc: "2.0", id: "<response>", result: loadResult })}`);
-        record.needsBootstrap = false;
         record.resolveDownstreamReady?.(record.downstreamSessionId);
         this.markDownstreamActivity(record);
         this.scheduleIdleDisconnectCheck(record);
@@ -881,16 +880,17 @@ function renderAgentGatewayPrompt(input: {
   agents: Array<{ agentId: AgentId; description: string }>;
 }) {
   const sections = [
-    `# AgentHub Request (${input.promptMode})`,
-    input.contextText ? `## Session Context\n${input.contextText}` : "",
+    `# AgentHub 任务分派 (${input.promptMode})`,
+    "请基于以下会话上下文和用户请求完成当前任务。",
+    input.contextText ? `## 会话上下文\n${input.contextText}` : "",
     input.mentionedAgents.length > 0
-      ? `## Mentioned Agents\n${input.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
+      ? `## 提及的 Agent\n${input.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
       : "",
     input.agents.length > 0
-      ? `## Available Worker Agents\n${input.agents.map((agent) => `- ${agent.agentId}: ${agent.description}`).join("\n")}`
+      ? `## 可用 Worker Agent\n${input.agents.map((agent) => `- ${agent.agentId}: ${agent.description}`).join("\n")}`
       : "",
     messageContextPrompt(input.messageContext),
-    `## Current User Request\n${input.promptText}`,
+    `## 当前用户请求\n${input.promptText}`,
   ];
   return sections.filter((section) => section.trim().length > 0).join("\n\n");
 }
