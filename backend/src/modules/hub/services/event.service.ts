@@ -17,12 +17,15 @@ type MessageBuffer = {
   startedAt: Date;
 };
 
+type RunTerminalHandler = (sessionId: string, runId: string, eventType: string) => void | Promise<void>;
+
 /** 事件服务：接收下游事件、去重排序、应用副作用（消息缓冲、文件变更、产物管理等） */
 @Injectable()
 export class HubEventService {
   private readonly messageBuffers = new Map<string, Map<string, MessageBuffer>>();
   private readonly artifactPartBuffers = new Map<string, Map<string, HubMessagePartDto[]>>();
   private readonly runSeqWatermarks = new Map<string, number>();
+  private readonly runTerminalHandlers = new Set<RunTerminalHandler>();
   // key: runId -> Map<speakerAgentId, MessageBuffer>
 
   constructor(
@@ -35,6 +38,13 @@ export class HubEventService {
     @Inject(HubContextService)
     private readonly context: HubContextService,
   ) {}
+
+  onRunTerminal(handler: RunTerminalHandler) {
+    this.runTerminalHandlers.add(handler);
+    return () => {
+      this.runTerminalHandlers.delete(handler);
+    };
+  }
 
   /** 接收并处理事件：去重、排序、持久化、触发副作用 */
   async append(input: {
@@ -268,6 +278,17 @@ export class HubEventService {
       this.messageBuffers.delete(event.runId);
       this.artifactPartBuffers.delete(event.runId);
       this.runSeqWatermarks.delete(event.runId);
+      this.notifyRunTerminal(event);
+    }
+  }
+
+  private notifyRunTerminal(event: HubEventDto) {
+    for (const handler of this.runTerminalHandlers) {
+      try {
+        void Promise.resolve(handler(event.sessionId, event.runId, event.eventType)).catch(() => undefined);
+      } catch {
+        // 不阻塞下游事件落库和实时推送。
+      }
     }
   }
 

@@ -17,6 +17,7 @@ import type {
   HubEventDto,
   HubFileChangeDto,
   HubMessageDto,
+  PendingHubMessageDto,
   HubSessionDto,
 } from "@agenthub/shared";
 import { AuthSessionService } from "../auth/auth-session.service";
@@ -177,6 +178,26 @@ export class HubRealtimeGateway implements OnGatewayConnection, OnGatewayDisconn
       payload: context,
     };
     this.server.to(sessionRoom(sessionId)).emit("hub:context", envelope);
+  }
+
+  /** 推送待发送消息更新 */
+  emitPendingMessage(message: PendingHubMessageDto) {
+    const envelope: FrontendRealtimeEnvelope = {
+      type: "pending_message",
+      sessionId: message.sessionId,
+      payload: message,
+    };
+    this.server.to(sessionRoom(message.sessionId)).emit("hub:pending_message", envelope);
+  }
+
+  /** 推送待发送消息删除 */
+  emitPendingMessageDeleted(sessionId: string, pendingId: string) {
+    const envelope: FrontendRealtimeEnvelope = {
+      type: "pending_message",
+      sessionId,
+      payload: { id: pendingId, deleted: true },
+    };
+    this.server.to(sessionRoom(sessionId)).emit("hub:pending_message", envelope);
   }
 
   /** 追踪客户端订阅并更新计数 */

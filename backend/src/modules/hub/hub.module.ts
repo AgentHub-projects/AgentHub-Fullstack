@@ -25,6 +25,7 @@ import { HubEventService } from "./services/event.service";
 import { HubSessionService } from "./services/hub-session.service";
 import { PrismaService } from "./services/prisma.service";
 import { DownstreamSandboxRegistryService } from "./services/downstream-sandbox-registry.service";
+import { PendingMessageQueueService } from "./services/pending-message-queue.service";
 
 /** Hub 核心模块，注册所有控制器、服务、网关和全局鉴权守卫 */
 @Module({
@@ -54,6 +55,7 @@ import { DownstreamSandboxRegistryService } from "./services/downstream-sandbox-
     HubEventService,
     DownstreamOrchestratorService,
     DownstreamSandboxRegistryService,
+    PendingMessageQueueService,
     DeploymentService,
     HubSessionService,
   ],

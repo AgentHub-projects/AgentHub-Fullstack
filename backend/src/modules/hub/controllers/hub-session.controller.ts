@@ -13,9 +13,11 @@ import {
 import type {
   AddParticipantRequest,
   CreateHubSessionRequest,
+  CreatePendingHubMessageRequest,
   PinHubMessageRequest,
   SendHubMessageRequest,
   StartDeploymentRequest,
+  UpdatePendingHubMessageRequest,
   UpdateHubSessionRequest,
 } from "@agenthub/shared";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
@@ -133,6 +135,34 @@ export class HubSessionController {
   @Post(":sessionId/messages")
   sendMessage(@Param("sessionId") sessionId: string, @Body() body: SendHubMessageRequest) {
     return this.sessions.sendMessage(sessionId, body);
+  }
+
+  /** 列出待发送消息 */
+  @Get(":sessionId/pending-messages")
+  listPendingMessages(@Param("sessionId") sessionId: string) {
+    return this.sessions.listPendingMessages(sessionId);
+  }
+
+  /** 创建待发送消息 */
+  @Post(":sessionId/pending-messages")
+  createPendingMessage(@Param("sessionId") sessionId: string, @Body() body: CreatePendingHubMessageRequest) {
+    return this.sessions.createPendingMessage(sessionId, body);
+  }
+
+  /** 修改待发送消息 */
+  @Patch(":sessionId/pending-messages/:pendingId")
+  updatePendingMessage(
+    @Param("sessionId") sessionId: string,
+    @Param("pendingId") pendingId: string,
+    @Body() body: UpdatePendingHubMessageRequest,
+  ) {
+    return this.sessions.updatePendingMessage(sessionId, pendingId, body);
+  }
+
+  /** 删除待发送消息 */
+  @Delete(":sessionId/pending-messages/:pendingId")
+  deletePendingMessage(@Param("sessionId") sessionId: string, @Param("pendingId") pendingId: string) {
+    return this.sessions.deletePendingMessage(sessionId, pendingId);
   }
 
   /** 置顶/取消置顶消息 */

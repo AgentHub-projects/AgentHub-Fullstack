@@ -12,7 +12,9 @@ import type {
   HubMessagePartDto,
   HubRunDto,
   HubSessionDto,
+  PendingHubMessageDto,
   ProjectDto,
+  SendHubMessageRequest,
   SessionDetailDto,
   SessionTimelinePageDto,
   UpdateAgentRequest,
@@ -45,15 +47,18 @@ import {
   bindSessionProject,
   cancelRun,
   connectHubSocket,
+  createPendingSessionMessage,
   createSession,
   createProject,
   createSessionAgent,
   deleteAgent,
+  deletePendingSessionMessage,
   getAuthState,
   getDeploymentPreflight,
   getSessionDetail,
   listAgents,
   listAgentTemplates,
+  listPendingSessionMessages,
   listPinnedMessages,
   listProjects,
   listSessions,
@@ -128,7 +133,10 @@ type SessionWorkspace = {
   detail: SessionDetailDto | null;
   composer: string;
   attachments: UploadedAttachmentDto[];
+  preservedAttachmentIds: string[];
   replyTargets: ReplyTarget[];
+  pendingMessages: PendingHubMessageDto[];
+  pendingMessagesLoading: boolean;
   inspectorTab: InspectorTab;
   timelineHasMore: boolean;
   timelineCursor: string | null;
@@ -139,7 +147,10 @@ const EMPTY_WORKSPACE: SessionWorkspace = {
   detail: null,
   composer: "",
   attachments: [],
+  preservedAttachmentIds: [],
   replyTargets: [],
+  pendingMessages: [],
+  pendingMessagesLoading: false,
   inspectorTab: "diff",
   timelineHasMore: false,
   timelineCursor: null,
@@ -176,6 +187,7 @@ export default function WorkbenchPage() {
   const [deploymentPreflights, setDeploymentPreflights] = useState<Record<string, DeploymentPreflightResponse>>({});
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [deployingSessionId, setDeployingSessionId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
@@ -267,7 +279,9 @@ export default function WorkbenchPage() {
   const detail = activeWorkspace?.detail ?? null;
   const composer = activeWorkspace?.composer ?? "";
   const attachments = activeWorkspace?.attachments ?? [];
+  const preservedAttachmentIds = activeWorkspace?.preservedAttachmentIds ?? [];
   const replyTargets = activeWorkspace?.replyTargets ?? [];
+  const pendingMessages = activeWorkspace?.pendingMessages ?? [];
   const inspectorTab = activeWorkspace?.inspectorTab ?? "diff";
   const deploymentPreflight = activeSessionId ? deploymentPreflights[activeSessionId] : undefined;
   const activeSession = detail?.session ?? sessions.find((session) => session.id === activeSessionId) ?? null;
@@ -280,8 +294,8 @@ export default function WorkbenchPage() {
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
-  const runActionLocked = !sessionWritable;
-  const chatActionLocked = runActionLocked;
+  const runActionLocked = !sessionWritable || activeRunInProgress;
+  const chatActionLocked = !sessionWritable;
   const sandboxEditorDisabledReason = !activeSessionId
     ? "请选择会话后编辑文件"
     : !sessionWritable
@@ -390,6 +404,13 @@ export default function WorkbenchPage() {
     updateActiveWorkspace((current) => ({ ...current, attachments: resolveState(value, current.attachments) }));
   }
 
+  function setPreservedAttachmentIds(value: SetStateAction<string[]>) {
+    updateActiveWorkspace((current) => ({
+      ...current,
+      preservedAttachmentIds: resolveState(value, current.preservedAttachmentIds),
+    }));
+  }
+
   function setReplyTargets(value: SetStateAction<ReplyTarget[]>) {
     updateActiveWorkspace((current) => ({ ...current, replyTargets: resolveState(value, current.replyTargets) }));
   }
@@ -462,6 +483,16 @@ export default function WorkbenchPage() {
             : current,
         );
         setSessionTabs((current) => markSessionTabUpdated(current, message.sessionId));
+      },
+      onPendingMessage: (message) => {
+        if (!message.sessionId) return;
+        updateWorkspace(message.sessionId, (current) => ({
+          ...current,
+          pendingMessages: "deleted" in message && message.deleted
+            ? current.pendingMessages.filter((item) => item.id !== message.id)
+            : upsertById(current.pendingMessages, message as PendingHubMessageDto).sort(sortPendingMessage),
+        }));
+        setSessionTabs((current) => markSessionTabUpdated(current, message.sessionId!));
       },
       onArtifact: (artifact) => {
         setWorkspaceDetail(artifact.sessionId, (current) =>
@@ -751,6 +782,7 @@ export default function WorkbenchPage() {
     ensureWorkspace(sessionId);
     if (workspaces[sessionId]?.detail) {
       void ensureAgentsLoaded();
+      void loadPendingMessages(sessionId);
       schedulePinnedMessagesLoad(sessionId);
       closeMentionMenu();
       return;
@@ -772,8 +804,24 @@ export default function WorkbenchPage() {
       timelineLoadingOlder: false,
     }));
     void ensureAgentsLoaded();
+    void loadPendingMessages(sessionId);
     schedulePinnedMessagesLoad(sessionId);
     closeMentionMenu();
+  }
+
+  async function loadPendingMessages(sessionId: string) {
+    updateWorkspace(sessionId, (current) => ({ ...current, pendingMessagesLoading: true }));
+    const result = await listPendingSessionMessages(sessionId);
+    if (!result.ok) {
+      updateWorkspace(sessionId, (current) => ({ ...current, pendingMessagesLoading: false }));
+      setNotice(`待发送消息加载失败：${result.error}`);
+      return;
+    }
+    updateWorkspace(sessionId, (current) => ({
+      ...current,
+      pendingMessages: result.data.items.sort(sortPendingMessage),
+      pendingMessagesLoading: false,
+    }));
   }
 
   async function loadOlderTimeline() {
@@ -996,24 +1044,34 @@ export default function WorkbenchPage() {
 
   async function handleSend() {
     const text = composer.trim();
-    if (!text || !activeSessionId || runActionLocked || sending) return;
+    if (!text || !activeSessionId || !sessionWritable || sending) return;
     setSending(true);
     setComposer("");
     closeMentionMenu();
     try {
-      const targetAgentIds =
-        mode === "direct" ? [] : parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
-      const result = await sendSessionMessage(activeSessionId, {
-        content: text,
-        mentionedAgentIds: targetAgentIds,
-        orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
-        parentMessageId: replyTargets[0]?.message.id,
-        quotedMessageId: replyTargets[0]?.message.id,
-        references: replyTargets.map((target) => ({ messageId: target.message.id, partId: target.partId })),
-        attachments: attachments.map((item) => ({ id: item.id })),
-      });
+      const payload = buildMessagePayload(text);
+      if (activeRunInProgress) {
+        const result = await createPendingSessionMessage(activeSessionId, payload);
+        if (!result.ok) {
+          setNotice(`发送失败：${result.error}`);
+          setComposer(text);
+          return;
+        }
+        updateWorkspace(activeSessionId, (current) => ({
+          ...current,
+          pendingMessages: upsertById(current.pendingMessages, result.data).sort(sortPendingMessage),
+        }));
+        setAttachments([]);
+        setPreservedAttachmentIds([]);
+        setReplyTargets([]);
+        setNotice("已加入待发送队列");
+        return;
+      }
+
+      const result = await sendSessionMessage(activeSessionId, payload);
       if (!result.ok) {
         setNotice(`发送失败：${result.error}`);
+        setComposer(text);
         return;
       }
       setDetail((current) => {
@@ -1032,11 +1090,30 @@ export default function WorkbenchPage() {
       });
       setSessions((current) => upsertById(current, result.data.session).sort(sortSession));
       setAttachments([]);
+      setPreservedAttachmentIds([]);
       setReplyTargets([]);
       setNotice(mode === "direct" ? "消息已发送给 Agent" : "消息已发送给 Orchestrator");
     } finally {
       setSending(false);
     }
+  }
+
+  function buildMessagePayload(text: string): SendHubMessageRequest {
+    const targetAgentIds =
+      mode === "direct" ? [] : parsedMentionIds.length > 0 ? parsedMentionIds : composerAgents.map((agent) => agent.id);
+    const attachmentIds = [
+      ...preservedAttachmentIds.map((id) => ({ id })),
+      ...attachments.map((item) => ({ id: item.id })),
+    ];
+    return {
+      content: text,
+      mentionedAgentIds: targetAgentIds,
+      orchestratorAgentId: mode === "direct" ? directAgent?.id : orchestrator?.id,
+      parentMessageId: replyTargets[0]?.message.id,
+      quotedMessageId: replyTargets[0]?.message.id,
+      references: replyTargets.map((target) => ({ messageId: target.message.id, partId: target.partId })),
+      attachments: dedupeAttachments(attachmentIds),
+    };
   }
 
   function updateMessageInDetail(message: HubMessageDto) {
@@ -1082,6 +1159,54 @@ export default function WorkbenchPage() {
       }
     } finally {
       setCancellingRunId(null);
+    }
+  }
+
+  async function handleDeletePendingMessage(pending: PendingHubMessageDto) {
+    if (!activeSessionId || pendingActionId) return;
+    setPendingActionId(pending.id);
+    try {
+      const result = await deletePendingSessionMessage(activeSessionId, pending.id);
+      if (!result.ok) {
+        setNotice(`删除待发送消息失败：${result.error}`);
+        return;
+      }
+      updateWorkspace(activeSessionId, (current) => ({
+        ...current,
+        pendingMessages: current.pendingMessages.filter((item) => item.id !== pending.id),
+      }));
+      setNotice("已删除待发送消息");
+    } finally {
+      setPendingActionId(null);
+    }
+  }
+
+  async function handleEditPendingMessage(pending: PendingHubMessageDto) {
+    if (!activeSessionId || pendingActionId) return;
+    setPendingActionId(pending.id);
+    try {
+      const result = await deletePendingSessionMessage(activeSessionId, pending.id);
+      if (!result.ok) {
+        setNotice(`修改待发送消息失败：${result.error}`);
+        return;
+      }
+      const targets: ReplyTarget[] = [];
+      for (const reference of pending.payload.references ?? []) {
+        const message = detail?.messages.find((item) => item.id === reference.messageId);
+        if (message) targets.push({ message, partId: reference.partId, preview: message.contentText || "引用消息" });
+      }
+      setComposer(pending.payload.content);
+      setAttachments([]);
+      setPreservedAttachmentIds((pending.payload.attachments ?? []).map((item) => item.id));
+      setReplyTargets(targets);
+      updateWorkspace(activeSessionId, (current) => ({
+        ...current,
+        pendingMessages: current.pendingMessages.filter((item) => item.id !== pending.id),
+      }));
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+      setNotice("已载入待发送消息，可修改后重新加入队列");
+    } finally {
+      setPendingActionId(null);
     }
   }
 
@@ -1432,8 +1557,8 @@ export default function WorkbenchPage() {
   }
 
   async function uploadAttachmentFiles(files: File[]) {
-    if (!activeSessionId || runActionLocked || files.length === 0 || uploadingAttachment) return;
-    const selected = files.slice(0, Math.max(0, 5 - attachments.length));
+    if (!activeSessionId || !sessionWritable || files.length === 0 || uploadingAttachment) return;
+    const selected = files.slice(0, Math.max(0, 5 - attachments.length - preservedAttachmentIds.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
       return;
@@ -1448,6 +1573,7 @@ export default function WorkbenchPage() {
         const result = await uploadSessionAttachment(activeSessionId, file);
         if (result.ok) {
           setAttachments((current) => [...current, result.data].slice(0, 5));
+          setPreservedAttachmentIds((current) => current.filter((id) => id !== result.data.id));
         } else {
           setNotice(`附件上传失败：${result.error}`);
         }
@@ -1752,7 +1878,7 @@ export default function WorkbenchPage() {
                 onPinPart={handlePinPart}
                 onReply={!chatActionLocked ? addReplyTarget : undefined}
                 onReferencePart={!chatActionLocked ? addReplyPartTarget : undefined}
-                onRegenerate={!chatActionLocked ? (message) => void handleRegenerate(message) : undefined}
+                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 onOpenDiffPanel={focusDiffPanel}
@@ -1773,7 +1899,7 @@ export default function WorkbenchPage() {
                 onPinPart={handlePinPart}
                 onReply={!chatActionLocked ? addReplyTarget : undefined}
                 onReferencePart={!chatActionLocked ? addReplyPartTarget : undefined}
-                onRegenerate={!chatActionLocked ? (message) => void handleRegenerate(message) : undefined}
+                onRegenerate={!runActionLocked ? (message) => void handleRegenerate(message) : undefined}
                 onOpenArtifact={openArtifactViewer}
                 onOpenPart={setActivePartViewer}
                 onOpenDiffPanel={focusDiffPanel}
@@ -1789,6 +1915,14 @@ export default function WorkbenchPage() {
         )}
 
         <footer className="composer">
+          {pendingMessages.length > 0 && (
+            <PendingMessageQueue
+              items={pendingMessages}
+              busyId={pendingActionId}
+              onEdit={handleEditPendingMessage}
+              onDelete={handleDeletePendingMessage}
+            />
+          )}
           {replyTargets.length > 0 && (
             <div className="replyBanner">
               <span>
@@ -1797,6 +1931,14 @@ export default function WorkbenchPage() {
               </span>
               <button type="button" onClick={() => setReplyTargets([])}>
                 取消
+              </button>
+            </div>
+          )}
+          {preservedAttachmentIds.length > 0 && (
+            <div className="replyBanner preservedAttachmentBanner">
+              <span>保留附件 {preservedAttachmentIds.length}/5</span>
+              <button type="button" onClick={() => setPreservedAttachmentIds([])}>
+                清除
               </button>
             </div>
           )}
@@ -1845,10 +1987,10 @@ export default function WorkbenchPage() {
             <textarea
               ref={textareaRef}
               value={composer}
-              placeholder="发消息..."
+              placeholder={activeRunInProgress ? "Ask for follow-up changes" : "发消息..."}
               onPaste={(event) => {
                 const files = clipboardAttachmentFiles(event.clipboardData);
-                if (!files.length || !activeSessionId || chatActionLocked) return;
+                if (!files.length || !activeSessionId || !sessionWritable) return;
                 event.preventDefault();
                 void uploadAttachmentFiles(files);
               }}
@@ -1919,7 +2061,7 @@ export default function WorkbenchPage() {
               className="iconButton"
               type="button"
               title="上传附件"
-              disabled={!activeSessionId || chatActionLocked || uploadingAttachment || attachments.length >= 5}
+              disabled={!activeSessionId || !sessionWritable || uploadingAttachment || attachments.length + preservedAttachmentIds.length >= 5}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
@@ -1927,11 +2069,11 @@ export default function WorkbenchPage() {
             <button
               className="primaryButton"
               type="button"
-              disabled={!composer.trim() || sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
+              disabled={!composer.trim() || sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
               onClick={() => void handleSend()}
             >
-              {sending ? <LoadingOutlined /> : <SendOutlined />}
-              <span>发送</span>
+              {sending ? <LoadingOutlined /> : activeRunInProgress ? <PlusOutlined /> : <SendOutlined />}
+              <span>{activeRunInProgress ? "加入待发送" : "发送"}</span>
             </button>
           </div>
         </footer>
@@ -2717,6 +2859,27 @@ function sessionListPreview(session: HubSessionDto) {
   return subtitle.endsWith(timeSuffix) ? subtitle.slice(0, -timeSuffix.length) : subtitle;
 }
 
+function sortPendingMessage(a: PendingHubMessageDto, b: PendingHubMessageDto) {
+  return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+}
+
+function dedupeAttachments(items: Array<{ id: string }>) {
+  const seen = new Set<string>();
+  const next: Array<{ id: string }> = [];
+  for (const item of items) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    next.push(item);
+  }
+  return next.length ? next : undefined;
+}
+
+function pendingStatusText(item: PendingHubMessageDto) {
+  if (item.status === "sending") return "发送中";
+  if (item.status === "failed") return "发送失败";
+  return "等待上一个 run 完成";
+}
+
 function PinnedKeyMessages({
   messages,
   onReply,
@@ -2789,6 +2952,56 @@ function PinnedKeyMessages({
                   )}
                 </div>
               )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function PendingMessageQueue({
+  items,
+  busyId,
+  onEdit,
+  onDelete,
+}: {
+  items: PendingHubMessageDto[];
+  busyId?: string | null;
+  onEdit: (message: PendingHubMessageDto) => void;
+  onDelete: (message: PendingHubMessageDto) => void;
+}) {
+  return (
+    <section className="pendingMessageQueue" aria-label="待发送消息">
+      <div className="pendingQueueHeader">
+        <span>待发送 {items.length}</span>
+      </div>
+      <div className="pendingQueueList">
+        {items.map((item, index) => {
+          const attachmentCount = item.payload.attachments?.length ?? 0;
+          const referenceCount = item.payload.references?.length ?? 0;
+          return (
+            <article className={`pendingMessageCard ${item.status}`} key={item.id}>
+              <div className="pendingMessageMain">
+                <span className="pendingMessageIndex">{index + 1}</span>
+                <p>{item.payload.content}</p>
+              </div>
+              <div className="pendingMessageMeta">
+                <span>{pendingStatusText(item)}</span>
+                {referenceCount > 0 && <span>引用 {referenceCount}</span>}
+                {attachmentCount > 0 && <span>附件 {attachmentCount}</span>}
+              </div>
+              {item.errorMessage && <small className="pendingMessageError">{item.errorMessage}</small>}
+              <div className="pendingMessageActions">
+                <button type="button" disabled={Boolean(busyId)} onClick={() => onEdit(item)}>
+                  <EditOutlined />
+                  <span>修改</span>
+                </button>
+                <button type="button" disabled={Boolean(busyId)} onClick={() => onDelete(item)}>
+                  {busyId === item.id ? <LoadingOutlined /> : <DeleteOutlined />}
+                  <span>删除</span>
+                </button>
+              </div>
             </article>
           );
         })}

@@ -461,6 +461,20 @@ export interface SendHubMessageRequest {
   attachments?: Array<{ id: string }>;
 }
 
+export interface PendingHubMessageDto {
+  id: string;
+  sessionId: string;
+  payload: SendHubMessageRequest;
+  status: "pending" | "sending" | "failed";
+  errorMessage?: string | null;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+export interface CreatePendingHubMessageRequest extends SendHubMessageRequest {}
+
+export interface UpdatePendingHubMessageRequest extends SendHubMessageRequest {}
+
 export interface SendHubMessageResponse {
   session: HubSessionDto;
   message: HubMessageDto;
@@ -572,7 +586,7 @@ export interface FrontendRealtimeSubscribe {
 }
 
 export interface FrontendRealtimeEnvelope {
-  type: "event" | "session" | "message" | "artifact" | "file_change" | "context";
+  type: "event" | "session" | "message" | "artifact" | "file_change" | "context" | "pending_message";
   sessionId: string;
   payload:
     | HubEventDto
@@ -580,5 +594,7 @@ export interface FrontendRealtimeEnvelope {
     | HubMessageDto
     | HubArtifactDto
     | HubFileChangeDto
-    | HubContextSnapshotDto;
+    | HubContextSnapshotDto
+    | PendingHubMessageDto
+    | { id: string; deleted: true };
 }

@@ -26,6 +26,7 @@ import type {
   HubSessionDto,
   ListSessionsResponse,
   ListBuildSessionsResponse,
+  PendingHubMessageDto,
   PinHubMessageRequest,
   DeploymentPreflightResponse,
   ProjectDto,
@@ -34,12 +35,14 @@ import type {
   SendBuildMessageResponse,
   SendHubMessageRequest,
   SendHubMessageResponse,
+  CreatePendingHubMessageRequest,
   SessionDetailDto,
   SessionDiffContextDto,
   SessionTimelinePageDto,
   StartDeploymentResponse,
   StartBuildRequest,
   StartBuildResponse,
+  UpdatePendingHubMessageRequest,
   UpdateHubSessionRequest,
   UpdateCurrentUserRequest,
   UpdateAgentRequest,
@@ -325,6 +328,34 @@ export function sendSessionMessage(sessionId: string, body: SendHubMessageReques
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export function listPendingSessionMessages(sessionId: string) {
+  return requestJson<{ items: PendingHubMessageDto[] }>(`/sessions/${encodeURIComponent(sessionId)}/pending-messages`);
+}
+
+export function createPendingSessionMessage(sessionId: string, body: CreatePendingHubMessageRequest) {
+  return requestJson<PendingHubMessageDto>(`/sessions/${encodeURIComponent(sessionId)}/pending-messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updatePendingSessionMessage(sessionId: string, pendingId: string, body: UpdatePendingHubMessageRequest) {
+  return requestJson<PendingHubMessageDto>(
+    `/sessions/${encodeURIComponent(sessionId)}/pending-messages/${encodeURIComponent(pendingId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function deletePendingSessionMessage(sessionId: string, pendingId: string) {
+  return requestJson<{ ok: boolean }>(
+    `/sessions/${encodeURIComponent(sessionId)}/pending-messages/${encodeURIComponent(pendingId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function uploadSessionAttachment(sessionId: string, file: File): Promise<ApiResult<UploadedAttachmentDto>> {
@@ -664,6 +695,7 @@ export function connectHubSocket(
     onEvent: (event: HubEventDto) => void;
     onSession: (session: HubSessionDto) => void;
     onMessage?: (message: HubMessageDto) => void;
+    onPendingMessage?: (message: PendingHubMessageDto | { id: string; deleted: true; sessionId?: string }) => void;
     onArtifact: (artifact: HubArtifactDto) => void;
     onFileChange: (fileChange: HubFileChangeDto) => void;
   },
@@ -696,6 +728,11 @@ export function connectHubSocket(
   });
   socket.on("hub:message", (envelope: FrontendRealtimeEnvelope) => {
     if (envelope.type === "message") handlers.onMessage?.(envelope.payload as HubMessageDto);
+  });
+  socket.on("hub:pending_message", (envelope: FrontendRealtimeEnvelope) => {
+    if (envelope.type === "pending_message") {
+      handlers.onPendingMessage?.({ ...(envelope.payload as PendingHubMessageDto | { id: string; deleted: true }), sessionId: envelope.sessionId });
+    }
   });
   socket.on("hub:artifact", (envelope: FrontendRealtimeEnvelope) => {
     if (envelope.type === "artifact") handlers.onArtifact(envelope.payload as HubArtifactDto);

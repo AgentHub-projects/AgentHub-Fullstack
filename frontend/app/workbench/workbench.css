@@ -5153,11 +5153,126 @@ div.agentChoice {
 }
 
 .replyBanner,
+.pendingMessageQueue,
 .composerInputWrap,
 .composerBar {
   width: min(920px, 100%);
   margin-right: auto;
   margin-left: auto;
+}
+
+.pendingMessageQueue {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.pendingQueueHeader {
+  display: flex;
+  justify-content: space-between;
+  color: #777777;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pendingQueueList {
+  display: grid;
+  gap: 7px;
+}
+
+.pendingMessageCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-items: center;
+  border: 1px solid #dddddd;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px 9px;
+}
+
+.pendingMessageCard.sending {
+  border-color: #b8d4ff;
+  background: #f8fbff;
+}
+
+.pendingMessageCard.failed {
+  border-color: #ffd0c2;
+  background: #fff8f5;
+}
+
+.pendingMessageMain {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.pendingMessageIndex {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #f0f0f0;
+  color: #6b6b6b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.pendingMessageMain p {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #2c2c2c;
+  font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pendingMessageMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #777777;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pendingMessageError {
+  grid-column: 1 / -1;
+  color: #d14a1f;
+  font-size: 12px;
+}
+
+.pendingMessageActions {
+  display: flex;
+  gap: 4px;
+}
+
+.pendingMessageActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #777777;
+  padding: 5px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pendingMessageActions button:hover:not(:disabled) {
+  border-color: #dddddd;
+  color: #111111;
+}
+
+.preservedAttachmentBanner {
+  margin-top: 0;
 }
 
 .composerInputWrap {

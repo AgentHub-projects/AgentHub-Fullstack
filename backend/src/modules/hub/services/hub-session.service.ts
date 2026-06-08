@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import type {
   AddParticipantRequest,
   AgentInstanceDto,
+  CreatePendingHubMessageRequest,
   CreateHubSessionRequest,
   HubMessagePartDto,
   ListSessionsResponse,
@@ -12,6 +13,7 @@ import type {
   SessionDetailDto,
   SessionDiffContextDto,
   SessionTimelinePageDto,
+  UpdatePendingHubMessageRequest,
   UpdateHubSessionRequest,
 } from "@agenthub/shared";
 import { AgentRegistryService } from "./agent-registry.service";
@@ -29,6 +31,7 @@ import {
 } from "../mappers/hub.mappers";
 import { HubRealtimeGateway } from "../gateways/hub-realtime.gateway";
 import { PrismaService } from "./prisma.service";
+import { PendingMessageQueueService } from "./pending-message-queue.service";
 import { buildLinkPreviewParts, messageJsonWithParts } from "../utils/message-parts";
 
 /** 会话服务：管理会话 CRUD、消息收发、@提及、附件、上下文引用和运行编排 */
@@ -49,7 +52,13 @@ export class HubSessionService {
     private readonly deployments: DeploymentService,
     @Inject(HubRealtimeGateway)
     private readonly gateway: HubRealtimeGateway,
-  ) {}
+    @Inject(PendingMessageQueueService)
+    private readonly pendingMessages: PendingMessageQueueService,
+  ) {
+    this.events.onRunTerminal((sessionId) => {
+      void this.drainPendingMessages(sessionId);
+    });
+  }
 
   /** 列出会话，支持搜索和归档过滤，置顶优先排序 */
   async listSessions(input: { query?: string; includeArchived?: boolean; limit?: number; cursor?: string } = {}): Promise<ListSessionsResponse> {
@@ -469,6 +478,7 @@ export class HubSessionService {
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
     if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
+    await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
     const deploymentCommand = parseDeploymentCommand(text);
@@ -515,17 +525,6 @@ export class HubSessionService {
       text: contextText,
       importance: 20,
     });
-
-    // 如果已有活跃 run，把新消息作为增量提示追加，不创建新 run
-    const activeRun = await this.prisma.agentRun.findFirst({
-      where: { sessionId, status: { in: ["queued", "context_building", "connecting", "running"] } },
-      select: { id: true },
-    });
-    if (activeRun) {
-      this.downstream.notifyIncrementalMessage(sessionId, text, message.id, runAgent.id, mentionedAgents.map((a) => a.id));
-      const sessionDto = mapSession(await this.prisma.session.findUniqueOrThrow({ where: { id: sessionId } }));
-      return { session: sessionDto, message: mapMessage(message), run: mapRun(activeRun!) };
-    }
 
     const run = await this.prisma.agentRun.create({
       data: {
@@ -640,6 +639,49 @@ export class HubSessionService {
       run: mapRun(run),
       contextSnapshot: null,
     };
+  }
+
+  /** 列出 run 中待发送消息 */
+  async listPendingMessages(sessionId: string) {
+    await this.assertSessionActive(sessionId);
+    if (!(await this.hasActiveRun(sessionId))) await this.drainPendingMessages(sessionId);
+    return { items: await this.pendingMessages.list(sessionId) };
+  }
+
+  /** 添加待发送消息，不触发当前 run 的 steer/update */
+  async createPendingMessage(sessionId: string, input: CreatePendingHubMessageRequest) {
+    await this.assertSessionActive(sessionId);
+    const pending = await this.pendingMessages.create(sessionId, input);
+    if (!(await this.hasActiveRun(sessionId))) void this.drainPendingMessages(sessionId);
+    return pending;
+  }
+
+  /** 修改待发送消息 */
+  async updatePendingMessage(sessionId: string, pendingId: string, input: UpdatePendingHubMessageRequest) {
+    await this.assertSessionActive(sessionId);
+    return this.pendingMessages.update(sessionId, pendingId, input);
+  }
+
+  /** 删除待发送消息 */
+  async deletePendingMessage(sessionId: string, pendingId: string) {
+    await this.assertSessionActive(sessionId);
+    return this.pendingMessages.delete(sessionId, pendingId);
+  }
+
+  /** run 终态后按 FIFO 派发下一条待发送消息 */
+  async drainPendingMessages(sessionId: string) {
+    if (await this.hasActiveRun(sessionId)) return;
+    const pending = await this.pendingMessages.peek(sessionId);
+    if (!pending || pending.status === "sending" || pending.status === "failed") return;
+
+    await this.pendingMessages.markSending(sessionId, pending.id);
+    try {
+      await this.sendMessage(sessionId, pending.payload);
+      await this.pendingMessages.markDrained(sessionId, pending.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.pendingMessages.markFailed(sessionId, pending.id, message);
+    }
   }
 
   /** 置顶/取消置顶消息或消息部件 */
@@ -882,14 +924,22 @@ export class HubSessionService {
 
   /** 断言会话没有活跃的 run，否则抛出异常 */
   private async assertNoActiveRun(sessionId: string) {
-    const activeRun = await this.prisma.agentRun.findFirst({
+    const activeRun = await this.findActiveRun(sessionId);
+    if (activeRun) throw new BadRequestException("SESSION_HAS_ACTIVE_RUN");
+  }
+
+  private async hasActiveRun(sessionId: string) {
+    return Boolean(await this.findActiveRun(sessionId));
+  }
+
+  private async findActiveRun(sessionId: string) {
+    return this.prisma.agentRun.findFirst({
       where: {
         sessionId,
         status: { in: ["queued", "context_building", "connecting", "running"] },
       },
       select: { id: true },
     });
-    if (activeRun) throw new BadRequestException("SESSION_HAS_ACTIVE_RUN");
   }
 
   /** 断言会话处于活跃状态 */
