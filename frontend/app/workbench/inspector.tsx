@@ -1447,7 +1447,7 @@ export function FilePanel({
                   <div className="filePreviewMarkdown"><RichText text={draft} /></div>
                 )}
                 {previewKind === "image" && (
-                  <div className="filePreviewImage"><img alt={fileName} src={draft.startsWith("data:") ? draft : `data:image/${fileExt};base64,${btoa(draft)}`} /></div>
+                  <div className="filePreviewImage"><img alt={fileName} src={draft} /></div>
                 )}
                 {previewKind && previewKind !== "html" && previewKind !== "markdown" && previewKind !== "image" && (
                   <div className="filePreviewPlaceholder"><p>暂不支持预览 {fileExt.toUpperCase()} 文件</p></div>
