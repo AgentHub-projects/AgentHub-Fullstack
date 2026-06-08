@@ -1873,7 +1873,7 @@ export default function WorkbenchPage() {
                     ? "当前 run 运行中，完成后可继续发送"
                   : mode === "direct"
                     ? "输入要交给这个 Agent 的任务"
-                    : "输入任务，使用 @frontend-agent 指定群聊成员"
+                    : "输入任务"
               }
               disabled={sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
             />
@@ -1890,7 +1890,7 @@ export default function WorkbenchPage() {
                   : "请选择单聊 Agent"
                 : parsedMentionIds.length
                 ? "将发送给已 @ 成员"
-                : "默认由主 Orchestrator 协调"}
+                : ""}
             </span>
             <input
               ref={fileInputRef}
