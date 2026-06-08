@@ -469,7 +469,6 @@ export class HubSessionService {
     const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status === "deleted") throw new NotFoundException("SESSION_NOT_FOUND");
     if (session.status !== "active") throw new BadRequestException("SESSION_NOT_ACTIVE");
-    await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
     const deploymentCommand = parseDeploymentCommand(text);

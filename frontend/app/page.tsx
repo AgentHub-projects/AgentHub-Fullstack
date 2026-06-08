@@ -108,6 +108,7 @@ import {
 } from "../lib/workbench/session-tabs";
 import { buildConversationItems } from "../lib/workbench/timeline";
 import type { InspectorTab, MentionMatch } from "../lib/workbench/types";
+import { formatBytes } from "../lib/utils";
 
 const EMPTY_DETAIL: Omit<SessionDetailDto, "session"> = {
   messages: [],
@@ -281,7 +282,6 @@ export default function WorkbenchPage() {
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
   const runActionLocked = !sessionWritable;
   const chatActionLocked = runActionLocked;
-  const sendCooldownRef = useRef(0);
   const sandboxEditorDisabledReason = !activeSessionId
     ? "请选择会话后编辑文件"
     : !sessionWritable
@@ -998,11 +998,6 @@ export default function WorkbenchPage() {
   async function handleSend() {
     const text = composer.trim();
     if (!text || !activeSessionId || runActionLocked || sending) return;
-    if (activeRunInProgress) {
-      const now = Date.now();
-      if (now - sendCooldownRef.current < 3000) return;
-      sendCooldownRef.current = now;
-    }
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -1436,9 +1431,9 @@ export default function WorkbenchPage() {
     });
   }
 
-  async function handleAttachmentFiles(files: FileList | null) {
-    if (!activeSessionId || runActionLocked || !files?.length || uploadingAttachment) return;
-    const selected = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
+  async function uploadAttachmentFiles(files: File[]) {
+    if (!activeSessionId || runActionLocked || files.length === 0 || uploadingAttachment) return;
+    const selected = files.slice(0, Math.max(0, 5 - attachments.length));
     if (selected.length === 0) {
       setNotice("单条消息最多 5 个附件");
       return;
@@ -1459,8 +1454,12 @@ export default function WorkbenchPage() {
       }
     } finally {
       setUploadingAttachment(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  async function handleAttachmentFiles(files: FileList | null) {
+    await uploadAttachmentFiles(files ? Array.from(files) : []);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   if (!authChecked) {
@@ -1798,6 +1797,17 @@ export default function WorkbenchPage() {
             </div>
           )}
           <div className="composerInputWrap">
+            {attachments.length > 0 && (
+              <div className="attachmentTray" aria-label="待发送附件">
+                {attachments.map((attachment) => (
+                  <ComposerAttachmentCard
+                    attachment={attachment}
+                    key={attachment.id}
+                    onRemove={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                  />
+                ))}
+              </div>
+            )}
             {mentionMatch && !sending && activeSessionId && !chatActionLocked && (
               <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
                 {mentionCandidates.length > 0 ? (
@@ -1831,6 +1841,13 @@ export default function WorkbenchPage() {
             <textarea
               ref={textareaRef}
               value={composer}
+              placeholder="发消息..."
+              onPaste={(event) => {
+                const files = clipboardAttachmentFiles(event.clipboardData);
+                if (!files.length || !activeSessionId || chatActionLocked) return;
+                event.preventDefault();
+                void uploadAttachmentFiles(files);
+              }}
               onChange={(event) => {
                 setComposer(event.target.value);
                 refreshMentionMenu(event.target.value, event.target.selectionStart);
@@ -1913,23 +1930,6 @@ export default function WorkbenchPage() {
               <span>发送</span>
             </button>
           </div>
-          {attachments.length > 0 && (
-            <div className="attachmentTray">
-              {attachments.map((attachment) => (
-                <span className="attachmentChip" key={attachment.id}>
-                  <PaperClipOutlined />
-                  <span>{attachment.name}</span>
-                  <button
-                    type="button"
-                    title="移除附件"
-                    onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
         </footer>
       </section>
 
@@ -2832,6 +2832,52 @@ function partTypeLabel(part: HubMessagePartDto) {
 function clipInline(text: string, limit: number) {
   const normalized = text.replace(/\s+/g, " ").trim();
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}...`;
+}
+
+function clipboardAttachmentFiles(data: DataTransfer | null) {
+  if (!data) return [];
+  const files = Array.from(data.files ?? []);
+  if (files.length > 0) return files;
+  return Array.from(data.items ?? [])
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+}
+
+function ComposerAttachmentCard({
+  attachment,
+  onRemove,
+}: {
+  attachment: UploadedAttachmentDto;
+  onRemove: () => void;
+}) {
+  const image = attachment.mimeType.startsWith("image/");
+
+  if (image) {
+    return (
+      <span className="attachmentCard imageAttachment" title={attachment.name}>
+        <img alt={attachment.name} src={attachment.url} />
+        <button type="button" title="移除附件" onClick={onRemove}>
+          <CloseOutlined />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="attachmentCard fileAttachment" title={attachment.name}>
+      <span className="attachmentFileIcon">
+        <FileOutlined />
+      </span>
+      <span className="attachmentFileMeta">
+        <strong>{attachment.name}</strong>
+        <small>{formatBytes(attachment.sizeBytes)}</small>
+      </span>
+      <button type="button" title="移除附件" onClick={onRemove}>
+        <CloseOutlined />
+      </button>
+    </span>
+  );
 }
 
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string) {

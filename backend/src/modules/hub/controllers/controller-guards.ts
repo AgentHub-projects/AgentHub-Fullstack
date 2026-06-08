@@ -6,7 +6,6 @@ const ACTIVE_RUN_STATUSES = ["queued", "context_building", "connecting", "runnin
 /** 断言会话可写：活跃且无活跃 run */
 export async function assertSessionWritable(prisma: PrismaService, sessionId: string) {
   await assertSessionActive(prisma, sessionId);
-  await assertSessionHasNoActiveRun(prisma, sessionId);
 }
 
 /** 断言会话存在且处于活跃状态 */
