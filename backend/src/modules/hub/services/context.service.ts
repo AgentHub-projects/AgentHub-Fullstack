@@ -357,16 +357,35 @@ export class HubContextService {
             {
               role: "system",
               content: [
-                "根据以下 Agent 工作记录，更新结构化工作笔记。输出 JSON（不要 markdown 代码块包裹）：",
-                '{',
-                '  "title": "一句话任务标题",',
-                '  "status": "当前进度状态",',
-                '  "files": [{"path": "文件路径", "description": "变更说明", "changeType": "modified"}],',
-                '  "errors": [{"message": "错误描述", "solution": "解决方式", "resolved": false}],',
-                '  "lessons": "经验教训（无新内容则为 null）",',
-                '  "workLog": [{"timestamp": "ISO时间", "summary": "本轮工作摘要"}]',
-                '}',
-                "注意：files/errors 只需本次新出现的项；title/status 有变化才更新。",
+                "你是 AgentHub 工作记录分析器。你只根据本轮 Agent 工作日志提取结构化增量记忆。",
+                "",
+                "=== CRITICAL: 增量提取约束 ===",
+                "- 只输出纯 JSON 对象，不要 Markdown 代码块或解释文字",
+                "- 输入只包含本轮日志，不包含完整历史；不要猜测历史状态",
+                "- title、status、lessons 只有在本轮日志提供明确新信息时填写；否则返回 null",
+                "- files、errors、workLog 只返回本轮新出现的内容；没有新内容时返回空数组",
+                "- 所有字段键名必须固定存在，但不要用空字符串、\"无\"、\"不变\"、\"null\" 字符串凑字段",
+                "- 不要编造文件路径、错误、解决方案或时间",
+                "",
+                "## Required Output Format",
+                "{",
+                '  "title": null,',
+                '  "status": null,',
+                '  "files": [],',
+                '  "errors": [],',
+                '  "lessons": null,',
+                '  "workLog": []',
+                "}",
+                "",
+                'Good: {"title":null,"status":null,"files":[{"path":"backend/src/a.ts","description":"修复解析逻辑","changeType":"modified"}],"errors":[],"lessons":null,"workLog":[{"timestamp":"2026-06-08T10:00:00.000Z","summary":"修复上下文解析逻辑"}]}',
+                'Bad: {"title":"不变","status":"进行中","files":[],"errors":[],"lessons":"无","workLog":[]}',
+                "原因：使用占位文本，并且在没有明确新信息时覆盖 title/status",
+                "",
+                "## Before responding",
+                "- [ ] JSON 是否合法可解析（非截断、非空、无语法错误）？",
+                "- [ ] 输出是否不含 ``` 字符？",
+                "- [ ] 无新 title/status/lessons 时是否返回 null？",
+                "- [ ] 无新 files/errors/workLog 时是否返回空数组？",
               ].join("\n"),
             },
             { role: "user", content: text.slice(0, 8000) },
@@ -540,23 +559,23 @@ function toItem(row: ContextRow): ContextSnapshotItem {
 
 function renderContextPrompt(snapshot: ContextSnapshotPayload): string {
   const sections = [
-    ["Pinned Context", snapshot.pins],
-    ["Recent Turns", snapshot.recent],
-    ["Retrieved Context", snapshot.retrieved],
+    ["置顶上下文", snapshot.pins],
+    ["最近对话", snapshot.recent],
+    ["检索上下文", snapshot.retrieved],
   ] as const;
 
   const body = sections
     .map(([title, items]) => {
-      if (items.length === 0) return `## ${title}\n(empty)`;
+      if (items.length === 0) return `## ${title}\n(无)`;
       return `## ${title}\n${items.map((item) => `- [${item.kind}] ${item.text}`).join("\n")}`;
     })
     .join("\n\n");
 
   return [
-    "You are resuming an existing AgentHub session. Use the context below before acting.",
-    snapshot.summary ? `## Structured Summary\n${snapshot.summary}` : "",
+    "你正在恢复一个已有的 AgentHub 会话。请先阅读以下上下文再执行操作。",
+    snapshot.summary ? `## 结构化摘要\n${snapshot.summary}` : "",
     snapshot.mentionedAgents.length
-      ? `## Mentioned Agents\n${snapshot.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
+      ? `## 提及的 Agent\n${snapshot.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
       : "",
     body,
   ]
@@ -630,9 +649,9 @@ function recentCodePartSummaries(contentJson: Record<string, unknown>, contentTe
       const title = typeof part.title === "string" && part.title ? `, title: ${part.title}` : "";
       const preview =
         code.length > RECENT_CODE_PART_TEXT_LIMIT
-          ? `${code.slice(0, RECENT_CODE_PART_TEXT_LIMIT)}\n[truncated: ${code.length - RECENT_CODE_PART_TEXT_LIMIT} chars omitted]`
+          ? `${code.slice(0, RECENT_CODE_PART_TEXT_LIMIT)}\n[已截断 ${code.length - RECENT_CODE_PART_TEXT_LIMIT} 字符]`
           : code;
-      return `code part ${index + 1}${language}${title}, chars: ${code.length}:\n${preview}`;
+      return `代码片段 ${index + 1}${language}${title}, 字符数: ${code.length}:\n${preview}`;
     });
 }
 

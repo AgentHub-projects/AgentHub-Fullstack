@@ -976,18 +976,18 @@ function withAttachmentPrompt(text: string, parts: HubMessagePartDto[]) {
   if (parts.length === 0) return text;
   const attachmentText = parts
     .map((part) => {
-      const description = typeof part.metadata?.description === "string" ? `\ndescription: ${part.metadata.description}` : "";
-      const preview = part.text ? `\ntextPreview:\n${part.text}` : "";
+      const description = typeof part.metadata?.description === "string" ? `\n描述: ${part.metadata.description}` : "";
+      const preview = part.text ? `\n预览:\n${part.text}` : "";
       return `- ${part.title ?? part.id} (${part.metadata?.mimeType ?? part.type}, ${part.metadata?.sizeBytes ?? 0} bytes)\nurl: ${part.url ?? ""}${description}${preview}`;
     })
     .join("\n");
-  return `${text}\n\nAttachments:\n${attachmentText}`;
+  return `${text}\n\n附件：\n${attachmentText}`;
 }
 
 function withReferencePrompt(text: string, references: Array<{ label: string; text: string }>) {
   if (references.length === 0) return text;
   const quoted = references.map((item) => `### ${item.label}\n${item.text}`).join("\n\n");
-  return `${text}\n\nQuoted context:\n${quoted}`;
+  return `${text}\n\n引用上下文：\n${quoted}`;
 }
 
 function normalizeReferences(input: SendHubMessageRequest) {
