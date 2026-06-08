@@ -279,15 +279,14 @@ export default function WorkbenchPage() {
   const latestRun = detail?.runs.at(-1) ?? activeSession?.lastRun ?? null;
   const sessionWritable = activeSession?.status === "active";
   const activeRunInProgress = isRunning(latestRun?.status ?? "");
-  const runActionLocked = !sessionWritable || activeRunInProgress;
+  const runActionLocked = !sessionWritable;
   const chatActionLocked = runActionLocked;
+  const sendCooldownRef = useRef(0);
   const sandboxEditorDisabledReason = !activeSessionId
     ? "请选择会话后编辑文件"
     : !sessionWritable
         ? "归档会话不能编辑文件"
-        : activeRunInProgress
-          ? "Agent 运行中，暂不能编辑文件"
-          : "";
+        : "";
   const inspectorModeClass =
     inspectorTab === "files" ? "filesActive" : inspectorTab === "diff" ? "diffActive" : "artifactsActive";
   const fileEditorOpen = inspectorTab === "files" && !inspectorCollapsed && Boolean(openedFilePath);
@@ -999,6 +998,11 @@ export default function WorkbenchPage() {
   async function handleSend() {
     const text = composer.trim();
     if (!text || !activeSessionId || runActionLocked || sending) return;
+    if (activeRunInProgress) {
+      const now = Date.now();
+      if (now - sendCooldownRef.current < 3000) return;
+      sendCooldownRef.current = now;
+    }
     setSending(true);
     setComposer("");
     closeMentionMenu();
@@ -1866,16 +1870,7 @@ export default function WorkbenchPage() {
                   void handleSend();
                 }
               }}
-              placeholder={
-                !sessionWritable
-                  ? sessionReadOnly ? "归档会话为只读" : "请选择会话"
-                  : activeRunInProgress
-                    ? "当前 run 运行中，完成后可继续发送"
-                  : mode === "direct"
-                    ? "输入要交给这个 Agent 的任务"
-                    : ""
-              }
-              disabled={sending || !activeSessionId || chatActionLocked || (mode === "direct" && !directAgent)}
+              disabled={sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
             />
           </div>
           <div className="composerBar">
