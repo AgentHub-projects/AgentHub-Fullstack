@@ -817,6 +817,44 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.messageReferenceBubbles {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 8px;
+}
+
+.messageReferenceBubble {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(360px, 100%);
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.messageReferenceBubble .anticon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.messageReferenceBubble span {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .bubbleMeta {
   margin-bottom: 7px;
   font-size: 12px;
@@ -5065,6 +5103,17 @@ div.agentChoice {
   border-radius: 16px;
   background: #f4f4f4;
   padding: 10px 14px;
+}
+
+.messageReferenceBubbles {
+  margin-bottom: 9px;
+}
+
+.messageReferenceBubble {
+  border-color: #e3e3e3;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(17, 17, 17, 0.06);
+  color: #333333;
 }
 
 .agentReply {

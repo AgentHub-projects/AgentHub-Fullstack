@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    participant Downstream as "DownstreamOrchestrator"
+    participant Context as "HubContextService"
+    participant DB as "PostgreSQL + pgvector"
+    participant Embed as "Embeddings API"
+    participant MemLLM as "Summary LLM"
+
+    Note over Downstream,MemLLM: "=== 上下文快照构建 buildSnapshot ==="
+
+    Downstream->>Context: "buildSnapshot(sessionId, runId, promptText)"
+    Context->>DB: "INSERT context_update_jobs status=running"
+
+    Context->>DB: "SELECT pinned=true ContextItems ORDER BY importance DESC"
+    DB-->>Context: "置顶项列表"
+
+    Context->>DB: "SELECT 最近24条 Messages ORDER BY createdAt DESC"
+    DB-->>Context: "最近消息列表"
+
+    Context->>Embed: "POST /embeddings (text-embedding-3-small)"
+    Embed-->>Context: "embedding vector[1536]"
+    Context->>DB: "SELECT by cosine distance ORDER BY embedding <=> query LIMIT 8"
+    DB-->>Context: "语义检索结果"
+
+    Context->>DB: "SELECT SessionMemory by sessionId"
+    DB-->>Context: "结构化会话记忆"
+
+    Note over Context: "Token预算裁剪: 置顶→最近(4800)→检索(剩余)"
+
+    Context->>DB: "INSERT ContextSnapshot"
+    DB-->>Context: "快照保存完成"
+    Context-->>Downstream: "HubContextSnapshotDto"
+
+    Note over Downstream,MemLLM: "=== 会话记忆构建 buildSessionMemory ==="
+
+    Note over Context: "短期缓冲区 >=20 events 或 >=2000 tokens"
+
+    Context->>MemLLM: "POST /chat/completions (deepseek-chat)"
+    MemLLM-->>Context: "JSON: title status files errors lessons workLog"
+    Context->>DB: "SELECT existing SessionMemory"
+    DB-->>Context: "已有记录"
+    Context->>Context: "合并去重: files按path errors按message"
+    Context->>DB: "UPSERT SessionMemory"
+    Context->>Context: "重置短期缓冲区"

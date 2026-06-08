@@ -16,6 +16,7 @@ import {
   CommentOutlined,
   CopyOutlined,
   FileDoneOutlined,
+  FileOutlined,
   LoadingOutlined,
   MessageOutlined,
   PushpinFilled,
@@ -264,7 +265,7 @@ function UserMessage({
             <CopyOutlined />
           </button>
         </div>
-        {referenceCount(message) > 0 && <div className="messageReferenceHint">引用 {referenceCount(message)} 条消息</div>}
+        <MessageReferenceBubbles message={message} />
         <MessageParts
           parts={message.parts}
           fallbackText={message.contentText}
@@ -389,9 +390,63 @@ function RunFailureBlock({ run, events }: { run: HubRunDto; events: HubEventDto[
   );
 }
 
-function referenceCount(message: HubMessageDto) {
+type MessageReference = {
+  messageId?: string;
+  partId?: string;
+  selectedText?: string;
+  sourceLabel?: string;
+};
+
+function MessageReferenceBubbles({ message }: { message: HubMessageDto }) {
+  const references = messageReferences(message);
+  if (references.length === 0) return null;
+  return (
+    <div className="messageReferenceBubbles" aria-label="引用内容">
+      {references.map((reference, index) => (
+        <span className="messageReferenceBubble" key={messageReferenceKey(reference, index)}>
+          <FileOutlined />
+          <span>{messageReferenceText(reference, index)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function messageReferences(message: HubMessageDto): MessageReference[] {
   const refs = message.contentJson.references;
-  return Array.isArray(refs) ? refs.length : message.contentJson.quotedMessageId ? 1 : 0;
+  if (Array.isArray(refs)) {
+    return refs
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+      .map((item) => ({
+        messageId: stringValue(item.messageId),
+        partId: stringValue(item.partId),
+        selectedText: selectedTextValue(item.selectedText),
+        sourceLabel: stringValue(item.sourceLabel),
+      }))
+      .filter((item) => item.messageId || item.selectedText);
+  }
+  const quotedMessageId = stringValue(message.contentJson.quotedMessageId);
+  return quotedMessageId ? [{ messageId: quotedMessageId }] : [];
+}
+
+function messageReferenceKey(reference: MessageReference, index: number) {
+  return `${reference.messageId ?? reference.sourceLabel ?? "selection"}-${reference.partId ?? ""}-${reference.selectedText ?? ""}-${index}`;
+}
+
+function messageReferenceText(reference: MessageReference, index: number) {
+  const text = reference.selectedText ?? reference.sourceLabel ?? (reference.partId ? "引用片段" : "引用消息");
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, 140) : `selection ${index + 1}`;
+}
+
+function selectedTextValue(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\r\n/g, "\n").trim();
+  return text || undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function canRegenerateMessage(message: HubMessageDto) {

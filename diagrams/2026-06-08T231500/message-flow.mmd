@@ -1,0 +1,74 @@
+sequenceDiagram
+    autonumber
+    participant User as "用户浏览器"
+    participant Frontend as "Next.js Frontend"
+    participant SocketIO as "Socket.IO Gateway"
+    participant SessionSvc as "HubSessionService"
+    participant CtxSvc as "HubContextService"
+    participant OrchSvc as "DownstreamOrchestrator"
+    participant EventSvc as "HubEventService"
+    participant Gateway as "HubRealtimeGateway"
+    participant Agent as "AgentRunner (Claude Code CLI)"
+
+    Note over User,Agent: "Phase 1: 消息发送"
+
+    User->>Frontend: "发送消息 + @Agent"
+    Frontend->>Frontend: "解析附件/引用/Mention"
+    Frontend->>SessionSvc: "POST /api/sessions/:id/messages"
+    SessionSvc->>SessionSvc: "loadAttachmentParts() 加载附件"
+    SessionSvc->>CtxSvc: "recordContextItem(message, kind=message)"
+    CtxSvc->>CtxSvc: "创建 ContextItem 记录"
+    CtxSvc->>CtxSvc: "persistEmbedding() 生成向量"
+    CtxSvc-->>SessionSvc: "返回 ContextItem"
+
+    Note over User,Agent: "Phase 2: 启动 Agent Run"
+
+    SessionSvc->>OrchSvc: "startRun(sessionId, runId, promptText)"
+    OrchSvc->>OrchSvc: "RDB: agentRun status=connecting"
+
+    Note over User,Agent: "Phase 3: 构建上下文快照"
+
+    OrchSvc->>CtxSvc: "buildSnapshot(sessionId, promptText)"
+    CtxSvc->>CtxSvc: "查询 pinned=true 的 ContextItems"
+    CtxSvc->>CtxSvc: "查询最近24条Messages"
+    CtxSvc->>CtxSvc: "recallByPgvector() 向量语义检索"
+    CtxSvc->>CtxSvc: "loadSessionMemorySummary() 加载记忆"
+    CtxSvc->>CtxSvc: "selectWithinBudget() Token预算裁剪"
+    CtxSvc-->>OrchSvc: "返回 HubContextSnapshotDto"
+
+    Note over User,Agent: "Phase 4: ACP协议发送Prompt"
+
+    OrchSvc->>Agent: "ACP initialize → session/load → session/prompt"
+    Note right of Agent: "Socket.IO WebSocket 连接"
+    Agent-->>OrchSvc: "ACP prompt response (accepted)"
+
+    Note over User,Agent: "Phase 5: 流式事件处理"
+
+    loop "Agent流式产出"
+        Agent-->>OrchSvc: "ACP session/update (agent_message_chunk)"
+        OrchSvc->>EventSvc: "append(message.delta)"
+        EventSvc->>Gateway: "emit 实时广播"
+        Gateway-->>Frontend: "Socket.IO hub:event (增量消息)"
+        Frontend->>Frontend: "EventStreamBuffer 累积渲染"
+
+        Agent-->>OrchSvc: "ACP session/update (file.change)"
+        OrchSvc->>EventSvc: "append(file.change)"
+        EventSvc->>CtxSvc: "recordContextItem(file_change)"
+        EventSvc->>Gateway: "emit 文件变更事件"
+
+        Agent-->>OrchSvc: "ACP session/update (artifact.upsert)"
+        OrchSvc->>EventSvc: "append(artifact.upsert)"
+        EventSvc->>Gateway: "emit 产物更新事件"
+    end
+
+    Note over User,Agent: "Phase 6: 消息完成"
+
+    Agent-->>OrchSvc: "ACP session/update (agent_message_stop)"
+    OrchSvc->>EventSvc: "append(message.completed)"
+    EventSvc->>CtxSvc: "recordContextItem(message + artifact)"
+    EventSvc->>Gateway: "emit 消息完成事件"
+
+    Agent-->>OrchSvc: "ACP response stopReason=completed"
+    OrchSvc->>OrchSvc: "RDB: run status=completed"
+    Gateway-->>Frontend: "Socket.IO session:updated"
+    Frontend-->>User: "显示完整Agent回复"
