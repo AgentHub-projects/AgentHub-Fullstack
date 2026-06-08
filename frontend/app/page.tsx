@@ -75,7 +75,7 @@ import {
 import { AvatarFace } from "./workbench/avatar";
 import { ArtifactPanel, ArtifactViewerLayer, FilePanel, MainGitDiffPanel } from "./workbench/inspector";
 import { MessagePartViewerLayer } from "./workbench/rich-text";
-import { RunBadge, RunThread, TimelineMessage } from "./workbench/timeline";
+import { RunBadge, RunStatusPill, RunThread, TimelineMessage } from "./workbench/timeline";
 import {
   agentColor,
   formatTime,
@@ -1783,6 +1783,10 @@ export default function WorkbenchPage() {
           )}
           <div ref={endRef} />
         </div>
+
+        {latestRun && isRunning(latestRun.status) && (
+          <RunStatusPill run={latestRun} events={detail?.events ?? []} />
+        )}
 
         <footer className="composer">
           {replyTargets.length > 0 && (

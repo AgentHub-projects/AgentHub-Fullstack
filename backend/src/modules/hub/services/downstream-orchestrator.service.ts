@@ -101,6 +101,21 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 运行中增量消息：通过 notify 追加到活跃 run 的下游会话，不创建新 run */
+  notifyIncrementalMessage(sessionId: string, text: string, messageId: string, orchestratorId: AgentId, mentionedIds: number[]) {
+    const record = this.connections.get(sessionId);
+    if (!record?.socket.connected || !record.downstreamSessionId || !record.activeRunId) return;
+    record.acp.notify("session/update", {
+      sessionId: record.downstreamSessionId,
+      update: {
+        content: { type: "text", text },
+        sessionUpdate: "agent_message_chunk",
+      },
+      _meta: { agentId: String(orchestratorId), agenthubSessionId: sessionId, messageId, mentionedAgentIds: mentionedIds.map(String) },
+    });
+    this.logger.log(`[增量消息] sessionId=${sessionId} 已追加到活跃run`);
+  }
+
   /** 取消运行：更新状态，发送 session/cancel，跳过已终止的 run */
   async cancelRun(sessionId: string, runId: string, orchestratorAgentId: AgentId) {
     // Skip if the run is already in a terminal state

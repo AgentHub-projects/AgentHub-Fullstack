@@ -355,7 +355,7 @@ function AgentReplyBlock({
   );
 }
 
-function RunStatusPill({ run, events }: { run: HubRunDto; events: HubEventDto[] }) {
+export function RunStatusPill({ run, events }: { run: HubRunDto; events: HubEventDto[] }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {

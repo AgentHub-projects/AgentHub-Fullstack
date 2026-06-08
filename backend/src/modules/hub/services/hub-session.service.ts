@@ -516,6 +516,17 @@ export class HubSessionService {
       importance: 20,
     });
 
+    // 如果已有活跃 run，把新消息作为增量提示追加，不创建新 run
+    const activeRun = await this.prisma.agentRun.findFirst({
+      where: { sessionId, status: { in: ["queued", "context_building", "connecting", "running"] } },
+      select: { id: true },
+    });
+    if (activeRun) {
+      this.downstream.notifyIncrementalMessage(sessionId, text, message.id, runAgent.id, mentionedAgents.map((a) => a.id));
+      const sessionDto = mapSession(await this.prisma.session.findUniqueOrThrow({ where: { id: sessionId } }));
+      return { session: sessionDto, message: mapMessage(message), run: mapRun(activeRun!) };
+    }
+
     const run = await this.prisma.agentRun.create({
       data: {
         sessionId,
