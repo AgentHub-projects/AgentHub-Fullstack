@@ -334,7 +334,12 @@ export function MainGitDiffPanel({
     skipNextCacheSaveRef.current = downstreamSessionId;
     cacheReadyRef.current = true;
     preserveSelectionOnShaChangeRef.current = Boolean(cached);
-    restoreMainGitCacheState(cached);
+    // 只恢复 UI 状态，不恢复文件/commit 数据（避免旧缓存与刷新后的 commit 列表不匹配）
+    if (cached) {
+      setSelectedFilePath(cached.selectedFilePath ?? "");
+      setFileFilter(cached.fileFilter ?? "");
+      setFileListVisible(cached.fileListVisible ?? true);
+    }
     void refreshCommitList({ selectLatest: viewingLatest, silent: Boolean(cached) });
   }, [downstreamSessionId]);
 
@@ -418,7 +423,12 @@ export function MainGitDiffPanel({
 
   async function refreshCommitList(options: { selectLatest?: boolean; silent?: boolean } = {}) {
     if (!downstreamSessionId) return;
-    if (!options.silent) setLoadingCommits(true);
+    if (!options.silent) {
+      setLoadingCommits(true);
+      setFilesByCommit({});
+      setFileDiffs({});
+      setFileDiffErrors({});
+    }
     setCommitError("");
     const result = await listMainGitCommits(downstreamSessionId, { limit: MAIN_GIT_COMMIT_LIMIT });
     if (!options.silent) setLoadingCommits(false);
@@ -476,7 +486,7 @@ export function MainGitDiffPanel({
 
   async function loadFileDiff(commitSha: string, path: string) {
     const key = mainGitFileKey(commitSha, path);
-    if (fileDiffs[key] || fileDiffLoading[key]) return;
+    if (fileDiffs[key] || fileDiffLoading[key] || fileDiffErrors[key]) return;
     const cachedDiff = downstreamSessionId ? mainGitDiffCache.get(downstreamSessionId)?.fileDiffs[key] : undefined;
     if (cachedDiff) {
       setFileDiffs((current) => (current[key] ? current : { ...current, [key]: cachedDiff }));
