@@ -2259,7 +2259,6 @@ export default function WorkbenchPage() {
                 sessionId={activeSessionId}
                 disabledReason={sandboxEditorDisabledReason}
                 onSaved={() => {
-                  setInspectorTab("diff");
                   setMainGitRefreshSignal((value) => value + 1);
                 }}
                 onNotice={setNotice}
