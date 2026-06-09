@@ -170,7 +170,6 @@ export function RunThread({
           onOpenArtifactsPanel={onOpenArtifactsPanel}
         />
       )}
-      {isRunning(run.status) && <RunStatusPill run={run} events={events} />}
       {run.status === "failed" && <RunFailureBlock run={run} events={events} />}
     </section>
   );
