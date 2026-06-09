@@ -10,7 +10,6 @@ import type {
   HubMessagePartDto,
   HubRunDto,
   HubSessionDto,
-  LongTermSummaryDto,
   ProjectDto,
   DeploymentDto,
 } from "@agenthub/shared";
@@ -307,14 +306,3 @@ export function mapContextSnapshot(row: Row): HubContextSnapshotDto {
   };
 }
 
-/** 将数据库行映射为 LongTermSummaryDto */
-export function mapLongTermSummary(row: Row): LongTermSummaryDto {
-  return {
-    id: row.id,
-    sessionId: row.sessionId,
-    seq: row.seq,
-    content: row.content ?? "",
-    tokenCount: row.tokenCount ?? 0,
-    createdAt: iso(row.createdAt),
-  };
-}

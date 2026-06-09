@@ -354,15 +354,6 @@ export interface ContextSnapshotItem {
   createdAt: ISODateString;
 }
 
-export interface LongTermSummaryDto {
-  id: string;
-  sessionId: string;
-  seq: number;
-  content: string;
-  tokenCount: number;
-  createdAt: ISODateString;
-}
-
 export interface SessionMemoryFileEntry {
   path: string;
   description?: string;

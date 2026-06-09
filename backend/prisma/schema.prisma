@@ -204,7 +204,6 @@ model Session {
   contextItems     ContextItem[]
   contextEmbeddings ContextEmbedding[]
   contextUpdateJobs ContextUpdateJob[]
-  longTermSummaries LongTermSummary[]
   project          Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
   deployments      Deployment[]
 
@@ -465,18 +464,7 @@ model ContextUpdateJob {
   @@map("context_update_jobs")
 }
 
-model LongTermSummary {
-  id         String   @id @default(uuid()) @db.Uuid
-  sessionId  String   @map("session_id") @db.Uuid
-  seq        Int
-  content    String   @default("")
-  tokenCount Int      @default(0) @map("token_count")
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@index([sessionId, seq], map: "idx_long_term_summaries_session_seq")
-  @@map("long_term_summaries")
-}
 
 model SessionMemory {
   id        String   @id @default(uuid()) @db.Uuid

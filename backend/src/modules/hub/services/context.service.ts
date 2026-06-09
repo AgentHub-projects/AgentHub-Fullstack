@@ -5,14 +5,13 @@ import type {
   ContextSnapshotPayload,
   HubContextSnapshotDto,
   HubContextItemKind,
-  LongTermSummaryDto,
   SessionMemoryDto,
   SessionMemoryFileEntry,
   SessionMemoryErrorEntry,
   SessionMemoryWorkLogEntry,
 } from "@agenthub/shared";
 import { PrismaService } from "./prisma.service";
-import { mapContextSnapshot, mapLongTermSummary } from "../mappers/hub.mappers";
+import { mapContextSnapshot } from "../mappers/hub.mappers";
 
 type ContextRow = {
   id: string;
@@ -257,15 +256,6 @@ export class HubContextService {
 
   // ---- Incremental Summary Chain ----
 
-  /** 加载会话的长期摘要链 */
-  async loadSummaryChain(sessionId: string): Promise<LongTermSummaryDto[]> {
-    const rows = await this.prisma.longTermSummary.findMany({
-      where: { sessionId },
-      orderBy: { seq: "asc" },
-    });
-    return rows.map(mapLongTermSummary);
-  }
-
   /** 追加文本到短期缓冲，达到限制时触发压缩 */
   private async appendShortTermBuffer(sessionId: string, text: string) {
     let buffer = shortTermBuffers.get(sessionId);
@@ -416,13 +406,6 @@ export class HubContextService {
   }
 
   /** 获取下一个长期摘要序号 */
-  private async getNextSeq(sessionId: string): Promise<number> {
-    const result = await this.prisma.longTermSummary.aggregate({
-      where: { sessionId },
-      _max: { seq: true },
-    });
-    return (result._max.seq ?? 0) + 1;
-  }
 
   // ---- Embedding & Vector Recall ----
 
