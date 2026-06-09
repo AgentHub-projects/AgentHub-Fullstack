@@ -5812,7 +5812,7 @@ div.agentChoice {
 }
 
 .fileEditorPane {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: #ffffff;
 }
 
