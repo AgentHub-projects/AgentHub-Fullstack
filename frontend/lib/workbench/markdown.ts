@@ -195,7 +195,11 @@ export function parseInlineMarkdown(text: string): InlineSegment[] {
         if (token.startsWith("!")) {
           segments.push({ kind: "image", alt: m[1], url: m[2] });
         } else {
-          segments.push({ kind: "link", text: m[1] || m[2], url: m[2] });
+          if (isImageUrl(m[2])) {
+            segments.push({ kind: "image", alt: m[1] || "", url: m[2] });
+          } else {
+            segments.push({ kind: "link", text: m[1] || m[2], url: m[2] });
+          }
         }
       } else {
         pushText(token);
@@ -218,4 +222,9 @@ export function parseInlineMarkdown(text: string): InlineSegment[] {
       segments.push({ kind: "text", text: t });
     }
   }
+}
+
+function isImageUrl(url: string) {
+  const lower = new URL(url, "https://placeholder").pathname.toLowerCase();
+  return /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)([?#]|$)/.test(lower);
 }
