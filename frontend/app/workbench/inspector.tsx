@@ -1366,10 +1366,11 @@ export function FilePanel({
   const previewKind = openedFile ? previewKindFromPath(openedFile.path) : null;
   const canPreview = Boolean(previewKind && openedFile);
   const canEdit = Boolean(file);
-  const previewUrl = connection && openedFile ? sandboxPreviewUrl(connection.downstreamSessionId, openedFile.path) : "";
-  const previewDirUrl = connection && openedFile ? sandboxPreviewBaseUrl(connection.downstreamSessionId, openedFile.path) : "";
-  const previewRootUrl = connection ? sandboxPreviewRootUrl(connection.downstreamSessionId) : "";
-  const htmlPreview = previewKind === "html" ? htmlWithPreviewBase(draft, previewDirUrl, previewRootUrl) : "";
+  const previewUrl = connection && openedFile ? sandboxDownloadUrl(connection.downstreamSessionId, openedFile.path) : "";
+  const htmlPreview =
+    previewKind === "html" && connection && openedFile
+      ? htmlWithDownloadUrls(draft, openedFile.path, connection.downstreamSessionId)
+      : "";
   const statusSize = file?.size ?? openedFile?.size ?? 0;
 
   return (
@@ -1489,7 +1490,13 @@ export function FilePanel({
             {openedFile && previewMode && previewKind && (
               <div className="filePreviewPane">
                 {previewKind === "html" && (
-                  <iframe key={`preview-${openedFile.path}`} className="filePreviewFrame" title={fileName} srcDoc={file?.content ?? draft} sandbox="" />
+                  <iframe
+                    key={`preview-${openedFile.path}`}
+                    className="filePreviewFrame"
+                    title={fileName}
+                    srcDoc={htmlPreview}
+                    sandbox="allow-scripts"
+                  />
                 )}
                 {previewKind === "markdown" && (
                   <div className="filePreviewMarkdown"><RichText text={draft} /></div>
@@ -2125,20 +2132,10 @@ function fileExtFromPath(path: string) {
   return fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
 }
 
-function sandboxPreviewUrl(downstreamSessionId: string, path: string) {
+function sandboxDownloadUrl(downstreamSessionId: string, path: string) {
   const normalizedPath = normalizeFilePath(path);
-  return `/filesystem/preview/${encodeURIComponent(downstreamSessionId)}/${encodePathSegments(normalizedPath)}`;
-}
-
-function sandboxPreviewBaseUrl(downstreamSessionId: string, path: string) {
-  const normalizedPath = normalizeFilePath(path);
-  const dir = normalizedPath.includes("/") ? normalizedPath.split("/").slice(0, -1).join("/") : "";
-  const base = sandboxPreviewRootUrl(downstreamSessionId);
-  return dir ? `${base}${encodePathSegments(dir)}/` : base;
-}
-
-function sandboxPreviewRootUrl(downstreamSessionId: string) {
-  return `/filesystem/preview/${encodeURIComponent(downstreamSessionId)}/`;
+  const suffix = normalizedPath ? `/${encodePathSegments(normalizedPath)}` : "";
+  return `/filesystem/download${suffix}?sessionId=${encodeURIComponent(downstreamSessionId)}`;
 }
 
 function encodePathSegments(path: string) {
@@ -2149,19 +2146,68 @@ function normalizeFilePath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+/g, "");
 }
 
-function htmlWithPreviewBase(html: string, baseUrl: string, rootUrl: string) {
-  if (!baseUrl) return html;
-  const baseTag = `<base href="${escapeHtmlAttribute(baseUrl)}">`;
-  const withBase = /<base\s/i.test(html)
-    ? html.replace(/<base\b[^>]*>/i, baseTag)
-    : /<head\b[^>]*>/i.test(html)
-      ? html.replace(/<head\b([^>]*)>/i, `<head$1>${baseTag}`)
-      : `${baseTag}${html}`;
-  if (!rootUrl) return withBase;
-  const escapedRoot = escapeHtmlAttribute(rootUrl);
-  return withBase.replace(/\b(src|href)=("|')\/(?!\/)([^"']*)\2/gi, (_match, attr: string, quote: string, path: string) => {
-    return `${attr}=${quote}${escapedRoot}${path}${quote}`;
+function htmlWithDownloadUrls(html: string, filePath: string, downstreamSessionId: string) {
+  const normalizedPath = normalizeFilePath(filePath);
+  const dir = normalizedPath.includes("/") ? normalizedPath.split("/").slice(0, -1).join("/") : "";
+  const baseUrl = sandboxDownloadBaseUrl(downstreamSessionId, dir);
+  const rewrittenHtml = html.replace(/\b(src|href)=("|')([^"']*)\2/gi, (_match, attr: string, quote: string, url: string) => {
+    const nextUrl = resolveHtmlAssetDownloadUrl(url, dir, downstreamSessionId);
+    return nextUrl ? `${attr}=${quote}${nextUrl}${quote}` : _match;
   });
+  const baseTag = `<base href="${escapeHtmlAttribute(baseUrl)}">`;
+  if (/<base\s/i.test(rewrittenHtml)) return rewrittenHtml.replace(/<base\b[^>]*>/i, baseTag);
+  if (/<head\b[^>]*>/i.test(rewrittenHtml)) return rewrittenHtml.replace(/<head\b([^>]*)>/i, `<head$1>${baseTag}`);
+  return `${baseTag}${rewrittenHtml}`;
+}
+
+function sandboxDownloadBaseUrl(downstreamSessionId: string, dir: string) {
+  const path = dir ? `${encodePathSegments(dir)}/` : "";
+  return `/filesystem/download/${path}?sessionId=${encodeURIComponent(downstreamSessionId)}`;
+}
+
+function resolveHtmlAssetDownloadUrl(url: string, currentDir: string, downstreamSessionId: string) {
+  const trimmed = url.trim();
+  if (!trimmed || shouldKeepHtmlAssetUrl(trimmed)) return null;
+
+  const [pathWithQuery, hash = ""] = trimmed.split("#", 2);
+  const queryIndex = pathWithQuery.indexOf("?");
+  const rawPath = queryIndex >= 0 ? pathWithQuery.slice(0, queryIndex) : pathWithQuery;
+  const query = queryIndex >= 0 ? pathWithQuery.slice(queryIndex + 1) : "";
+  const normalizedPath = normalizeHtmlAssetPath(rawPath, currentDir);
+  if (!normalizedPath) return null;
+
+  const params = new URLSearchParams(query);
+  params.set("sessionId", downstreamSessionId);
+  const suffix = hash ? `#${hash}` : "";
+  return `/filesystem/download/${encodePathSegments(normalizedPath)}?${params.toString()}${suffix}`;
+}
+
+function shouldKeepHtmlAssetUrl(url: string) {
+  const lower = url.toLowerCase();
+  return (
+    url.startsWith("#") ||
+    url.startsWith("//") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(url) ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:")
+  );
+}
+
+function normalizeHtmlAssetPath(path: string, currentDir: string) {
+  const base = path.startsWith("/") ? "" : currentDir;
+  const segments = `${base}/${path}`
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((segment) => segment && segment !== ".");
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === "..") {
+      resolved.pop();
+    } else {
+      resolved.push(segment);
+    }
+  }
+  return resolved.join("/");
 }
 
 function escapeHtmlAttribute(value: string) {
