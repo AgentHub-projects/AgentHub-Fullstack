@@ -1446,6 +1446,7 @@ export function FilePanel({
                   <span>预览</span>
                 </button>
               )}
+              <span>DBG: pm={String(previewMode)} cp={String(canPreview)} ce={String(canEdit)}</span>
               {previewMode && (
                 <button className="filePreviewButton active" type="button" disabled={!canEdit} onClick={() => setPreviewMode(false)}>
                   <EditOutlined />

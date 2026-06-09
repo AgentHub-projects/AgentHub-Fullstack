@@ -1,4 +1,5 @@
 import React, { Fragment, useState } from "react";
+import { createPortal } from "react-dom";
 import type { HubMessagePartDto } from "@agenthub/shared";
 import {
   CheckCircleOutlined,
@@ -632,10 +633,11 @@ function ZoomableImage({ src, alt, className }: { src: string; alt: string; clas
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === "Enter") setZoomed(true); }}
       />
-      {zoomed && (
+      {zoomed && createPortal(
         <div className="imageZoomOverlay" onClick={() => setZoomed(false)}>
           <img alt={alt} src={src} onClick={(e) => e.stopPropagation()} />
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
