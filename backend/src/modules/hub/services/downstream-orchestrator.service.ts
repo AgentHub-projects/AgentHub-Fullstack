@@ -8,6 +8,7 @@ import { mapSession } from "../mappers/hub.mappers";
 import { PrismaService } from "./prisma.service";
 import { HubContextService } from "./context.service";
 import { DownstreamSandboxRegistryService } from "./downstream-sandbox-registry.service";
+import { AgentRegistryService } from "./agent-registry.service";
 import type { ConnectionRecord, DownstreamEnvelope } from "../types/downstream-orchestrator.types";
 import { AcpConnection } from "./acp-connection";
 import { asRecord, stringValue, waitForSocket } from "../utils/downstream-orchestrator.utils";
@@ -51,6 +52,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     private readonly gateway: HubRealtimeGateway,
     @Inject(HubContextService)
     private readonly context: HubContextService,
+    @Inject(AgentRegistryService)
+    private readonly agents: AgentRegistryService,
     @Optional()
     @Inject(DownstreamSandboxRegistryService)
     private readonly sandboxRegistry?: DownstreamSandboxRegistryService,
@@ -417,8 +420,9 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const needsBootstrap = connection.needsBootstrap || !sessionActive;
     this.logger.log(`[startRun] sessionActive=${sessionActive} needsBootstrap=${needsBootstrap}`);
     const contextSnapshot = needsBootstrap ? await this.createBootstrapSnapshot(input) : null;
+    const systemPrompt = needsBootstrap ? (await this.agents.getAgentPrompt(input.orchestrator.id)).systemPrompt : "";
     const promptInput = await this.buildPromptInput(
-      { ...input, context: contextSnapshot },
+      { ...input, context: contextSnapshot, systemPrompt },
       downstreamSessionId,
       needsBootstrap,
     );
@@ -810,6 +814,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
       runId: string;
       userMessageId: string;
       promptText: string;
+      systemPrompt?: string;
       messageContext?: Record<string, unknown>;
       orchestrator: AgentInstanceDto;
       mentionedAgents: AgentInstanceDto[];
@@ -824,6 +829,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const promptText = renderAgentGatewayPrompt({
       promptText: input.promptText,
       promptMode,
+      systemPrompt: input.systemPrompt,
       contextText: bootstrap ? input.context?.promptText : undefined,
       messageContext: input.messageContext,
       mentionedAgents: input.mentionedAgents,
@@ -894,6 +900,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
 function renderAgentGatewayPrompt(input: {
   promptText: string;
   promptMode: "bootstrap" | "incremental";
+  systemPrompt?: string;
   contextText?: string;
   messageContext?: Record<string, unknown>;
   mentionedAgents: AgentInstanceDto[];
@@ -902,6 +909,7 @@ function renderAgentGatewayPrompt(input: {
   const isIncremental = input.promptMode === "incremental";
   const sections = [
     `# AgentHub 任务分派 (${input.promptMode})`,
+    input.systemPrompt ? `## 系统角色\n${input.systemPrompt}` : "",
     isIncremental ? "" : "请基于以下会话上下文和用户请求完成当前任务。",
     input.contextText && !isIncremental ? `## 会话上下文\n${input.contextText}` : "",
     input.mentionedAgents.length > 0 && !isIncremental
