@@ -406,6 +406,7 @@ export function MainGitDiffPanel({
     }
     preserveSelectionOnShaChangeRef.current = false;
     setOpenCommitMenu("");
+    setSelectedFilePath("");
     if (selectedSha) void loadCommitFiles(selectedSha);
   }, [selectedSha]);
 

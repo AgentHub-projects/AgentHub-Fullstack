@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>生日快乐 /title>
+  <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Nunito:wght@700;900&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #ff6ec7 0%, #ff9a3c 40%, #ffe259 100%);
+      font-family: 'Nunito', 'Ma Shan Zheng', sans-serif;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* ── Canvas overlay for confetti/fireworks ── */
+    #canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Main content card ── */
+    .card {
+      position: relative;
+      z-index: 10;
+      max-width: 640px;
+      margin: 60px auto 40px;
+      padding: 40px 32px 36px;
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 32px;
+      box-shadow: 0 8px 48px rgba(255, 80, 160, 0.25);
+      text-align: center;
+    }
+
+    /* ── Cake icon ── */
+    .cake {
+      font-size: clamp(3.5rem, 10vw, 5.5rem);
+      display: block;
+      margin-bottom: 8px;
+      animation: bounce 1.6s ease-in-out infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-12px); }
+    }
+
+    /* ── Main title ── */
+    h1 {
+      font-size: clamp(2rem, 8vw, 3.6rem);
+      font-weight: 900;
+      background: linear-gradient(90deg, #ff3cac, #ff6a00, #fbff3c);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.15;
+      margin-bottom: 18px;
+      text-shadow: none;
+    }
+
+    /* ── Blessing text ── */
+    .blessing {
+      font-size: clamp(1rem, 3.5vw, 1.25rem);
+      color: #6b3fa0;
+      line-height: 1.9;
+      margin-bottom: 28px;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      height: 3px;
+      background: linear-gradient(90deg, #ff6ec7, #ffe259, #ff9a3c);
+      border-radius: 99px;
+      margin: 0 auto 24px;
+      width: 60%;
+    }
+
+    /* ── Signature ── */
+    .signature {
+      font-size: 0.95rem;
+      color: #b36abf;
+      letter-spacing: 0.05em;
+    }
+    .signature span {
+      display: inline-block;
+      margin-top: 4px;
+      font-weight: 700;
+      color: #ff5a99;
+    }
+
+    /* ── Balloon scene ── */
+    .balloons {
+      position: fixed;
+      bottom: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 5;
+      overflow: hidden;
+    }
+
+    /* Each balloon is a circle + a tiny string */
+    .balloon {
+      position: absolute;
+      bottom: -120px;
+      width: clamp(40px, 6vw, 70px);
+      aspect-ratio: 1 / 1.2;
+      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+      opacity: 0.88;
+      animation: floatUp linear infinite;
+    }
+
+    /* String */
+    .balloon::after {
+      content: '';
+      position: absolute;
+      bottom: -14px; left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      height: 14px;
+      background: rgba(0,0,0,0.25);
+      border-radius: 2px;
+    }
+
+    /* Individual balloon colours & timing */
+    .balloon:nth-child(1)  { left: 5%;  background: #ff4d6d; animation-duration: 9s;   animation-delay: 0s;   width: 55px; }
+    .balloon:nth-child(2)  { left: 18%; background: #ffd600; animation-duration: 11s;  animation-delay: 1.5s; width: 48px; }
+    .balloon:nth-child(3)  { left: 33%; background: #00d4aa; animation-duration: 8s;   animation-delay: 3s;   width: 60px; }
+    .balloon:nth-child(4)  { left: 52%; background: #845ef7; animation-duration: 12s;  animation-delay: 0.8s; width: 44px; }
+    .balloon:nth-child(5)  { left: 68%; background: #ff922b; animation-duration: 10s;  animation-delay: 2.2s; width: 58px; }
+    .balloon:nth-child(6)  { left: 80%; background: #f06595; animation-duration: 8.5s; animation-delay: 4s;   width: 50px; }
+    .balloon:nth-child(7)  { left: 90%; background: #74c0fc; animation-duration: 13s;  animation-delay: 1s;   width: 42px; }
+
+    @keyframes floatUp {
+      0%   { transform: translateY(0)       rotate(0deg);  opacity: 0; }
+      5%   { opacity: 0.88; }
+      90%  { opacity: 0.88; }
+      100% { transform: translateY(-110vh)  rotate(15deg); opacity: 0; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .card { margin: 32px 16px; padding: 28px 20px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ Confetti / Fireworks Canvas ══ -->
+<canvas id="canvas"></canvas>
+
+<!-- ══ Floating Balloons (7 balloons, CSS animation) ══ -->
+<div class="balloons" aria-hidden="true">
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+  <div class="balloon"></div>
+</div>
+
+<!-- ══ Main Card ══ -->
+<main class="card" role="main">
+  <span class="cake" aria-label="生日蛋糕">🎂</span>
+
+  <h1>生日快乐！🎉</h1>
+
+  <hr class="divider" />
+
+  <p class="blessing">
+    愿这一天如阳光般温暖，<br />
+    每一刻都充满欢笑与惊喜。<br />
+    愿你的每个心愿都能成真，<br />
+    健康、快乐、幸福常伴左右。<br />
+    <br />
+    岁月静好，生日美好，<br />
+    生命因你而更加精彩！✨
+  </p>
+
+  <hr class="divider" />
+
+  <!-- 署名区：将"你的朋友们"替换为真实署名 -->
+  <p class="signature">
+    送上最真挚的祝福<br />
+    <span>—— 小紫 🎁</span>
+  </p>
+</main>
+
+<script>
+/* ══════════════════════════════════════════════════
+   Canvas 粒子系统：彩纸屑（持续飘落）+ 烟花爆炸效果
+   ══════════════════════════════════════════════════ */
+(function () {
+  const canvas = document.getElementById('canvas');
+  const ctx    = canvas.getContext('2d');
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const COLORS = [
+    '#ff4d6d','#ff922b','#ffd43b','#69db7c',
+    '#74c0fc','#cc5de8','#f783ac','#a9e34b',
+  ];
+
+  /* ── 彩纸屑粒子 ── */
+  class Confetti {
+    constructor() { this.reset(true); }
+
+    reset(initial = false) {
+      this.x        = Math.random() * canvas.width;
+      this.y        = initial ? Math.random() * canvas.height : -20;
+      this.w        = 6 + Math.random() * 8;
+      this.h        = this.w * (0.4 + Math.random() * 0.4);
+      this.color    = COLORS[Math.floor(Math.random() * COLORS.length)];
+      this.rotation = Math.random() * Math.PI * 2;
+      this.rotSpeed = (Math.random() - 0.5) * 0.12;
+      this.vy       = 1.2 + Math.random() * 2.4;
+      this.vx       = (Math.random() - 0.5) * 1.2;
+      this.alpha    = 0.7 + Math.random() * 0.3;
+    }
+
+    update() {
+      this.y        += this.vy;
+      this.x        += this.vx;
+      this.rotation += this.rotSpeed;
+      if (this.y > canvas.height + 20) this.reset();
+    }
+
+    draw() {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rotation);
+      ctx.globalAlpha = this.alpha;
+      ctx.fillStyle   = this.color;
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+      ctx.restore();
+    }
+  }
+
+  /* ── 烟花火花粒子 ── */
+  class Spark {
+    constructor(x, y) {
+      const angle   = Math.random() * Math.PI * 2;
+      const speed   = 1.5 + Math.random() * 4;
+      this.x        = x;
+      this.y        = y;
+      this.vx       = Math.cos(angle) * speed;
+      this.vy       = Math.sin(angle) * speed;
+      this.life     = 1;
+      this.decay    = 0.018 + Math.random() * 0.022;
+      this.color    = COLORS[Math.floor(Math.random() * COLORS.length)];
+      this.r        = 2 + Math.random() * 3;
+    }
+
+    update() {
+      this.x    += this.vx;
+      this.y    += this.vy;
+      this.vy   += 0.06; // 模拟重力
+      this.life -= this.decay;
+    }
+
+    draw() {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, this.life);
+      ctx.fillStyle   = this.color;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    get dead() { return this.life <= 0; }
+  }
+
+  /* 初始化 80 个彩纸屑 */
+  const confetti = Array.from({ length: 80 }, () => new Confetti());
+  let sparks = [];
+
+  /* 定时发射烟花 */
+  function launchFirework() {
+    const x = canvas.width  * (0.1 + Math.random() * 0.8);
+    const y = canvas.height * (0.1 + Math.random() * 0.5);
+    for (let i = 0; i < 60; i++) sparks.push(new Spark(x, y));
+  }
+
+  launchFirework();                          // 页面加载立即触发一次
+  setInterval(launchFirework, 2200);         // 之后每 2.2s 触发一次
+
+  /* 主动画循环 */
+  function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    confetti.forEach(c => { c.update(); c.draw(); });
+
+    sparks = sparks.filter(s => !s.dead);
+    sparks.forEach(s => { s.update(); s.draw(); });
+
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+})();
+</script>
+</body>
+</html>
