@@ -1400,6 +1400,22 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
+.diffMessageMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diffMessageMeta .add {
+  color: var(--green);
+  font-weight: 760;
+}
+
+.diffMessageMeta .remove {
+  color: var(--red);
+  font-weight: 760;
+}
+
 .diffMessageTop > div:last-child {
   display: inline-flex;
   align-items: center;
@@ -1436,6 +1452,17 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.diffMessageTop .partPanelButton.primary {
+  border-color: var(--line);
+  background: var(--ink);
+  color: #fff;
+}
+
+.diffMessageTop .partPanelButton.primary:hover {
+  background: #2f2f2f;
+  color: #fff;
+}
+
 .diffMessageTop .partPanelButton span,
 .artifactMessageActions .partPanelButton span {
   color: inherit;
@@ -1443,8 +1470,27 @@ textarea:focus-visible {
   font-weight: 760;
 }
 
+.diffMessagePreview {
+  max-height: 280px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.diffMessagePreview .unifiedDiff {
+  max-height: none;
+}
+
+.diffMessageEmpty {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
 .partMessageHint {
   margin: 0 8px 8px;
+  padding-top: 8px;
   color: var(--muted);
   font-size: 12px;
 }

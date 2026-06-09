@@ -56,7 +56,9 @@ export function messageJsonWithParts(
     : [];
   const textParts = contentText ? parseMessageParts(contentText) : [];
   const fileDiffParts = Array.isArray(base.files)
-    ? base.files.map((file: any, i: number) => fileDiffPart(i, file))
+    ? base.files
+      .map((file, i) => fileRecord(file) ? fileDiffPart(i, file) : null)
+      .filter((part): part is HubMessagePartDto => Boolean(part))
     : [];
   return {
     ...base,
@@ -139,6 +141,10 @@ function decodeHtml(value: string | undefined) {
 /** 转义正则表达式特殊字符 */
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function fileRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function fileDiffPart(index: number, file: Record<string, unknown>): HubMessagePartDto {

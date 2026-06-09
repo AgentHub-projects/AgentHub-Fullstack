@@ -21,6 +21,8 @@ import { parseInlineMarkdown, parseMarkdownBlocks, type InlineSegment, type Mark
 import type { DiffLine } from "../../lib/workbench/types";
 import { copyText, formatBytes } from "../../lib/utils";
 
+const DIFF_MESSAGE_PREVIEW_LINE_LIMIT = 80;
+
 export type SelectionSource = {
   sourceId?: string;
   messageId?: string;
@@ -198,8 +200,14 @@ function DiffPart({
 }) {
   const path = stringMetadata(part.metadata, "path") ?? part.title ?? "Diff";
   const changeType = stringMetadata(part.metadata, "changeType");
-  const patch = part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
+  const status = stringMetadata(part.metadata, "status") ?? changeType ?? "diff";
+  const additions = numberMetadata(part.metadata, "additions");
+  const deletions = numberMetadata(part.metadata, "deletions");
+  const patch = diffPartPatch(part);
   const lineCount = patch.trim() ? patch.replace(/\r\n/g, "\n").split("\n").length : null;
+  const lines = diffPartLines(part);
+  const previewLines = lines.slice(0, DIFF_MESSAGE_PREVIEW_LINE_LIMIT);
+  const previewTruncated = lines.length > previewLines.length;
   return (
     <div className="diffMessagePart">
       <div className="diffMessageTop">
@@ -208,18 +216,23 @@ function DiffPart({
         </span>
         <div>
           <strong>{path}</strong>
-          <span>{changeType ?? "diff"}</span>
+          <span className="diffMessageMeta">
+            <span>{diffStatusLabel(status)}</span>
+            {additions !== undefined && <span className="add">+{additions}</span>}
+            {deletions !== undefined && <span className="remove">-{deletions}</span>}
+          </span>
         </div>
         <div>
-          {onOpenDiffPanel && (
-            <button className="partPanelButton" type="button" title="打开 main 审查" onClick={onOpenDiffPanel}>
-              <BranchesOutlined />
-              <span>main 审查</span>
+          {onOpenPart && (
+            <button className="partPanelButton primary" type="button" title="在对话内展开完整 Diff" onClick={() => onOpenPart(part)}>
+              <ExpandOutlined />
+              <span>展开</span>
             </button>
           )}
-          {onOpenPart && (
-            <button type="button" title="展开预览" onClick={() => onOpenPart(part)}>
-              <ExpandOutlined />
+          {onOpenDiffPanel && (
+            <button className="partPanelButton" type="button" title="在右侧审查面板查看" onClick={onOpenDiffPanel}>
+              <BranchesOutlined />
+              <span>右侧审查</span>
             </button>
           )}
           {part.url && (
@@ -239,8 +252,16 @@ function DiffPart({
           )}
         </div>
       </div>
+      {previewLines.length > 0 ? (
+        <div className="diffMessagePreview" aria-label={`${path} Diff 预览`}>
+          <DiffLines lines={previewLines} />
+        </div>
+      ) : (
+        <div className="diffMessageEmpty">暂无可直接展示的 patch 内容。</div>
+      )}
       <small className="partMessageHint">
-        文件变更详情可打开右侧 main 审查查看{lineCount ? ` · ${lineCount} 行 patch` : ""}
+        可在对话内展开查看完整 patch{lineCount ? ` · ${lineCount} 行 patch` : ""}
+        {previewTruncated ? ` · 已预览前 ${DIFF_MESSAGE_PREVIEW_LINE_LIMIT} 行` : ""}
       </small>
     </div>
   );
@@ -268,6 +289,27 @@ function beforeAfterLines(before: string, after: string): DiffLine[] {
     { kind: "meta", text: "+++ after" },
     ...after.replace(/\r\n/g, "\n").split("\n").map((text, index) => ({ kind: "add" as const, newLine: index + 1, text })),
   ];
+}
+
+function diffPartPatch(part: HubMessagePartDto) {
+  return part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
+}
+
+function diffPartLines(part: HubMessagePartDto): DiffLine[] {
+  const patch = diffPartPatch(part);
+  const before = stringMetadata(part.metadata, "beforeContent");
+  const after = stringMetadata(part.metadata, "afterContent");
+  if (patch.trim()) return parseUnifiedPatch(patch);
+  if (before || after) return beforeAfterLines(before ?? "", after ?? "");
+  return [];
+}
+
+function diffStatusLabel(status: string) {
+  if (status === "A" || status === "added") return "新增";
+  if (status === "D" || status === "deleted") return "删除";
+  if (status === "R" || status === "renamed") return "重命名";
+  if (status === "M" || status === "modified") return "修改";
+  return status;
 }
 
 function FilePart({
@@ -797,10 +839,7 @@ function ExpandedPartPreview({ part }: { part: HubMessagePartDto }) {
   }
 
   if (part.type === "diff") {
-    const patch = part.text?.trim() ? part.text : stringMetadata(part.metadata, "patch") ?? "";
-    const before = stringMetadata(part.metadata, "beforeContent");
-    const after = stringMetadata(part.metadata, "afterContent");
-    const lines = patch.trim() ? parseUnifiedPatch(patch) : before || after ? beforeAfterLines(before ?? "", after ?? "") : [];
+    const lines = diffPartLines(part);
     return lines.length ? (
       <div className="messagePartDiffPreview">
         <DiffLines lines={lines} />

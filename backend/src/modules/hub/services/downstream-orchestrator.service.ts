@@ -963,13 +963,16 @@ function briefPromptInput(promptInput: Record<string, unknown>) {
 
 function asFiles(value: unknown) {
   if (!Array.isArray(value)) return undefined;
-  return value.map((file: Record<string, unknown>) => ({
-    path: (typeof file.path === "string" ? file.path : "") ?? "",
-    status: (typeof file.status === "string" ? file.status : "M") ?? "M",
-    additions: Number(file.additions) || 0,
-    deletions: Number(file.deletions) || 0,
-    patch: (typeof file.patch === "string" ? file.patch : "") ?? "",
-  }));
+  return value
+    .map((file) => asRecord(file))
+    .filter((file) => Object.keys(file).length > 0)
+    .map((file) => ({
+      path: typeof file.path === "string" ? file.path : "",
+      status: typeof file.status === "string" ? file.status : "M",
+      additions: Number(file.additions) || 0,
+      deletions: Number(file.deletions) || 0,
+      patch: typeof file.patch === "string" ? file.patch : "",
+    }));
 }
 
 function isPromptResponseTimeout(error: unknown) {
