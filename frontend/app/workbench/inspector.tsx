@@ -1459,12 +1459,6 @@ export function FilePanel({
                 </button>
               )}
             </div>
-            {openedFile && !previewMode && (
-            <div className="fileEditorPathBar">
-              <span title={openedFile.path}>{openedFile.path}</span>
-              {loadingFile && <small>正在读取...</small>}
-            </div>
-            )}
             {file && !previewMode && (
               <textarea
                 spellCheck={false}
