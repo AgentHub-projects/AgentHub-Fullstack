@@ -1523,13 +1523,6 @@ export function FilePanel({
                 )}
               </div>
             )}
-            {!previewMode && (
-              <footer className="fileEditorStatus">
-                <span>{openedFile ? fileLanguage : "No file"}</span>
-                <span>{file ? `${draft.length} 字符 · ${formatBytes(statusSize)}` : openedFile ? formatBytes(statusSize) : "Ready"}</span>
-                <span>{dirty ? "已修改" : file ? "已同步" : openedFile ? "仅预览" : "空闲"}</span>
-              </footer>
-            )}
           </section>
         </div>
       )}
