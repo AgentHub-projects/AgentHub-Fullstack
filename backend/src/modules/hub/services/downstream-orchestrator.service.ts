@@ -618,22 +618,23 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         const speaker = stringValue(meta.agentId) ?? stringValue(content.speaker) ?? "agent";
         const speakerAgentId = agentIdValue(meta.agentId) ?? agentIdValue(content.speaker);
 
-        if (updateType) {
-          if (updateType === "file.change") {
-            const payload = asRecord(content.payload ?? {});
-            this.logger.log(`[session/update] 结构化更新 type=${updateType} runId=${runId}`);
-            await this.events.append({
-              sessionId: record.sessionId,
-              runId,
-              eventType: updateType,
-              speakerAgentId,
-              payload,
-              source: "downstream_agent",
-              occurredAt: new Date(),
-            });
-          } else {
-            this.logger.warn(`[session/update] 未支持的结构化更新 type=${updateType}`);
-          }
+        if (updateType === "file.change") {
+          const payload = asRecord(content.payload ?? {});
+          this.logger.log(`[session/update] 结构化更新 type=${updateType} runId=${runId}`);
+          await this.events.append({
+            sessionId: record.sessionId,
+            runId,
+            eventType: updateType,
+            speakerAgentId,
+            payload,
+            source: "downstream_agent",
+            occurredAt: new Date(),
+          });
+          if (envelopeId !== undefined) record.acp.respond(envelopeId);
+          return;
+        }
+        if (updateType && updateType !== "diff") {
+          this.logger.warn(`[session/update] 未支持的结构化更新 type=${updateType}`);
           if (envelopeId !== undefined) record.acp.respond(envelopeId);
           return;
         }
@@ -655,15 +656,18 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         if (text && runId) {
           const isChunk = sessionUpdate === "agent_message_chunk";
           const isStop = sessionUpdate === "agent_message_stop" || sessionUpdate === "stop";
+          const innerContent = asRecord((content as any).content);
+          const rawFiles = (innerContent.files ?? (content as any).files);
+          const diffFiles = Array.isArray(rawFiles) && rawFiles.length > 0 ? asFiles(rawFiles) : undefined;
           if (isChunk) {
-            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length}`);
+            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length} hasFiles=${!!diffFiles}`);
             await this.events.append({
               sessionId: record.sessionId,
               runId,
               eventType: "message.delta",
               speakerAgentId,
               source: "downstream_agent",
-              payload: { text, speaker, append: false },
+              payload: { text, speaker, append: false, ...(diffFiles ? { files: diffFiles } : {}) },
             });
           }
           if (isStop) {
@@ -955,6 +959,17 @@ function briefPromptInput(promptInput: Record<string, unknown>) {
     })
     : promptInput.prompt;
   return { ...promptInput, prompt };
+}
+
+function asFiles(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((file: Record<string, unknown>) => ({
+    path: (typeof file.path === "string" ? file.path : "") ?? "",
+    status: (typeof file.status === "string" ? file.status : "M") ?? "M",
+    additions: Number(file.additions) || 0,
+    deletions: Number(file.deletions) || 0,
+    patch: (typeof file.patch === "string" ? file.patch : "") ?? "",
+  }));
 }
 
 function isPromptResponseTimeout(error: unknown) {

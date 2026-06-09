@@ -348,7 +348,7 @@ export class HubEventService {
         agentId: speakerAgentId,
         contentText: fullText,
         contentJson: messageJsonWithParts(
-          event.payload ?? {},
+          { ...(buffer?.payload ?? {}), ...(event.payload ?? {}), files: diffFiles(buffer?.payload, event.payload) },
           fullText,
           bufferedParts,
         ) as any,
@@ -532,6 +532,15 @@ function payloadParts(payload: Record<string, unknown>) {
 
 function hasPayloadParts(payload: Record<string, unknown>) {
   return payloadParts(payload).length > 0;
+}
+
+function diffFiles(bufferPayload: Record<string, unknown> | undefined, eventPayload: Record<string, unknown>) {
+  const files = Array.isArray(eventPayload.files) && eventPayload.files.length > 0
+    ? eventPayload.files
+    : Array.isArray(bufferPayload?.files) && bufferPayload.files.length > 0
+      ? bufferPayload.files
+      : undefined;
+  return files;
 }
 
 function partContextText(payload: Record<string, unknown>, extraParts: HubMessagePartDto[]) {

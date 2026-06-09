@@ -55,9 +55,12 @@ export function messageJsonWithParts(
     ? base.parts.map(normalizePayloadPart).filter((part): part is HubMessagePartDto => Boolean(part))
     : [];
   const textParts = contentText ? parseMessageParts(contentText) : [];
+  const fileDiffParts = Array.isArray(base.files)
+    ? base.files.map((file: any, i: number) => fileDiffPart(i, file))
+    : [];
   return {
     ...base,
-    parts: [...textParts, ...payloadParts, ...extraParts],
+    parts: [...textParts, ...payloadParts, ...fileDiffParts, ...extraParts],
   };
 }
 
@@ -136,4 +139,19 @@ function decodeHtml(value: string | undefined) {
 /** 转义正则表达式特殊字符 */
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function fileDiffPart(index: number, file: Record<string, unknown>): HubMessagePartDto {
+  return {
+    id: `file_diff_${index + 1}`,
+    type: "diff",
+    text: file.patch && typeof file.patch === "string" ? file.patch : "",
+    title: file.path && typeof file.path === "string" ? file.path : "",
+    metadata: {
+      path: file.path ?? "",
+      status: file.status ?? "M",
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+    },
+  };
 }
