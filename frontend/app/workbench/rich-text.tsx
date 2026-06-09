@@ -270,16 +270,39 @@ function DiffPart({
 function DiffLines({ lines }: { lines: DiffLine[] }) {
   return (
     <div className="unifiedDiff" role="table">
-      {lines.map((line, index) => (
-        <div className={`diffLine ${line.kind}`} key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`} role="row">
-          <span className="lineNo">{line.oldLine ?? ""}</span>
-          <span className="lineNo">{line.newLine ?? ""}</span>
-          <span className="lineMarker">{diffMarker(line.kind)}</span>
-          <code>{line.text || " "}</code>
-        </div>
-      ))}
+      {lines.map((line, index) => {
+        const metaClass = diffMetaClass(line);
+        return (
+          <div
+            className={`diffLine ${line.kind}${metaClass ? ` ${metaClass}` : ""}`}
+            key={`${index}-${line.oldLine ?? "x"}-${line.newLine ?? "x"}`}
+            role="row"
+          >
+            <span className="lineNo">{line.oldLine ?? ""}</span>
+            <span className="lineNo">{line.newLine ?? ""}</span>
+            <span className="lineMarker">{diffMarker(line.kind)}</span>
+            <code>{line.text || " "}</code>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function diffMetaClass(line: DiffLine) {
+  if (line.kind !== "meta") return "";
+  const text = line.text.trimStart();
+  if (/^@@\s/.test(text)) return "structuralMeta hunkMeta";
+  if (
+    text.startsWith("diff --git ") ||
+    text.startsWith("index ") ||
+    text.startsWith("--- ") ||
+    text.startsWith("+++ ") ||
+    text.startsWith("\\ No newline")
+  ) {
+    return "structuralMeta";
+  }
+  return "";
 }
 
 function beforeAfterLines(before: string, after: string): DiffLine[] {

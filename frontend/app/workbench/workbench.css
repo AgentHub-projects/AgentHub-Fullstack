@@ -1499,6 +1499,46 @@ textarea:focus-visible {
   max-height: 280px;
 }
 
+.diffMessagePart .diffLine.structuralMeta,
+.messagePartDiffPreview .diffLine.structuralMeta {
+  min-height: 18px;
+  border-bottom: 0;
+  background: #fbfbfb;
+}
+
+.diffMessagePart .diffLine.structuralMeta .lineNo,
+.diffMessagePart .diffLine.structuralMeta .lineMarker,
+.messagePartDiffPreview .diffLine.structuralMeta .lineNo,
+.messagePartDiffPreview .diffLine.structuralMeta .lineMarker {
+  background: transparent;
+  color: #d2d2d2;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.diffMessagePart .diffLine.structuralMeta code,
+.messagePartDiffPreview .diffLine.structuralMeta code {
+  color: #9a9a9a;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  font-size: 11px;
+}
+
+.diffMessagePart .diffLine.hunkMeta,
+.messagePartDiffPreview .diffLine.hunkMeta {
+  min-height: 22px;
+  border-top: 1px solid #eeeeee;
+  border-bottom: 1px solid #eeeeee;
+  background: #f7f8fa;
+}
+
+.diffMessagePart .diffLine.hunkMeta code,
+.messagePartDiffPreview .diffLine.hunkMeta code {
+  color: #737373;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .diffMessagePart > pre {
   max-height: 220px;
   overflow: auto;
