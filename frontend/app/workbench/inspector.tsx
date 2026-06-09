@@ -250,6 +250,7 @@ export function MainGitDiffPanel({
   const [filesLoading, setFilesLoading] = useState<Record<string, boolean>>({});
   const [filesError, setFilesError] = useState<Record<string, string>>({});
   const [selectedFilePath, setSelectedFilePath] = useState(() => initialCache?.selectedFilePath ?? "");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [fileFilter, setFileFilter] = useState(() => initialCache?.fileFilter ?? "");
   const [fileListVisible, setFileListVisible] = useState(() => initialCache?.fileListVisible ?? true);
   const [openCommitMenu, setOpenCommitMenu] = useState<"" | "parent" | "target">("");
@@ -662,11 +663,11 @@ export function MainGitDiffPanel({
             <div className="mainGitFileList">
               {filteredFileGroups.map((group) => (
                 <div className="mainGitFileGroup" key={group.directory}>
-                  <div className="mainGitFileGroupHeader" title={group.directory}>
-                    <DownOutlined />
+                  <div className="mainGitFileGroupHeader" title={group.directory} onClick={() => setCollapsedGroups((prev) => { const next = new Set(prev); if (next.has(group.directory)) next.delete(group.directory); else next.add(group.directory); return next; })} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") { const next = new Set(collapsedGroups); if (next.has(group.directory)) next.delete(group.directory); else next.add(group.directory); setCollapsedGroups(next); } }}>
+                    {collapsedGroups.has(group.directory) ? <RightOutlined /> : <DownOutlined />}
                     <span>{group.directory}</span>
                   </div>
-                  {group.files.map((file) => (
+                  {!collapsedGroups.has(group.directory) && group.files.map((file) => (
                     <button
                       className={`mainGitFileNode ${file.path === selectedFilePath ? "active" : ""}`}
                       key={file.path}
