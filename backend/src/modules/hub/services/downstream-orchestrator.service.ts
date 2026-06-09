@@ -899,14 +899,15 @@ function renderAgentGatewayPrompt(input: {
   mentionedAgents: AgentInstanceDto[];
   agents: Array<{ agentId: AgentId; description: string }>;
 }) {
+  const isIncremental = input.promptMode === "incremental";
   const sections = [
     `# AgentHub 任务分派 (${input.promptMode})`,
-    "请基于以下会话上下文和用户请求完成当前任务。",
-    input.contextText ? `## 会话上下文\n${input.contextText}` : "",
-    input.mentionedAgents.length > 0
+    isIncremental ? "" : "请基于以下会话上下文和用户请求完成当前任务。",
+    input.contextText && !isIncremental ? `## 会话上下文\n${input.contextText}` : "",
+    input.mentionedAgents.length > 0 && !isIncremental
       ? `## 提及的 Agent\n${input.mentionedAgents.map((agent) => `- ${agent.name} (${agent.id})`).join("\n")}`
       : "",
-    input.agents.length > 0
+    input.agents.length > 0 && !isIncremental
       ? `## 可用 Worker Agent\n${input.agents.map((agent) => `- ${agent.agentId}: ${agent.description}`).join("\n")}`
       : "",
     messageContextPrompt(input.messageContext),
