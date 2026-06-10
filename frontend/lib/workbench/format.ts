@@ -17,7 +17,7 @@ export function formatElapsed(seconds: number) {
 }
 
 export function formatTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 export function initials(name: string) {
