@@ -41,25 +41,25 @@ pnpm --filter @agenthub/frontend dev    # 前端 :3000
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                   Frontend                       │
-│          Next.js 15 · React 19 · Ant Design      │
-│              Socket.IO Client                    │
-└─────────────────────┬───────────────────────────┘
-                      │ HTTP + WebSocket
-┌─────────────────────▼───────────────────────────┐
-│                   Backend                        │
-│     NestJS · Prisma · PostgreSQL (pgvector)      │
-│              Socket.IO · Redis                   │
+│                    Frontend                     │
+│       Next.js 15 · React 19 · Ant Design        │
+│               Socket.IO Client                  │
+└───────────────────────┬─────────────────────────┘
+                        │ HTTP + WebSocket
+┌───────────────────────▼─────────────────────────┐
+│                     Backend                     │
+│     NestJS · Prisma · PostgreSQL (pgvector)     │
+│                Socket.IO · Redis                │
 │         ┌──────────────┐                        │
-│         │  Context Svc  │                        │
-│         │  Embedding   │  Token Budget │
-│         │  Summary     │  Retrieval    │
+│         │  Context Svc  │                       │
+│         │  Embedding   │  Token Budget │        │
+│         │  Summary     │  Retrieval    │        │
 │         └──────────────┘                        │
-└─────────────────────┬───────────────────────────┘
-                      │ ACP over WebSocket
-┌─────────────────────▼───────────────────────────┐
-│            Downstream Orchestrator               │
-│     Agent 调度 · Sandbox 管理 · 事件回流           │
+└───────────────────────┬─────────────────────────┘
+                        │ ACP over WebSocket
+┌───────────────────────▼─────────────────────────┐
+│          Downstream Orchestrator                │
+│     Agent 调度 · Sandbox 管理 · 事件回流        │
 └─────────────────────────────────────────────────┘
 ```
 
