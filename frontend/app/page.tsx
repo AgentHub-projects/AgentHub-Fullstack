@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction, type UIEvent } from "react";
+import { createPortal } from "react-dom";
 import type {
   AgentInstanceDto,
   AgentTemplateDto,
@@ -197,6 +198,7 @@ export default function WorkbenchPage() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [mentionStyle, setMentionStyle] = useState<React.CSSProperties>({});
   const [deploymentPreflights, setDeploymentPreflights] = useState<Record<string, DeploymentPreflightResponse>>({});
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
@@ -259,6 +261,8 @@ export default function WorkbenchPage() {
   const [renamingSession, setRenamingSession] = useState(false);
   const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const agentAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -1421,12 +1425,51 @@ export default function WorkbenchPage() {
   function closeMentionMenu() {
     setMentionMatch(null);
     setActiveMentionIndex(0);
+    setMentionStyle({});
   }
 
   function refreshMentionMenu(value: string, caret: number | null) {
     const next = findActiveMention(value, caret ?? value.length);
     setMentionMatch(next);
     setActiveMentionIndex(0);
+    if (next) {
+      const textarea = textareaRef.current;
+      const mirror = mirrorRef.current;
+      const wrap = wrapRef.current;
+      if (!textarea || !mirror || !wrap) return;
+
+      // Sync mirror position/size with textarea
+      const taRect = textarea.getBoundingClientRect();
+      const wrapRect = wrap.getBoundingClientRect();
+      mirror.style.top = `${taRect.top - wrapRect.top}px`;
+      mirror.style.left = `${taRect.left - wrapRect.left}px`;
+      mirror.style.width = `${taRect.width}px`;
+      mirror.style.height = `${taRect.height}px`;
+
+      // Fill mirror with text before @
+      const beforeAt = value.slice(0, next.start);
+      mirror.innerHTML = "";
+      const lines = beforeAt.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) mirror.appendChild(document.createElement("br"));
+        mirror.appendChild(document.createTextNode(lines[i]));
+      }
+
+      // Marker at @ position
+      const marker = document.createElement("span");
+      marker.textContent = "|";
+      mirror.appendChild(marker);
+
+      const markerRect = marker.getBoundingClientRect();
+      marker.remove();
+
+      setMentionStyle({
+        top: markerRect.top,
+        left: Math.min(markerRect.left, window.innerWidth - 436),
+      });
+    } else {
+      setMentionStyle({});
+    }
   }
 
   function insertMention(agent: AgentInstanceDto) {
@@ -2086,7 +2129,7 @@ export default function WorkbenchPage() {
               </button>
             </div>
           )}
-          <div className="composerInputWrap">
+          <div className="composerInputWrap" ref={wrapRef}>
             {attachments.length > 0 && (
               <div className="attachmentTray" aria-label="待发送附件">
                 {attachments.map((attachment) => (
@@ -2098,36 +2141,39 @@ export default function WorkbenchPage() {
                 ))}
               </div>
             )}
-            {mentionMatch && !sending && activeSessionId && !chatActionLocked && (
-              <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选">
-                {mentionCandidates.length > 0 ? (
-                  mentionCandidates.map((agent, index) => (
-                    <button
-                      key={agent.id}
-                      className={index === activeMentionIndex ? "active" : ""}
-                      type="button"
-                      role="option"
-                      aria-selected={index === activeMentionIndex}
-                      onMouseEnter={() => setActiveMentionIndex(index)}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        insertMention(agent);
-                      }}
-                    >
-                      <AvatarFace name={agent.name} avatarUrl={agent.avatarUrl} colorKey={agent.id} />
-                      <span>
-                        <strong>@{agent.name}</strong>
-                        <small>{agent.template?.name ?? "worker"}</small>
-                        <CapabilityTags capabilities={agent.capabilities} />
-                      </span>
-                      {index === activeMentionIndex && <CheckCircleOutlined />}
-                    </button>
-                  ))
-                ) : (
-                  <p>没有匹配的 Agent</p>
-                )}
-              </div>
-            )}
+            {mentionMatch && !sending && activeSessionId && !chatActionLocked &&
+              createPortal(
+                <div className="mentionMenu" role="listbox" aria-label="Agent mention 候选" style={mentionStyle}>
+                  {mentionCandidates.length > 0 ? (
+                    mentionCandidates.map((agent, index) => (
+                      <button
+                        key={agent.id}
+                        className={index === activeMentionIndex ? "active" : ""}
+                        type="button"
+                        role="option"
+                        aria-selected={index === activeMentionIndex}
+                        onMouseEnter={() => setActiveMentionIndex(index)}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          insertMention(agent);
+                        }}
+                      >
+                        <AvatarFace name={agent.name} avatarUrl={agent.avatarUrl} colorKey={agent.id} />
+                        <span>
+                          <strong>@{agent.name}</strong>
+                          <small>{agent.template?.name ?? "worker"}</small>
+                          <CapabilityTags capabilities={agent.capabilities} />
+                        </span>
+                        {index === activeMentionIndex && <CheckCircleOutlined />}
+                      </button>
+                    ))
+                  ) : (
+                    <p>没有匹配的 Agent</p>
+                  )}
+                </div>,
+                document.body,
+              )}
+            <div ref={mirrorRef} className="composerMirror" aria-hidden />
             <textarea
               ref={textareaRef}
               value={composer}

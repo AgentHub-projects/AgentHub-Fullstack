@@ -582,7 +582,7 @@ textarea:focus-visible {
 .conversationPane {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  overflow: hidden;
+  overflow: visible;
   border-right: 1px solid var(--line);
   background: var(--surface);
 }
@@ -1977,12 +1977,10 @@ textarea:focus-visible {
 }
 
 .mentionMenu {
-  position: absolute;
-  right: 12px;
-  bottom: calc(100% + 8px);
-  z-index: 20;
+  position: fixed;
+  z-index: 9999;
   display: grid;
-  width: min(420px, calc(100% - 24px));
+  width: min(420px, calc(100vw - 24px));
   max-height: min(280px, 46dvh);
   overflow: auto;
   border: 1px solid var(--line);
@@ -1990,6 +1988,7 @@ textarea:focus-visible {
   background: var(--surface);
   box-shadow: var(--shadow-menu);
   padding: 6px;
+  transform: translateY(calc(-100% - 8px));
 }
 
 .mentionMenu button {
@@ -2062,6 +2061,20 @@ textarea:focus-visible {
 .composer textarea:focus {
   border-color: var(--brand);
   box-shadow: var(--focus);
+}
+
+.composerMirror {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  min-height: 92px;
+  border: 1px solid transparent;
+  padding: 12px 13px;
+  font: inherit;
+  line-height: 1.52;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
 }
 
 .composerBar {
