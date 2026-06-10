@@ -36,6 +36,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
   private readonly logger = new Logger(DownstreamOrchestratorService.name);
   private readonly connections = new Map<string, ConnectionRecord>();
   private readonly connectionPreparations = new Map<string, Promise<ConnectionRecord>>();
+  private readonly eventQueues = new Map<string, Promise<void>>();
   private unregisterGatewaySubscription?: () => void;
 
   private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
@@ -303,7 +304,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     await waitForSocket(socket);
 
     const acp = new AcpConnection(socket, RECOVERY_TIMEOUT_MS);
-    acp.onNotification((env) => void this.handleDownstreamEvent(sessionId, env));
+    acp.onNotification((env) => void this.enqueueEvent(sessionId, env));
 
     let resolveReady!: (id: string) => void;
     let rejectReady!: (error: Error) => void;
@@ -332,6 +333,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     socket.on("disconnect", () => {
       this.logger.warn(`[连接] sessionId=${sessionId} 下游连接断开`);
       this.clearIdleTimer(record);
+      this.eventQueues.delete(sessionId);
       record.needsBootstrap = true;
       if (this.connections.get(sessionId) === record) {
         this.connections.delete(sessionId);
@@ -355,8 +357,8 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     });
 
     // Legacy event channels for downstream compatibility
-    socket.on("acp:event", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
-    socket.on("message", (event) => void this.handleDownstreamEvent(sessionId, event as DownstreamEnvelope));
+    socket.on("acp:event", (event) => void this.enqueueEvent(sessionId, event as DownstreamEnvelope));
+    socket.on("message", (event) => void this.enqueueEvent(sessionId, event as DownstreamEnvelope));
 
     const initParams = { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } };
     try {
@@ -571,6 +573,13 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     }
   }
 
+  /** 按 session 排队处理下游事件，避免 result 在 chunk 完成前刷新缓冲区 */
+  private enqueueEvent(sessionId: string, envelope: DownstreamEnvelope) {
+    const prev = this.eventQueues.get(sessionId) ?? Promise.resolve();
+    const next = prev.then(() => this.handleDownstreamEvent(sessionId, envelope)).catch(() => undefined);
+    this.eventQueues.set(sessionId, next);
+  }
+
   /**
    * 处理下游通知（session/update、JSON-RPC result/error 及 legacy message 事件）。
    * JSON-RPC 响应匹配已由 AcpConnection 内部处理，此处仅处理通知。
@@ -658,7 +667,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           if (envelopeId !== undefined) record.acp.respond(envelopeId);
           return;
         }
-        if (updateType && updateType !== "diff") {
+        if (updateType && updateType !== "diff" && updateType !== "text") {
           this.logger.warn(`[session/update] 未支持的结构化更新 type=${updateType}`);
           if (envelopeId !== undefined) record.acp.respond(envelopeId);
           return;
