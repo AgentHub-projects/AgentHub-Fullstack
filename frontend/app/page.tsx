@@ -286,6 +286,7 @@ export default function WorkbenchPage() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const preserveTimelineScrollRef = useRef<{ height: number; top: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const loadSessionRef = useRef(loadSession);
 
   const activeSessionId = sessionTabs.activeId;
   const activeSessionIdRef = useRef(activeSessionId);
@@ -459,7 +460,7 @@ export default function WorkbenchPage() {
     const socket = connectHubSocket([], {
       onState: () => undefined,
       onConnect: () => {
-        if (activeSessionIdRef.current) void loadSession(activeSessionIdRef.current);
+        if (activeSessionIdRef.current) void loadSessionRef.current(activeSessionIdRef.current);
       },
       onEvent: (event) => {
         setWorkspaceDetail(event.sessionId, (current) =>
@@ -839,6 +840,7 @@ export default function WorkbenchPage() {
     schedulePinnedMessagesLoad(sessionId);
     closeMentionMenu();
   }
+  loadSessionRef.current = loadSession;
 
   async function loadPendingMessages(sessionId: string) {
     updateWorkspace(sessionId, (current) => ({ ...current, pendingMessagesLoading: true }));
@@ -2015,8 +2017,8 @@ export default function WorkbenchPage() {
               </>
             )}
           </div>
-          {latestRun && <RunBadge run={latestRun} />}
           <div className="headerActions">
+            {latestRun && <RunBadge run={latestRun} />}
             {activeSession && !renamingSession && (
               <button
                 className="iconButton"

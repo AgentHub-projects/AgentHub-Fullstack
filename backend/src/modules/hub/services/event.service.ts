@@ -64,6 +64,60 @@ export class HubEventService {
     if (runBuffers.size === 0) this.messageBuffers.delete(runId);
   }
 
+  /** 直接持久化 agent 消息（非流式场景）：落库 + 推送 hub:message */
+  async persistAgentMessage(input: {
+    sessionId: string;
+    runId: string;
+    text: string;
+    speakerAgentId: number | null;
+    speakerName?: string;
+    parts?: HubMessagePartDto[];
+    files?: unknown[];
+  }) {
+    const fullText = input.text.trim();
+    const hasParts = (input.parts?.length ?? 0) > 0;
+    if (!fullText && !hasParts) return;
+
+    const message = await this.prisma.message.create({
+      data: {
+        sessionId: input.sessionId,
+        runId: input.runId,
+        role: "assistant",
+        agentId: input.speakerAgentId,
+        contentText: fullText,
+        contentJson: messageJsonWithParts(
+          { files: input.files },
+          fullText,
+          input.parts ?? [],
+        ) as any,
+        tokenCount: this.context.estimateTokens(fullText),
+        status: "completed",
+      },
+    });
+
+    this.gateway.emitMessage(mapMessage(message));
+
+    await this.prisma.agentRun.update({
+      where: { id: input.runId },
+      data: { assistantMessageId: message.id },
+    });
+
+    const contextText = fullText || partContextText({ parts: input.parts ?? [] }, []);
+    if (contextText) {
+      await this.context.recordContextItem({
+        sessionId: input.sessionId,
+        sourceType: "message",
+        sourceId: message.id,
+        kind: "message",
+        text: contextText,
+        importance: 10,
+        metadata: { runId: input.runId, agentId: input.speakerAgentId },
+      });
+    }
+
+    return mapMessage(message);
+  }
+
   onRunTerminal(handler: RunTerminalHandler) {
     this.runTerminalHandlers.add(handler);
     return () => {

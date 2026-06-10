@@ -25,7 +25,6 @@ import {
 } from "@ant-design/icons";
 import type { AgentReplyBlockModel } from "../../lib/workbench/types";
 import {
-  buildAgentReplyBlocks,
   eventText,
   messageToReplyBlock,
   runStageLabel,
@@ -134,10 +133,10 @@ export function RunThread({
   onOpenArtifactsPanel?: () => void;
 }) {
   const persistedReplies = messages.filter((message) => message.role !== "user" && message.contentText.trim());
-  const hasPersistedReplies = persistedReplies.length > 0 && !isRunning(run.status);
-  const replyBlocks = hasPersistedReplies
+  // 始终从持久化 messages 渲染，不再 fallback 到 events
+  const replyBlocks = persistedReplies.length > 0
     ? persistedReplies.map((message) => messageToReplyBlock(message, agents))
-    : buildAgentReplyBlocks(events, agents);
+    : [];
 
   return (
     <section className="runThread">

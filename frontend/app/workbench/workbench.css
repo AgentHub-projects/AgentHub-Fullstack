@@ -589,6 +589,7 @@ textarea:focus-visible {
   grid-row: 1;
   flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: flex-start;
   min-height: 58px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.98);
@@ -653,6 +654,7 @@ textarea:focus-visible {
   min-width: 0;
   gap: 8px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .deployActionWrap {

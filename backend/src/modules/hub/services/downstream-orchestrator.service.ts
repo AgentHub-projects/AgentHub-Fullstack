@@ -694,28 +694,17 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
           const innerContent = asRecord((content as any).content);
           const rawFiles = (innerContent.files ?? (content as any).files);
           const diffFiles = Array.isArray(rawFiles) && rawFiles.length > 0 ? asFiles(rawFiles) : undefined;
-          if (isChunk) {
-            this.logger.log(`[session/update] chunk增量 runId=${runId} textLen=${text.length} hasFiles=${!!diffFiles}`);
-            await this.events.append({
+          if (isChunk || isStop) {
+            this.logger.log(`[session/update] 直接落库消息 runId=${runId} textLen=${text.length} hasFiles=${!!diffFiles} isChunk=${isChunk}`);
+            void this.events.persistAgentMessage({
               sessionId: record.sessionId,
               runId,
-              eventType: "message.delta",
-              speakerAgentId,
-              source: "downstream_agent",
-              payload: { text, speaker, append: false, ...(diffFiles ? { files: diffFiles } : {}) },
+              text,
+              speakerAgentId: speakerAgentId ?? null,
+              speakerName: speaker,
+              parts: parts.length > 0 ? parts : undefined,
+              files: diffFiles,
             });
-          }
-          if (isStop) {
-            this.logger.log(`[session/update] 消息完成 runId=${runId}`);
-            await this.events.append({
-              sessionId: record.sessionId,
-              runId,
-              eventType: "message.completed",
-              speakerAgentId,
-              source: "downstream_agent",
-              payload: { text, speaker, ...(parts.length > 0 ? { parts } : {}) },
-            });
-            // 结束事件由downstream的stopReason result触发，不用自动完成
           }
         }
         if (envelopeId !== undefined) record.acp.respond(envelopeId);
