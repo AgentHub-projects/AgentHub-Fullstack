@@ -2129,7 +2129,7 @@ export default function WorkbenchPage() {
               </button>
             </div>
           )}
-          <div className="composerInputWrap" ref={wrapRef}>
+          <div className="composerBox" ref={wrapRef}>
             {attachments.length > 0 && (
               <div className="attachmentTray" aria-label="待发送附件">
                 {attachments.map((attachment) => (
@@ -2225,46 +2225,46 @@ export default function WorkbenchPage() {
               }}
               disabled={sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
             />
-          </div>
-          <div className="composerBar">
-            <span>
-              {sessionReadOnly
-                ? "归档会话只读"
-                : !activeSession
-                  ? "请选择会话"
-                : mode === "direct"
-                ? directAgent
-                  ? `单聊：${directAgent.name}`
-                  : "请选择单聊 Agent"
-                : parsedMentionIds.length
-                ? "将发送给已 @ 成员"
-                : ""}
-            </span>
-            <input
-              ref={fileInputRef}
-              className="hiddenFileInput"
-              type="file"
-              multiple
-              onChange={(event) => void handleAttachmentFiles(event.target.files)}
-            />
-            <button
-              className="iconButton"
-              type="button"
-              title="上传附件"
-              disabled={!activeSessionId || !sessionWritable || uploadingAttachment || attachments.length + preservedAttachmentIds.length >= 5}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
-            </button>
-            <button
-              className="primaryButton"
-              type="button"
-              disabled={!composer.trim() || sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
-              onClick={() => void handleSend()}
-            >
-              {sending ? <LoadingOutlined /> : activeRunInProgress ? <PlusOutlined /> : <SendOutlined />}
-              <span>{activeRunInProgress ? "加入待发送" : "发送"}</span>
-            </button>
+            <div className="composerBoxActions">
+              <span>
+                {sessionReadOnly
+                  ? "归档会话只读"
+                  : !activeSession
+                    ? "请选择会话"
+                  : mode === "direct"
+                  ? directAgent
+                    ? `单聊：${directAgent.name}`
+                    : "请选择单聊 Agent"
+                  : parsedMentionIds.length
+                  ? "将发送给已 @ 成员"
+                  : ""}
+              </span>
+              <input
+                ref={fileInputRef}
+                className="hiddenFileInput"
+                type="file"
+                multiple
+                onChange={(event) => void handleAttachmentFiles(event.target.files)}
+              />
+              <button
+                className="iconButton"
+                type="button"
+                title="上传附件"
+                disabled={!activeSessionId || !sessionWritable || uploadingAttachment || attachments.length + preservedAttachmentIds.length >= 5}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploadingAttachment ? <LoadingOutlined /> : <PaperClipOutlined />}
+              </button>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={!composer.trim() || sending || !activeSessionId || !sessionWritable || (mode === "direct" && !directAgent)}
+                onClick={() => void handleSend()}
+              >
+                {sending ? <LoadingOutlined /> : activeRunInProgress ? <PlusOutlined /> : <SendOutlined />}
+                <span>{activeRunInProgress ? "加入待发送" : "发送"}</span>
+              </button>
+            </div>
           </div>
         </footer>
       </section>

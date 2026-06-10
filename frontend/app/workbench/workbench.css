@@ -83,7 +83,6 @@
 
 .railHeader,
 .conversationHeader,
-.composerBar,
 .bubbleMeta,
 .artifactTop,
 .contextSummary,
@@ -120,7 +119,6 @@
 .sessionItem small,
 .miniMetric,
 .conversationHeader span,
-.composerBar span,
 .bubbleMeta,
 .artifactTop small,
 .contextSummary span,
@@ -1942,9 +1940,74 @@ textarea:focus-visible {
   padding: 12px clamp(16px, 2.4vw, 28px) 14px;
 }
 
-.composerInputWrap {
+.composerBox {
   position: relative;
   min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dddddd;
+  border-radius: 22px;
+  background: #ffffff;
+}
+
+.composerBox:focus-within {
+  border-color: #b8d4ff;
+}
+
+.composerBoxActions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  margin-top: 0;
+  padding: 0 10px 8px 12px;
+}
+
+.composerBoxActions > span {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #777777;
+  font-size: 13px;
+}
+
+.composerBox .iconButton {
+  grid-column: 1;
+  grid-row: 1;
+  border-color: transparent;
+}
+
+.composerBox .primaryButton {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 44px;
+  height: 36px;
+  border-radius: 999px;
+  padding: 0 12px;
+}
+
+.composerBox .primaryButton:disabled {
+  border-color: #777777;
+  background: #777777;
+  color: #ffffff;
+  opacity: 1;
+}
+
+.composerBox .primaryButton:not(:disabled) {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.composerBox .primaryButton > span:not(.anticon) {
+  display: none;
+}
+
+.composerBox .primaryButton .anticon {
+  display: inline-flex;
+  font-size: 15px;
 }
 
 .replyBanner {
@@ -2077,20 +2140,6 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
-.composerBar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.composerBar > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .hiddenFileInput {
   display: none;
@@ -4080,7 +4129,7 @@ div.agentChoice {
     min-height: 78px;
   }
 
-  .composerBar {
+  .composerBoxActions {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
@@ -5302,8 +5351,7 @@ div.agentChoice {
 
 .replyBanner,
 .pendingMessageQueue,
-.composerInputWrap,
-.composerBar {
+.composerBox {
   width: min(920px, 100%);
   margin-right: auto;
   margin-left: auto;
@@ -5563,23 +5611,7 @@ div.agentChoice {
   margin-top: 0;
 }
 
-.composerInputWrap {
-  overflow: hidden;
-  border: 1px solid #dddddd;
-  border-bottom: 0;
-  border-radius: 22px 22px 0 0;
-  background: #ffffff;
-}
-
-.composerInputWrap:focus-within {
-  border-color: #b8d4ff;
-}
-
-.composerInputWrap:focus-within + .composerBar {
-  border-color: #b8d4ff;
-}
-
-.composerInputWrap .attachmentTray {
+.composerBox .attachmentTray {
   width: 100%;
 }
 
@@ -5601,58 +5633,6 @@ div.agentChoice {
   color: #b0b0b0;
 }
 
-.composerBar {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 48px;
-  border: 1px solid #dddddd;
-  border-top: 0;
-  border-radius: 0 0 22px 22px;
-  background: #ffffff;
-  padding: 0 10px 8px 12px;
-}
-
-.composerBar > span {
-  grid-column: 2;
-  color: #777777;
-  font-size: 13px;
-}
-
-.composerBar .iconButton {
-  grid-column: 1;
-  grid-row: 1;
-  border-color: transparent;
-}
-
-.composerBar .primaryButton {
-  grid-column: 3;
-  grid-row: 1;
-  min-width: 44px;
-  height: 36px;
-  border-radius: 999px;
-  padding: 0 12px;
-}
-
-.composerBar .primaryButton:disabled {
-  border-color: #777777;
-  background: #777777;
-  color: #ffffff;
-  opacity: 1;
-}
-
-.composerBar .primaryButton:not(:disabled) {
-  border-color: #111111;
-  background: #111111;
-  color: #ffffff;
-}
-
-.composerBar .primaryButton > span:not(.anticon) {
-  display: none;
-}
-
-.composerBar .primaryButton .anticon {
-  display: inline-flex;
-  font-size: 15px;
-}
 
 .inspector {
   border-left: 1px solid #e5e5e5;
