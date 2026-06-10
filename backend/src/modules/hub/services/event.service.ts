@@ -39,6 +39,32 @@ export class HubEventService {
     private readonly context: HubContextService,
   ) {}
 
+  /** 刷新指定 run 所有未落库的消息缓冲区，用于 end_turn 等场景 */
+  async flushMessageBuffersForRun(sessionId: string, runId: string) {
+    const runBuffers = this.messageBuffers.get(runId);
+    if (!runBuffers || runBuffers.size === 0) return;
+    for (const [speakerKey, buffer] of runBuffers) {
+      const text = buffer.contentText.trim();
+      if (!text) continue;
+      await this.persistCompletedMessage({
+        id: "",
+        sessionId,
+        runId,
+        seq: 0,
+        source: "agenthub_backend",
+        eventType: "message.completed",
+        visibility: "public",
+        speakerAgentId: buffer.speakerAgentId,
+        speakerName: buffer.speakerName,
+        payload: buffer.payload,
+        occurredAt: new Date().toISOString(),
+        persistedAt: new Date().toISOString(),
+      });
+      runBuffers.delete(speakerKey);
+    }
+    if (runBuffers.size === 0) this.messageBuffers.delete(runId);
+  }
+
   onRunTerminal(handler: RunTerminalHandler) {
     this.runTerminalHandlers.add(handler);
     return () => {

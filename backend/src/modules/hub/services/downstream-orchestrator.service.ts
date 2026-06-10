@@ -494,6 +494,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
     const runId = record.activeRunId;
     if (!runId) return;
     this.logger.log(`[result] stopReason=${stopReason} 完成run runId=${runId}`);
+    await this.events.flushMessageBuffersForRun(record.sessionId, runId);
     await this.markRunCompleted(record.sessionId, runId);
   }
 
