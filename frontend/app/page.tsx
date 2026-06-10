@@ -287,8 +287,6 @@ export default function WorkbenchPage() {
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
   const openSessionIds = sessionTabs.openIds;
-  const socketSessionIds = openSessionIds.filter((sessionId) => Boolean(workspaces[sessionId]?.detail));
-  const socketSessionKey = socketSessionIds.join("|");
   const activeWorkspace = activeSessionId ? workspaces[activeSessionId] : null;
   const detail = activeWorkspace?.detail ?? null;
   const composer = activeWorkspace?.composer ?? "";
@@ -454,7 +452,7 @@ export default function WorkbenchPage() {
   const hubSocketRef = useRef<ReturnType<typeof connectHubSocket>>(undefined);
   useEffect(() => {
     if (!authenticated) return;
-    const disposable = connectHubSocket(socketSessionIds, {
+    const socket = connectHubSocket([], {
       onState: () => undefined,
       onConnect: () => {
         if (activeSessionIdRef.current) void loadSession(activeSessionIdRef.current);
@@ -464,7 +462,7 @@ export default function WorkbenchPage() {
           current ? { ...current, events: upsertById(current.events, event).sort(sortEvent) } : current,
         );
         setSessionTabs((current) => markSessionTabUpdated(current, event.sessionId));
-        if (event.sessionId !== activeSessionId) return;
+        if (event.sessionId !== activeSessionIdRef.current) return;
         if (event.eventType === "artifact.upsert" || event.eventType === "artifact.complete") setInspectorTab("artifacts");
         if (event.eventType === "file.change") setInspectorTab("diff");
       },
@@ -525,9 +523,15 @@ export default function WorkbenchPage() {
         setSessionTabs((current) => markSessionTabUpdated(current, fileChange.sessionId));
       },
     });
-    hubSocketRef.current = disposable;
-    return disposable;
-  }, [authenticated, socketSessionKey]);
+    hubSocketRef.current = socket;
+    return () => socket.dispose();
+  }, [authenticated]);
+
+  useEffect(() => {
+    const socket = hubSocketRef.current;
+    if (!socket || !activeSessionId) return;
+    socket.subscribe(activeSessionId);
+  }, [activeSessionId]);
 
   useEffect(() => {
     const preserve = preserveTimelineScrollRef.current;

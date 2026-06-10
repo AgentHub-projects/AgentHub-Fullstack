@@ -702,6 +702,7 @@ export function connectHubSocket(
   },
 ) {
   let socket: Socket | null = null;
+  const subscribed = new Set(normalizeSessionIds(sessionId));
   try {
     socket = io(SOCKET_URL, {
       path: "/socket.io",
@@ -711,12 +712,12 @@ export function connectHubSocket(
     });
   } catch {
     handlers.onState("unavailable");
-    return () => undefined;
+    return { dispose: () => undefined, subscribe: () => undefined, unsubscribe: () => undefined };
   }
 
   socket.on("connect", () => {
     handlers.onState("connected");
-    for (const id of normalizeSessionIds(sessionId)) socket?.emit("session.subscribe", { sessionId: id });
+    for (const id of subscribed) socket?.emit("session.subscribe", { sessionId: id });
     handlers.onConnect?.();
   });
   socket.on("disconnect", () => handlers.onState("disconnected"));
@@ -742,8 +743,19 @@ export function connectHubSocket(
     if (envelope.type === "file_change") handlers.onFileChange(envelope.payload as HubFileChangeDto);
   });
 
-  return () => {
-    socket?.disconnect();
+  return {
+    dispose: () => {
+      socket?.disconnect();
+    },
+    subscribe: (id: string) => {
+      if (subscribed.has(id)) return;
+      subscribed.add(id);
+      if (socket?.connected) socket.emit("session.subscribe", { sessionId: id });
+    },
+    unsubscribe: (id: string) => {
+      if (!subscribed.delete(id)) return;
+      if (socket?.connected) socket.emit("session.unsubscribe", { sessionId: id });
+    },
   };
 }
 
