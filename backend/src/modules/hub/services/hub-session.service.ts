@@ -200,6 +200,7 @@ export class HubSessionService {
     });
     const dto = mapSession(updated!);
     this.gateway.emitSession(dto);
+    void this.downstream.prepareSessionConnection(session.id);
     return dto;
   }
 
