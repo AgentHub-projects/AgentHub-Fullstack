@@ -56,11 +56,10 @@ export class HubEventService {
         visibility: "public",
         speakerAgentId: buffer.speakerAgentId,
         speakerName: buffer.speakerName,
-        payload: buffer.payload,
+        payload: { ...buffer.payload, text },
         occurredAt: new Date().toISOString(),
         persistedAt: new Date().toISOString(),
       });
-      runBuffers.delete(speakerKey);
     }
     if (runBuffers.size === 0) this.messageBuffers.delete(runId);
   }

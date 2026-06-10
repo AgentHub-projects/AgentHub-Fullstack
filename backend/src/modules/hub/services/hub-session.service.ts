@@ -482,7 +482,7 @@ export class HubSessionService {
     await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
-    const deploymentCommand = parseDeploymentCommand(text);
+    const deploymentCommand = parseDeploymentCommand(text) && session.projectId;
     const directAgentId = numberMetadataValue(metadata.directAgentId);
     const isDirect = metadata.mode === "direct" || Boolean(directAgentId);
     const runAgent = isDirect
