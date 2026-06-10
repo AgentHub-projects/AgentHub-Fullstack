@@ -20,7 +20,6 @@ import { AgentRegistryService } from "./agent-registry.service";
 import { HubContextService, messagePartContextText } from "./context.service";
 import { DownstreamOrchestratorService } from "./downstream-orchestrator.service";
 import { HubEventService } from "./event.service";
-import { DeploymentService } from "./deployment.service";
 import {
   mapArtifact,
   mapEvent,
@@ -48,8 +47,6 @@ export class HubSessionService {
     private readonly downstream: DownstreamOrchestratorService,
     @Inject(HubEventService)
     private readonly events: HubEventService,
-    @Inject(DeploymentService)
-    private readonly deployments: DeploymentService,
     @Inject(HubRealtimeGateway)
     private readonly gateway: HubRealtimeGateway,
     @Inject(PendingMessageQueueService)
@@ -482,7 +479,6 @@ export class HubSessionService {
     await this.assertNoActiveRun(sessionId);
 
     const metadata = mergeMetadata(session.metadata, {});
-    const deploymentCommand = parseDeploymentCommand(text) && session.projectId;
     const directAgentId = numberMetadataValue(metadata.directAgentId);
     const isDirect = metadata.mode === "direct" || Boolean(directAgentId);
     const runAgent = isDirect
@@ -560,66 +556,12 @@ export class HubSessionService {
       source: "agenthub_backend",
       payload: {
         status: "queued",
-        command: deploymentCommand ? "deployment" : undefined,
         orchestratorAgentId: runAgent.id,
         mode: isDirect ? "direct" : "group",
         mentionedAgentIds: mentionedAgents.map((agent) => agent.id),
         mentionedAgentNames: mentionedAgents.map((agent) => agent.name),
       },
     });
-
-    if (deploymentCommand) {
-      let deploymentResult: Awaited<ReturnType<DeploymentService["start"]>>;
-      try {
-        deploymentResult = await this.deployments.start(sessionId, {});
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error);
-        await this.prisma.agentRun.update({
-          where: { id: run.id },
-          data: {
-            status: "failed",
-            errorCode: "DEPLOYMENT_TRIGGER_FAILED",
-            errorMessage: messageText,
-            completedAt: new Date(),
-          },
-        });
-        await this.events.append({
-          sessionId,
-          runId: run.id,
-          eventType: "run.failed",
-          speakerAgentId: runAgent.id,
-          source: "agenthub_backend",
-          payload: {
-            status: "failed",
-            command: "deployment",
-            message: messageText,
-          },
-        });
-        throw error;
-      }
-      const completedRun = await this.prisma.agentRun.update({
-        where: { id: run.id },
-        data: { status: "completed", completedAt: new Date() },
-      });
-      await this.events.append({
-        sessionId,
-        runId: run.id,
-        eventType: "run.completed",
-        speakerAgentId: runAgent.id,
-        source: "agenthub_backend",
-        payload: {
-          status: "completed",
-          command: "deployment",
-        },
-      });
-      return {
-        session: sessionDto,
-        message: mapMessage(message),
-        messages: [mapMessage(message), deploymentResult.message],
-        run: mapRun(completedRun),
-        contextSnapshot: null,
-      };
-    }
 
     void this.downstream.startRun({
       sessionId,
