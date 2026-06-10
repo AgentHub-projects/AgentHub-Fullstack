@@ -2730,6 +2730,15 @@ export default function WorkbenchPage() {
                   onChange={(e) => setEditTarget({ ...editTarget, name: e.target.value })}
                 />
               </label>
+              <label>提供商
+                <select
+                  value={editTarget.provider}
+                  onChange={(e) => setEditTarget({ ...editTarget, provider: e.target.value })}
+                >
+                  <option value="claude-code">Claude Code</option>
+                  <option value="open-code">Open Code</option>
+                </select>
+              </label>
             </div>
             <footer>
               <button className="ghostButton" type="button" onClick={() => { setEditDialogOpen(false); setEditTarget(null); }}>
@@ -2742,6 +2751,7 @@ export default function WorkbenchPage() {
                 title={activeRunInProgress ? "运行中不能修改成员" : "保存"}
                 onClick={() => handleEditAgent({
                   name: editTarget.name.trim(),
+                  provider: editTarget.provider,
                   avatarUrl: editTarget.avatarUrl ?? null,
                 })}
               >
