@@ -593,7 +593,7 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
         const meta = asRecord(params._meta ?? (content as any)._meta);
         const text = stringValue(content.text) ?? stringValue((content as any).content?.text);
         const sessionUpdate = stringValue((content as any).sessionUpdate);
-        const updateType = stringValue(content.type);
+        const updateType = stringValue(content.type) ?? stringValue((content as any).content?.type);
         const parts = Array.isArray(content.parts) ? content.parts : [];
         let runId = stringValue(meta.runId) ?? stringValue(params.runId) ?? record.activeRunId;
         if (!runId) {
@@ -635,6 +635,26 @@ export class DownstreamOrchestratorService implements OnModuleDestroy {
             source: "downstream_agent",
             occurredAt: new Date(),
           });
+          if (envelopeId !== undefined) record.acp.respond(envelopeId);
+          return;
+        }
+        if (updateType === "image") {
+          const innerImage = asRecord((content as any).content);
+          const imageUrl = stringValue(innerImage.url);
+          const imageTitle = stringValue(innerImage.title) ?? "image";
+          const imageMeta = asRecord(innerImage.metadata);
+          if (imageUrl) {
+            this.logger.log(`[session/update] 图片消息 runId=${runId} url=${imageUrl}`);
+            const imageText = `![${imageTitle}](${imageUrl})`;
+            void this.events.append({
+              sessionId: record.sessionId,
+              runId,
+              eventType: "message.delta",
+              speakerAgentId,
+              source: "downstream_agent",
+              payload: { text: imageText, speaker, append: false, metadata: imageMeta },
+            });
+          }
           if (envelopeId !== undefined) record.acp.respond(envelopeId);
           return;
         }
