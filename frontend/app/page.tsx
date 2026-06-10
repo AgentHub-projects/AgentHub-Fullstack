@@ -2015,6 +2015,7 @@ export default function WorkbenchPage() {
               </>
             )}
           </div>
+          {latestRun && <RunBadge run={latestRun} />}
           <div className="headerActions">
             {activeSession && !renamingSession && (
               <button
@@ -2027,7 +2028,6 @@ export default function WorkbenchPage() {
                 <EditOutlined />
               </button>
             )}
-            {latestRun && <RunBadge run={latestRun} />}
             {latestRun && isRunning(latestRun.status) && (
               <button
                 className="ghostButton"
@@ -2431,102 +2431,103 @@ export default function WorkbenchPage() {
                 群聊
               </button>
             </div>
-            <div className="buildForm">
-              <label>
-                对话名称
-                <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="留空后使用首条消息摘要" />
-              </label>
-              {createMode === "direct" ? (
-                <>
-                  <label>
-                    Agent 模板
-                    <select
-                      value={directTemplateId}
-                      onChange={(event) => {
-                        const nextId = Number(event.target.value);
-                        setDirectTemplateId(nextId);
-                        const tpl = templates.find((item) => item.id === nextId);
-                        if (tpl) setDirectProvider(tpl.defaultProvider);
-                      }}
-                    >
-                      <option value={0}>选择模板</option>
-                      {templates.map((tpl) => (
-                        <option key={tpl.id} value={tpl.id}>
-                          {tpl.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    实例名称
-                    <input
-                      value={directName}
-                      onChange={(e) => setDirectName(e.target.value)}
-                      placeholder={templates.find((tpl) => tpl.id === directTemplateId)?.name ?? "不填则自动加序号"}
-                    />
-                  </label>
-                  <label>
-                    Provider
-                    <select value={directProvider} onChange={(e) => setDirectProvider(e.target.value)}>
-                      <option value="claude-code">claude-code</option>
-                      <option value="open-code">open-code</option>
-                    </select>
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label>
-                    Orchestrator
-                    <div className="searchableSelect">
+            <div className="groupDialogBody">
+              <div className="buildForm">
+                <label>
+                  对话名称
+                  <input value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} placeholder="留空后使用首条消息摘要" />
+                </label>
+                {createMode === "direct" ? (
+                  <>
+                    <label>
+                      Agent 模板
+                      <select
+                        value={directTemplateId}
+                        onChange={(event) => {
+                          const nextId = Number(event.target.value);
+                          setDirectTemplateId(nextId);
+                          const tpl = templates.find((item) => item.id === nextId);
+                          if (tpl) setDirectProvider(tpl.defaultProvider);
+                        }}
+                      >
+                        <option value={0}>选择模板</option>
+                        {templates.map((tpl) => (
+                          <option key={tpl.id} value={tpl.id}>
+                            {tpl.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      实例名称
                       <input
-                        value={orchDropdownOpen ? orchSearch : (selectedOrchTpl?.name ?? "")}
-                        placeholder="搜索模板…"
-                        onFocus={() => { setOrchSearch(""); setOrchDropdownOpen(true); }}
-                        onChange={(e) => setOrchSearch(e.target.value)}
-                        onBlur={() => setTimeout(() => setOrchDropdownOpen(false), 150)}
+                        value={directName}
+                        onChange={(e) => setDirectName(e.target.value)}
+                        placeholder={templates.find((tpl) => tpl.id === directTemplateId)?.name ?? "不填则自动加序号"}
                       />
-                      {orchDropdownOpen && (
-                        <div className="searchableDropdown">
-                          {templates
-                            .filter((tpl) => !orchSearch || tpl.name.toLowerCase().includes(orchSearch.toLowerCase()))
-                            .map((tpl) => (
-                              <div
-                                key={tpl.id}
-                                className={`searchableOption ${orchTemplateId === tpl.id ? "active" : ""}`}
-                                onMouseDown={() => { setOrchTemplateId(tpl.id); setOrchDropdownOpen(false); }}
-                              >
-                                <strong>{tpl.name}</strong>
-                                <small>{tpl.description.slice(0, 50)}</small>
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                  {orchTemplateId !== 0 && (
-                    <>
-                      <label>
-                        Orchestrator 名称
+                    </label>
+                    <label>
+                      Provider
+                      <select value={directProvider} onChange={(e) => setDirectProvider(e.target.value)}>
+                        <option value="claude-code">claude-code</option>
+                        <option value="open-code">open-code</option>
+                      </select>
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Orchestrator
+                      <div className="searchableSelect">
                         <input
-                          value={orchName}
-                          onChange={(e) => setOrchName(e.target.value)}
-                          placeholder={selectedOrchTpl?.name ?? "不填则自动加序号"}
+                          value={orchDropdownOpen ? orchSearch : (selectedOrchTpl?.name ?? "")}
+                          placeholder="搜索模板…"
+                          onFocus={() => { setOrchSearch(""); setOrchDropdownOpen(true); }}
+                          onChange={(e) => setOrchSearch(e.target.value)}
+                          onBlur={() => setTimeout(() => setOrchDropdownOpen(false), 150)}
                         />
-                      </label>
-                      <label>
-                        Orchestrator Provider
-                        <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
-                          <option value="claude-code">claude-code</option>
-                          <option value="open-code">open-code</option>
-                        </select>
-                      </label>
-                    </>
-                  )}
-                  <label>群成员模板（多选）</label>
-                </>
-              )}
-            </div>
-            {createMode === "group" && <div className="agentChoiceList">
+                        {orchDropdownOpen && (
+                          <div className="searchableDropdown">
+                            {templates
+                              .filter((tpl) => !orchSearch || tpl.name.toLowerCase().includes(orchSearch.toLowerCase()))
+                              .map((tpl) => (
+                                <div
+                                  key={tpl.id}
+                                  className={`searchableOption ${orchTemplateId === tpl.id ? "active" : ""}`}
+                                  onMouseDown={() => { setOrchTemplateId(tpl.id); setOrchDropdownOpen(false); }}
+                                >
+                                  <strong>{tpl.name}</strong>
+                                  <small>{tpl.description.slice(0, 50)}</small>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                    {orchTemplateId !== 0 && (
+                      <>
+                        <label>
+                          Orchestrator 名称
+                          <input
+                            value={orchName}
+                            onChange={(e) => setOrchName(e.target.value)}
+                            placeholder={selectedOrchTpl?.name ?? "不填则自动加序号"}
+                          />
+                        </label>
+                        <label>
+                          Orchestrator Provider
+                          <select value={orchProvider} onChange={(e) => setOrchProvider(e.target.value)}>
+                            <option value="claude-code">claude-code</option>
+                            <option value="open-code">open-code</option>
+                          </select>
+                        </label>
+                      </>
+                    )}
+                    <label>群成员模板（多选）</label>
+                  </>
+                )}
+              </div>
+              {createMode === "group" && <div className="agentChoiceList">
               {templates.length === 0 && <p className="dialogHint">暂无可用的 Agent 模板，请先创建模板。</p>}
               {templates.map((tpl) => {
                 const selected = memberTemplates.some((m) => m.templateId === tpl.id);
@@ -2588,6 +2589,7 @@ export default function WorkbenchPage() {
                 );
               })}
             </div>}
+            </div>
             <footer>
               <button className="ghostButton" type="button" onClick={closeGroupDialog}>
                 取消

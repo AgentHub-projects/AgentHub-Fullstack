@@ -597,18 +597,23 @@ textarea:focus-visible {
 
 .conversationHeader > div:first-child {
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .conversationTitleBlock {
   display: grid;
-  min-width: min(360px, 100%);
+  min-width: 0;
+  max-width: 360px;
   gap: 3px;
 }
 
 .conversationHeader strong {
   display: block;
   min-width: 0;
-  overflow-wrap: anywhere;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 16px;
   font-weight: 760;
 }
@@ -3484,6 +3489,15 @@ textarea:focus-visible {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+}
+
+.groupDialogBody {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.groupDialogBody .agentChoiceList {
+  overflow: visible;
 }
 
 .agentDialog {
