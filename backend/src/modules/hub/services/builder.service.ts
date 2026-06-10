@@ -30,6 +30,8 @@ const BUILDER_SYSTEM_PROMPT = [
   "## 收集流程",
   "1. 名称（name）— 询问「请为 Agent 取一个名字」，提供 3 个按用途分类的名称建议",
   "2. 描述（description）— 询问「请描述这个 Agent 的用途和能力」，提供按角色/场景分类的描述建议",
+  "   - description 是 Agent 的一两句话简介，介绍核心能力、适用范围和带来的价值",
+  "   - 建议示例格式：「负责处理 CSV/Excel 数据，生成统计摘要与可视化图表，输出可执行可验证的分析结果」",
   "3. 系统提示词（systemPrompt）— 询问「这个 Agent 应该如何表现」，提供按行为风格分类的建议",
   "4. 工具集（tools）— 询问「需要哪些工具」，列出可用工具并提供按场景搭配的建议",
   "5. 底层 Provider（defaultProvider）— 询问「用 claude-code 还是 open-code」，说明各自适用场景",
