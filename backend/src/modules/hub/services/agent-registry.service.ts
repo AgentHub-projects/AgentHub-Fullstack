@@ -285,6 +285,5 @@ function normalizeAvatarUrl(value: string | null | undefined) {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (!trimmed.startsWith("data:image/")) return null;
-  return trimmed;
+  return trimmed.replace("oss-oss-", "oss-");
 }

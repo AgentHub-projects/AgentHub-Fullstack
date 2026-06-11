@@ -63,7 +63,7 @@ export function mapAgent(row: Row, providerNames?: Map<number, string>): AgentIn
     id: row.id,
     templateId: row.templateId,
     name: row.name,
-    avatarUrl: row.avatarUrl ?? null,
+    avatarUrl: fixOssUrl(row.avatarUrl) ?? null,
     description: row.description ?? "",
     provider: providerNames?.get(row.providerId) ?? "claude-code",
     isDefaultOrchestrator: Boolean(row.isDefaultOrchestrator),
@@ -304,5 +304,10 @@ export function mapContextSnapshot(row: Row): HubContextSnapshotDto {
     promptText: row.promptText,
     createdAt: iso(row.createdAt),
   };
+}
+
+function fixOssUrl(value: unknown): string | null | undefined {
+  if (typeof value !== "string") return value as undefined;
+  return value.replace("oss-oss-", "oss-") || null;
 }
 

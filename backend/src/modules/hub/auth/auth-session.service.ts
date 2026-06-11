@@ -122,8 +122,13 @@ function mapAuthUser(user: {
     userId: user.id,
     username: user.username,
     displayName: user.displayName ?? null,
-    avatarUrl: user.avatarUrl ?? null,
+    avatarUrl: fixOssPrefix(user.avatarUrl) ?? null,
   };
+}
+
+function fixOssPrefix(value: unknown): string | null | undefined {
+  if (typeof value !== "string") return value as undefined;
+  return value.replace("oss-oss-", "oss-") || null;
 }
 
 function normalizeDisplayName(value: string | null | undefined) {
@@ -137,5 +142,5 @@ function normalizeAvatarUrl(value: string | null | undefined) {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return trimmed;
+  return trimmed.replace("oss-oss-", "oss-");
 }

@@ -52,9 +52,9 @@ export class AuthController {
     return { authenticated: true, user: result.user };
   }
 
-  /** 上传头像：接收 base64 图片，上传 OSS，返回 URL */
+  /** 上传头像：接收 base64 图片，上传 OSS，返回 URL。forAgent=true 时不更新用户头像。 */
   @Post("avatar")
-  async uploadAvatar(@Req() request: Request, @Body() body: { avatarBase64: string; mimeType?: string }) {
+  async uploadAvatar(@Req() request: Request, @Body() body: { avatarBase64: string; mimeType?: string; forAgent?: boolean }) {
     const user = await this.authSessions.authenticateCookie(request.headers.cookie);
     if (!user) throw new UnauthorizedException("NOT_AUTHENTICATED");
 
@@ -62,7 +62,9 @@ export class AuthController {
     const avatarUrl = await this.artifactStorage.uploadAvatar(user.userId, data, body.mimeType ?? "image/png");
     if (!avatarUrl) throw new UnauthorizedException("OSS_UPLOAD_FAILED");
 
-    await this.authSessions.updateCurrentUser(request.headers.cookie, { avatarUrl });
+    if (!body.forAgent) {
+      await this.authSessions.updateCurrentUser(request.headers.cookie, { avatarUrl });
+    }
     return { avatarUrl };
   }
 

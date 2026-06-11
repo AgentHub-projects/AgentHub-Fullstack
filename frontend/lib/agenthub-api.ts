@@ -198,10 +198,10 @@ export function loginWithCredentials(username: string, password: string) {
   });
 }
 
-export function uploadAvatar(avatarBase64: string, mimeType?: string) {
+export function uploadAvatar(avatarBase64: string, mimeType?: string, forAgent?: boolean) {
   return requestJson<{ avatarUrl: string }>("/auth/avatar", {
     method: "POST",
-    body: JSON.stringify({ avatarBase64, mimeType }),
+    body: JSON.stringify({ avatarBase64, mimeType, forAgent }),
   });
 }
 

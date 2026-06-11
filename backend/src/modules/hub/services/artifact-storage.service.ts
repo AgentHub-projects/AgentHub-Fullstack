@@ -334,7 +334,8 @@ export class ArtifactStorageService {
     if (!client) return null;
 
     await client.put(objectKey, data);
-    return `https://${bucket}.oss-${region}.aliyuncs.com/${objectKey}`;
+    const ossRegion = region.startsWith("oss-") ? region : `oss-${region}`;
+    return `https://${bucket}.${ossRegion}.aliyuncs.com/${objectKey}`;
   }
 
   /** 在 artifact_versions 表中插入或更新版本记录 */

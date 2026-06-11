@@ -1361,7 +1361,7 @@ export default function WorkbenchPage() {
     if (!file || !editTarget) return;
     void readAvatarFile(file).then((base64) => {
       if (!base64) return;
-      void uploadAvatar(base64, file.type).then((result) => {
+      void uploadAvatar(base64, file.type, true).then((result) => {
         if (!result.ok) { setNotice(`头像上传失败：${result.error}`); return; }
         setNotice("");
         setEditTarget((current) => (current ? { ...current, avatarUrl: result.data.avatarUrl } : current));
